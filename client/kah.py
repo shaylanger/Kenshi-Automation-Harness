@@ -13,7 +13,9 @@ Built-in commands:
   load <save> | save <name>
   speed <0|0.5..50>                       0 pauses
   chars [radius] | traders [radius]       characters near the player | real traders
-  benches [radius]                        crafting benches, their queue and contents
+  benches [radius] [crafts]               crafting benches: queue, needs, craft menu, contents
+  craft <npc> <item> [at <bench>] [count n]   real craft worked by <npc> (supply materials, run the game)
+  research <name> | blueprint <item>      complete research (test cheat); find research <text>
   find <character|squad|item|weapon|armour|container> <text>
   spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] [size <mult>]
   where|inv|hp|sections|select|recruit|kill <npc>  (inv: inventory JSON incl. worn items;

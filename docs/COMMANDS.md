@@ -39,7 +39,7 @@ Everything else needs a loaded game.
 | `speed <0\|0.5..50>` | game speed; 0 pauses |
 | `chars [radius]` | characters within radius (default 100) of the player |
 | `traders [radius]` | characters the game itself treats as traders (`isATrader`), default radius 300; shop keepers in towns, or spawn a trader squad such as `"Skeleton Traders Animals" "Traders Guild"` (a lone "Trader" character doesn't count) |
-| `find <character\|squad\|item\|weapon\|armour\|container> <text>` | look up game data by name |
+| `find <character\|squad\|item\|weapon\|armour\|container\|research> <text>` | look up game data by name |
 | `spawn <template> <faction> [near <npc> \| at x y z] [count n] [dist m] [target <npc>] [size <mult>]` | spawn characters, or a squad template (`target`: the squad's AI goes for that character; `size`: scale the squad) |
 | `stash <item> <n> [near <npc>]` | put items into the nearest storage chest |
 | `where <npc>` | name, serial, faction, position, distance, KO/DEAD |
@@ -65,7 +65,10 @@ Everything else needs a loaded game.
 | `packput <npc> <pack> <item> [n]` | create items directly inside a backpack the npc owns |
 | `packweight <npc> <pack>` | a backpack's equipped state, raw content weight and total weight |
 | `craftfinish <npc> <item> [at <bench>]` | queue a craft of the item at the nearest crafting bench (within 300; `at` = part of the bench name) and run the bench's real finish step with the npc as crafter (mods hooking it see a real craft); reports what reached the bench output. A repeat needs room in the output |
-| `benches [radius]` | crafting benches nearby with their queue and inventory sections (sizes, limits, items with grid position) |
+| `benches [radius] [crafts]` | crafting benches nearby: queue (first craft and its progress), missing materials (`needs:`), number of available crafts (`crafts` lists them), inventory sections (sizes, limits, items with grid position) |
+| `craft <npc> <item> [at <bench>] [count n]` | a **real** craft: queues the item from the bench's own craft menu (the game picks the material/grade) and gives the npc the bench as a job. Then supply materials (give them to the npc: workers carry them in; generic storage chests weren't used) and run the game (`speed`); `benches` shows progress. Works for weapons too |
+| `research <name>` | complete a research entry (TEST ONLY cheat; `find research <text>` lists names). Weapon crafting needs e.g. `Basic Weapon Smithing`, `Basic Weapon Grades` and the weapon type (`Katanas`) |
+| `blueprint <item>` | complete the research the game links to crafting that item (`getBlueprintsFor`); for weapons it finds nothing, use `research` |
 
 Stats: labouring, science, engineering, robotics, weapon_smith, armour_smith,
 crossbow_smith, medic, turrets, farming, cooking, stealth, athletics,
@@ -74,8 +77,8 @@ maxrunspeed, currentrunspeed, encumbrance.
 
 ## Notes
 
-- Weapons can't be created (`give`, `stash`, `buy`, `packput`, `craftfinish`): the game's item
-  factory refuses them, with or without a maker and quality grade. `find` shows exact names;
+- Weapons can't be created directly (`give`, `stash`, `buy`, `packput`, `craftfinish`): the game's
+  item factory refuses them. Make them the real way: `research` + `craft` (see above). `find` shows exact names;
   items can be named by game-data string ID too (`find` prints `sid=`).
 - Same-faction NPCs ignore `attack` orders against each other.
 - Characters teleported next to a hostile squad get attacked.

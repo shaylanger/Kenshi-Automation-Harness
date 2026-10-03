@@ -10,6 +10,7 @@
 #include <kenshi/Character.h>
 #include <kenshi/CharStats.h>
 #include <kenshi/Building/CraftingBuilding.h>
+#include <kenshi/Research.h>
 #include <kenshi/Damages.h>
 #include <kenshi/Faction.h>
 #include <kenshi/FactionRelations.h>
@@ -372,6 +373,39 @@ Item *MakeItem(GameWorld *world, GameData *data, const std::vector<std::string> 
   return Valid(item) ? item : nullptr;
 }
 
+// Nearest crafting bench to c within 300 whose name contains `wanted` (any if empty).
+CraftingBuilding *FindBench(GameWorld *world, Character *c, const std::string &wanted, float &dist) {
+  lektor<RootObject *> nearby;
+  world->getObjectsWithinSphere(nearby, c->getPosition(), 300.0f, BUILDING, 512, nullptr);
+  CraftingBuilding *best = nullptr;
+  for (uint32_t i = 0; i < nearby.size(); ++i) {
+    CraftingBuilding *b = dynamic_cast<CraftingBuilding *>(nearby.stuff[i]);
+    if (!Valid(b))
+      continue;
+    if (!wanted.empty() && Lower(b->getName()).find(Lower(wanted)) == std::string::npos)
+      continue;
+    float d = b->getPosition().distance(c->getPosition());
+    if (!best || d < dist) {
+      best = b;
+      dist = d;
+    }
+  }
+  return best;
+}
+
+// "item (material)" for a bench's available craft.
+std::string CraftName(const GameDataGroup &g) {
+  std::string out = Valid(g.g1) ? g.g1->name : std::string("?");
+  if (Valid(g.g2))
+    out += " (" + g.g2->name + ")";
+  return out;
+}
+
+Research *Tech(GameWorld *world) {
+  return Valid(world->player) && Valid(world->player->technology) ? world->player->technology
+                                                                  : nullptr;
+}
+
 // A count argument at f[at], unless that field is already an option name.
 int CountArg(const std::vector<std::string> &f, size_t at) {
   if (f.size() <= at)
@@ -425,11 +459,12 @@ const char *const kBuiltins[] = {
     "where", "hp",     "inv",      "teleport", "ko",    "health",  "kill",  "hunger",
     "attack", "money", "buy",      "select",  "recruit", "give",   "relation",
     "traders", "transfer", "packput", "packweight", "craftfinish", "sections",
-    "benches"};
+    "benches", "craft", "research", "blueprint"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
-    "chars [radius] | traders [radius] | benches [radius] | find <character|squad|item|weapon|armour|container> <text> | "
+    "chars [radius] | traders [radius] | benches [radius] [crafts] | research <name> | "
+    "blueprint <item> | craft <npc> <item> [at <bench>] [count n] | find <character|squad|item|weapon|armour|container> <text> | "
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
     "[size <mult>] | stash <item> <n> [near <npc>] | stat <npc> <stat> | "
     "setstat <npc> <stat> <value> | weight <npc> | iteminfo|equip|unequip <npc> <item> | "
@@ -640,13 +675,14 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
 
   if (cmd == "find") { // find <character|squad|item|faction> <substring>
     if (f.size() < 4)
-      return "usage: find <character|squad|item|weapon|armour|container> <text>";
+      return "usage: find <character|squad|item|weapon|armour|container|research> <text>";
     const std::string kind = Lower(f[2]);
     itemType type = kind == "squad" ? SQUAD_TEMPLATE
                     : kind == "item" ? ITEM
                     : kind == "weapon" ? WEAPON
                     : kind == "armour" ? ARMOUR
                     : kind == "container" ? CONTAINER
+                    : kind == "research" ? RESEARCH
                                        : CHARACTER;
     std::string error;
     GameData *data = FindData(world, type, f[3], error);
@@ -726,7 +762,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   }
 
   if (cmd == "benches") { // benches [radius]: crafting benches, their queue and inventory
-    float radius = f.size() >= 3 ? (float)atof(f[2].c_str()) : 300.0f;
+    float radius = f.size() >= 3 && Lower(f[2]) != "crafts" ? (float)atof(f[2].c_str()) : 300.0f;
     lektor<RootObject *> nearby;
     world->getObjectsWithinSphere(nearby, origin, radius, BUILDING, 512, nullptr);
     std::string out;
@@ -737,8 +773,24 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
         continue;
       ++n;
       out += " || " + b->getName() + " dist=" + Num(b->getPosition().distance(origin)) +
-             " queue=" + Int((long long)b->crafting.size()) +
-             " out=" + (Valid(b->outItem) ? b->outItem->getName() : std::string("-"));
+             " queue=" + Int((long long)b->crafting.size());
+      if (!b->crafting.empty())
+        out += " (first: " + b->crafting.front().name + " " +
+               Int((long long)(b->crafting.front().progress01 * 100.0f)) + "%)";
+      lektor<GameData *> needs;
+      b->getResourcesNeededBecauseEmpty(needs);
+      if (needs.size() > 0) {
+        out += " needs:";
+        for (uint32_t k = 0; k < needs.size() && k < 8; ++k)
+          if (Valid(needs.stuff[k]))
+            out += " [" + needs.stuff[k]->name + "]";
+      }
+      lektor<GameDataGroup> crafts;
+      b->getAvailableCrafts(crafts);
+      out += " crafts=" + Int(crafts.size());
+      if (Option(f, 2, "crafts", "") != "" || (f.size() >= 3 && Lower(f[f.size() - 1]) == "crafts"))
+        for (uint32_t k = 0; k < crafts.size() && k < 40; ++k)
+          out += " [" + CraftName(crafts.stuff[k]) + "]";
       Inventory *inv = b->getInventory();
       if (!Valid(inv))
         continue;
@@ -759,6 +811,48 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     }
     ok = true;
     return Int(n) + " crafting benches within " + Num(radius) + ":" + out;
+  }
+
+  if (cmd == "research") { // research <name>: complete a research entry (TEST ONLY cheat)
+    if (f.size() < 3)
+      return "usage: research <research name> (find research <text> lists names)";
+    Research *tech = Tech(world);
+    if (!tech)
+      return "no player research";
+    std::string error;
+    GameData *d = FindData(world, RESEARCH, f[2], error);
+    if (!d)
+      return error;
+    const bool before = tech->isFinished(d);
+    tech->completeResearch(d);
+    ok = tech->isFinished(d);
+    Log("KAH: research " + d->name + " finished " + (before ? "1" : "0") + " -> " + (ok ? "1" : "0"));
+    return "research " + d->name + ": " + (before ? "already finished" : ok ? "completed" : "NOT completed");
+  }
+
+  if (cmd == "blueprint") { // blueprint <item>: complete the research that unlocks crafting it
+    if (f.size() < 3)
+      return "usage: blueprint <item name|stringID>";
+    Research *tech = Tech(world);
+    if (!tech)
+      return "no player research";
+    std::string error;
+    GameData *data = nullptr;
+    const itemType types[] = {WEAPON, ARMOUR, ITEM, CONTAINER};
+    for (int t = 0; t < 4 && !data; ++t)
+      data = FindData(world, types[t], f[2], error);
+    if (!data)
+      return error;
+    GameData *bp = tech->getBlueprintsFor(data);
+    if (!Valid(bp))
+      return "no blueprint/research unlocks " + data->name;
+    const bool before = tech->isFinished(bp);
+    tech->completeResearch(bp);
+    ok = tech->isFinished(bp);
+    Log("KAH: blueprint " + data->name + " via " + bp->name + " finished " + (before ? "1" : "0") +
+        " -> " + (ok ? "1" : "0"));
+    return data->name + " unlocked by [" + bp->name + "]: " +
+           (before ? "already finished" : ok ? "completed" : "NOT completed");
   }
 
   if (cmd == "stash") { // stash <item> <count> [near <npc>]: fill the nearest storage
@@ -922,6 +1016,60 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
            " equipped=" + std::string(pack->isEquipped ? "1" : "0") +
            " items=" + Int(contents.size()) +
            " raw=" + Num(raw) + " total=" + Num(total);
+  }
+
+  if (cmd == "craft") { // craft <npc> <item> [at <bench>] [count n]: a real craft, worked by <npc>
+    if (f.size() < 4)
+      return "usage: craft <npc> <item> [at <bench name>] [count n]";
+    float dist = 0.0f;
+    CraftingBuilding *bench = FindBench(world, c, Option(f, 4, "at", ""), dist);
+    if (!bench)
+      return "no crafting bench within 300" + (Option(f, 4, "at", "").empty()
+                                                   ? std::string()
+                                                   : " matching '" + Option(f, 4, "at", "") + "'");
+    int count = atoi(Option(f, 4, "count", "1").c_str());
+    if (count < 1 || count > 10)
+      return "count must be 1..10";
+    // The bench's own craft menu: item + material pairs the player has unlocked.
+    lektor<GameDataGroup> crafts;
+    bench->getAvailableCrafts(crafts);
+    const std::string wanted = Lower(f[3]);
+    int exact = -1, partial = -1, partials = 0;
+    for (uint32_t i = 0; i < crafts.size(); ++i) {
+      if (!Valid(crafts.stuff[i].g1))
+        continue;
+      const std::string name = Lower(crafts.stuff[i].g1->name);
+      if (name == wanted || Lower(crafts.stuff[i].g1->stringID) == wanted) {
+        exact = (int)i;
+        break;
+      }
+      if (name.find(wanted) != std::string::npos) {
+        if (partial < 0)
+          partial = (int)i;
+        ++partials;
+      }
+    }
+    const int pick = exact >= 0 ? exact : partials == 1 ? partial : -1;
+    if (pick < 0) {
+      std::string list;
+      for (uint32_t i = 0; i < crafts.size() && i < 25; ++i)
+        list += " [" + CraftName(crafts.stuff[i]) + "]";
+      return std::string(partials > 1 ? "ambiguous craft name" : "not in the craft list") + " of " +
+             bench->getName() + " (" + Int(crafts.size()) + " available, unlock with blueprint/research):" + list;
+    }
+    const GameDataGroup craft = crafts.stuff[pick];
+    for (int i = 0; i < count; ++i)
+      bench->_addCraft(craft.g1, craft.g2, 0.0f, YesNoMaybe(YesNoMaybe::MAYBE));
+    // Put <npc> on the bench as a job (appended, existing jobs kept).
+    const TaskType task = bench->getDefaultTask();
+    c->addJob(task, bench, true, true, bench->getPosition());
+    ok = !bench->crafting.empty();
+    Log("KAH: craft " + CraftName(craft) + " x" + Int(count) + " at " + bench->getName() + " worker=" +
+        c->getName() + " task=" + Int((int)task) + " queue=" + Int((long long)bench->crafting.size()));
+    return "queued " + Int(count) + "x " + CraftName(craft) + " at " + bench->getName() + " (" +
+           Num(dist) + " away, queue=" + Int((long long)bench->crafting.size()) + "), " + c->getName() +
+           " has the job (task " + Int((int)task) + "). Materials go in the bench input or a nearby "
+           "store; run the game (speed) and watch benches.";
   }
 
   if (cmd == "craftfinish") { // craftfinish <npc> <item name|stringID> [at <bench name>]
