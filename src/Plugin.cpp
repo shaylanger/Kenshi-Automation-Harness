@@ -1,0 +1,297 @@
+// Kenshi Automation Harness (TEST ONLY): drives a running game from scripts.
+//
+// Active only while <mod folder>\enabled.flag exists. Tooling writes
+// inbox.txt (id<TAB>command<TAB>args, one per line); the DLL consumes it on
+// the game thread and appends id<TAB>ok|error<TAB>detail lines to
+// outbox.txt. Commands run from the Ogre frame listener, so load/status also
+// work at the main menu. autoload.txt (one save name) is loaded once the
+// main menu is up. While enabled, autosave is off and the game keeps running
+// when its window is in the background.
+#ifndef NOMINMAX
+#define NOMINMAX // OgreRoot.h uses std::min/max
+#endif
+#include "Harness.h"
+
+#include <core/Functions.h>
+#include <kenshi/GameWorld.h>
+#include <kenshi/Globals.h> // ou
+#include <kenshi/Kenshi.h>
+#include <kenshi/SaveManager.h>
+#include <mygui/MyGUI_Delegate.h>
+#include <mygui/MyGUI_Gui.h>
+#include <ogre/OgreFrameListener.h>
+#include <ogre/OgreRenderSystem.h>
+#include <ogre/OgreRenderWindow.h>
+#include <ogre/OgreRoot.h>
+
+#include <windows.h>
+#include <cstdio>
+#include <fstream>
+#include <sstream>
+
+namespace {
+
+CRITICAL_SECTION g_logLock;
+struct LogLockInit {
+  LogLockInit() { InitializeCriticalSection(&g_logLock); }
+} g_logLockInit;
+
+DWORD g_lastPoll = 0;
+bool g_loggedFirstTick = false;
+
+} // namespace
+
+const std::string &HarnessDir() {
+  static std::string dir;
+  if (dir.empty()) {
+    HMODULE self = nullptr;
+    char path[MAX_PATH] = {0};
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCSTR)&HarnessDir, &self) &&
+        GetModuleFileNameA(self, path, MAX_PATH)) {
+      dir = path;
+      size_t slash = dir.find_last_of("\\/");
+      dir = slash == std::string::npos ? "." : dir.substr(0, slash);
+    } else {
+      dir = ".";
+    }
+  }
+  return dir;
+}
+
+bool FileExists(const std::string &path) {
+  return GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+bool HarnessEnabled() { return FileExists(HarnessDir() + "\\enabled.flag"); }
+
+void Log(const std::string &msg) {
+  SYSTEMTIME t;
+  GetLocalTime(&t);
+  char stamp[32];
+  sprintf_s(stamp, "[%02d:%02d:%02d.%03d] ", t.wHour, t.wMinute, t.wSecond,
+            t.wMilliseconds);
+  EnterCriticalSection(&g_logLock);
+  std::ofstream out((HarnessDir() + "\\harness.log").c_str(), std::ios::app);
+  out << stamp << msg << "\n";
+  LeaveCriticalSection(&g_logLock);
+}
+
+std::string Lower(const std::string &value) {
+  std::string out = value;
+  for (size_t i = 0; i < out.size(); ++i)
+    out[i] = (char)tolower((unsigned char)out[i]);
+  return out;
+}
+
+std::string OneLine(const std::string &value) {
+  std::string out = value;
+  for (size_t i = 0; i < out.size(); ++i)
+    if (out[i] == '\r' || out[i] == '\n' || out[i] == '\t')
+      out[i] = ' ';
+  return out;
+}
+
+std::string Num(double v) {
+  std::ostringstream s;
+  s.setf(std::ios::fixed);
+  s.precision(1);
+  s << v;
+  return s.str();
+}
+
+std::string Int(long long v) {
+  std::ostringstream s;
+  s << v;
+  return s.str();
+}
+
+namespace {
+
+std::vector<std::string> SplitTabs(const std::string &line) {
+  std::vector<std::string> fields;
+  size_t start = 0;
+  while (true) {
+    size_t tab = line.find('\t', start);
+    fields.push_back(line.substr(start, tab == std::string::npos ? std::string::npos
+                                                                  : tab - start));
+    if (tab == std::string::npos)
+      break;
+    start = tab + 1;
+  }
+  return fields;
+}
+
+void ProcessInbox(GameWorld *world) {
+  if (!HarnessEnabled())
+    return;
+  const std::string dir = HarnessDir();
+
+  const std::string autoload = dir + "\\autoload.txt";
+  if (FileExists(autoload) && Phase(world) == "menu") {
+    std::string name;
+    {
+      std::ifstream in(autoload.c_str());
+      std::getline(in, name);
+    }
+    DeleteFileA(autoload.c_str());
+    while (!name.empty() && (name[name.size() - 1] == '\r' || name[name.size() - 1] == ' '))
+      name.erase(name.size() - 1);
+    std::vector<std::string> f;
+    f.push_back("autoload");
+    f.push_back("load");
+    f.push_back(name);
+    bool ok = false;
+    std::string detail;
+    try {
+      detail = RunCommand(world, f, ok);
+    } catch (...) {
+      detail = "exception";
+    }
+    Log("KAH: autoload " + name + ": " + detail);
+    std::ofstream out((dir + "\\outbox.txt").c_str(), std::ios::app);
+    out << "autoload\t" << (ok ? "ok" : "error") << "\t" << OneLine(detail) << "\n";
+  }
+
+  const std::string inboxPath = dir + "\\inbox.txt";
+  std::vector<std::string> lines;
+  {
+    std::ifstream in(inboxPath.c_str());
+    if (!in)
+      return;
+    std::string line;
+    while (std::getline(in, line)) {
+      if (!line.empty() && line[line.size() - 1] == '\r')
+        line.erase(line.size() - 1);
+      if (!line.empty())
+        lines.push_back(line);
+    }
+  }
+  DeleteFileA(inboxPath.c_str());
+  std::ofstream out((dir + "\\outbox.txt").c_str(), std::ios::app);
+  for (size_t i = 0; i < lines.size(); ++i) {
+    std::vector<std::string> fields = SplitTabs(lines[i]);
+    bool ok = false;
+    std::string detail;
+    if (fields.size() < 2) {
+      detail = "malformed line";
+    } else {
+      try {
+        detail = RunCommand(world, fields, ok);
+      } catch (...) {
+        detail = "exception";
+      }
+    }
+    out << fields[0] << "\t" << (ok ? "ok" : "error") << "\t" << OneLine(detail) << "\n";
+    out.flush();
+    if (!ok)
+      Log("KAH: error id=" + fields[0] + " " + detail);
+  }
+}
+
+// Runs once per frame on the game thread, at the main menu too
+// (GameWorld::mainLoop only runs once a game is loaded).
+void Tick(const char *source) {
+  GameWorld *world = ou;
+  if (!g_loggedFirstTick) {
+    g_loggedFirstTick = true;
+    Log(std::string("KAH: frame listener running (source=") + source +
+        " phase=" + Phase(world) + " thread=" + Int(GetCurrentThreadId()) + ")");
+  }
+  DWORD now = GetTickCount();
+  if (now - g_lastPoll < 250)
+    return;
+  g_lastPoll = now;
+  try {
+    LoadPending(); // notice the moment the old squad is gone
+    ProcessInbox(world);
+  } catch (...) {
+    Log("KAH: exception in ProcessInbox");
+  }
+}
+
+class AutomationFrameListener : public Ogre::FrameListener {
+public:
+  virtual bool frameStarted(const Ogre::FrameEvent &) {
+    Tick("ogre");
+    return true;
+  }
+};
+
+AutomationFrameListener g_frameListener;
+
+void OnGuiFrame(float) { Tick("mygui"); }
+
+// Test sessions must not overwrite the player's autosave slots: skip the
+// autosave update while the harness is enabled (checked once a second).
+typedef void(__fastcall *UpdateAutoSaveFn)(SaveManager *);
+UpdateAutoSaveFn g_updateAutoSaveOrig = nullptr;
+
+void __fastcall Hook_UpdateAutoSave(SaveManager *sm) {
+  static DWORD lastCheck = 0;
+  static bool testing = false;
+  DWORD now = GetTickCount();
+  if (now - lastCheck >= 1000) {
+    lastCheck = now;
+    bool was = testing;
+    testing = HarnessEnabled();
+    if (testing != was)
+      Log(std::string("KAH: autosave ") + (testing ? "off (harness enabled)" : "on"));
+  }
+  if (!testing)
+    g_updateAutoSaveOrig(sm);
+}
+
+void InstallHooks() {
+  __int64 autoSaveAddr = KenshiLib::GetRealAddress(&SaveManager::updateAutoSave);
+  if (autoSaveAddr) {
+    KenshiLib::HookStatus autoSaveStatus = KenshiLib::AddHook(
+        (void *)autoSaveAddr, (void *)Hook_UpdateAutoSave, (void **)&g_updateAutoSaveOrig);
+    Log("KAH: SaveManager::updateAutoSave hook status=" + Int((int)autoSaveStatus));
+  } else {
+    Log("KAH: SaveManager::updateAutoSave not found; autosave stays on");
+  }
+
+  Ogre::Root *root = Ogre::Root::getSingletonPtr();
+  if (!root) {
+    Log("KAH: no Ogre::Root yet; automation commands off.");
+    return;
+  }
+  root->addFrameListener(&g_frameListener);
+  MyGUI::Gui *gui = MyGUI::Gui::getInstancePtr();
+  if (gui)
+    gui->eventFrameStart += MyGUI::newDelegate(&OnGuiFrame);
+  Log("KAH: frame listener added (mygui=" + std::string(gui ? "yes" : "no") +
+      " thread=" + Int(GetCurrentThreadId()) + ")");
+
+  // Ogre stops rendering (and the game stops updating) while its window is
+  // in the background; automated runs keep the game running unfocused.
+  if (!HarnessEnabled())
+    return;
+  int windows = 0;
+  Ogre::RenderSystem *rs = root->getRenderSystem();
+  if (rs) {
+    Ogre::RenderSystem::RenderTargetIterator it = rs->getRenderTargetIterator();
+    while (it.hasMoreElements()) {
+      Ogre::RenderWindow *win = dynamic_cast<Ogre::RenderWindow *>(it.getNext());
+      if (!win)
+        continue;
+      win->setDeactivateOnFocusChange(false);
+      win->setActive(true);
+      ++windows;
+    }
+  }
+  Log("KAH: keep running in background: " + Int(windows) + " render window(s)");
+}
+
+} // namespace
+
+// RE_Kenshi plugin entry point.
+__declspec(dllexport) void startPlugin() {
+  // A fresh log per game session (tooling waits for lines of this session).
+  DeleteFileA((HarnessDir() + "\\harness.log").c_str());
+  Log("KAH: Kenshi Automation Harness starting (dir=" + HarnessDir() +
+      " enabled=" + (HarnessEnabled() ? "1" : "0") + ")");
+  InstallHooks();
+}

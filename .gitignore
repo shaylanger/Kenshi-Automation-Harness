@@ -1,0 +1,11 @@
+obj/
+out/
+__pycache__/
+*.pyc
+# runtime files (if the mod folder is ever tested from here)
+enabled.flag
+inbox.txt
+inbox.txt.tmp
+outbox.txt
+autoload.txt
+harness.log
