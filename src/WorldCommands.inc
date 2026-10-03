@@ -299,9 +299,109 @@ Building *CreateBuilding(GameWorld *world, GameData *data, const Ogre::Vector3 &
                                            false, 0, false);
 }
 
+// Production buildings "produced" watches: output quantity sampled every
+// frame (SampleProduction), rises counted as produced, drops as removed.
+struct TrackedProduction {
+  hand building;
+  std::string name;
+  ProductionCounter counter;
+};
+std::vector<TrackedProduction> g_tracked;
+const size_t kMaxTracked = 32;
+
+double GameHours(GameWorld *world) {
+  return world->getTimeStamp_inGameHours().getTotalHours();
+}
+
+StorageBuilding *ProductionOf(const hand &h) {
+  Building *b = h.getBuilding();
+  StorageBuilding *s = dynamic_cast<StorageBuilding *>(b);
+  return Valid(s) ? s : nullptr;
+}
+
+void SampleTracked(GameWorld *world) {
+  if (g_tracked.empty())
+    return;
+  if (!InWorld(world)) { // a load or the main menu: the handles mean nothing now
+    g_tracked.clear();
+    Log("KAH: produced: tracking cleared (no game loaded)");
+    return;
+  }
+  for (size_t i = 0; i < g_tracked.size(); ++i) {
+    try {
+      StorageBuilding *s = ProductionOf(g_tracked[i].building);
+      if (s)
+        g_tracked[i].counter.Sample(s->getCurrentProductionQuantity());
+    } catch (...) {
+    }
+  }
+}
+
 bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const Ogre::Vector3 &origin,
                      bool &ok, std::string &out) {
   const std::string cmd = Lower(f[1]);
+  if (cmd == "produced") { // produced <building> [reset] [radius <m>]: output made since the last reset
+    if (f.size() < 3) {
+      out = "usage: produced <building> [reset] [radius <m>]";
+      return true;
+    }
+    float radius = 0, dist = 0;
+    if (!ParseSearchRadius(f, 3, 0, kDefaultSearchRadius, radius, out))
+      return true;
+    bool reset = false;
+    for (size_t i = 3; i < f.size(); ++i)
+      if (Lower(f[i]) == "reset")
+        reset = true;
+    Building *b = FindBuilding(world, origin, f[2], radius, dist);
+    if (!b) {
+      out = "no building matching '" + f[2] + "' within " + Num(radius) + " of the player";
+      return true;
+    }
+    StorageBuilding *s = dynamic_cast<StorageBuilding *>(b);
+    GameData *product = Valid(s) ? s->getProductionItemData() : nullptr;
+    if (!Valid(product)) {
+      out = b->getName() + " has no production output (not a production building)";
+      return true;
+    }
+    const double now = GameHours(world);
+    const int level = s->getCurrentProductionQuantity();
+    TrackedProduction *t = nullptr;
+    for (size_t i = 0; i < g_tracked.size() && !t; ++i)
+      if (g_tracked[i].building == b->getHandle())
+        t = &g_tracked[i];
+    if (!t) {
+      if (g_tracked.size() >= kMaxTracked) {
+        out = "already tracking " + Int((long long)kMaxTracked) + " buildings";
+        return true;
+      }
+      TrackedProduction fresh;
+      fresh.building = b->getHandle();
+      fresh.name = b->getName();
+      fresh.counter.Reset(now);
+      fresh.counter.Sample(level);
+      g_tracked.push_back(fresh);
+      ok = true;
+      Log("KAH: produced: tracking " + b->getName() + " output=" + Int(level));
+      out = "tracking " + b->getName() + " product=" + product->name + " output_now=" + Int(level) +
+            " from game hour " + Num(now) + " (ask again later; a load clears tracking)";
+      return true;
+    }
+    t->counter.Sample(level);
+    const ProductionCounter &c = t->counter;
+    char rate[32];
+    sprintf_s(rate, "%.2f", c.PerGameHour(now));
+    char hours[32];
+    sprintf_s(hours, "%.3f", c.Hours(now));
+    out = b->getName() + " product=" + product->name + " produced=" + Int(c.produced) +
+          " removed=" + Int(c.removed) + " output_now=" + Int(level) + " game_hours=" + hours +
+          " per_game_hour=" + rate;
+    if (reset) {
+      t->counter.ResetKeepLevel(now);
+      out += " (reset)";
+    }
+    ok = true;
+    return true;
+  }
   if (cmd == "build") { // build <name|sid> [near <npc> [dist m] | at x y z] [faction <f>]
     BuildArgs a;
     if (!ParseBuildArgs(f, a, out))

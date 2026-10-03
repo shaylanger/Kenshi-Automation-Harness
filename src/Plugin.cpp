@@ -247,6 +247,7 @@ class AutomationFrameListener : public Ogre::FrameListener {
 public:
   virtual bool frameStarted(const Ogre::FrameEvent &) {
     MeasureFrame();
+    SampleProduction(ou);
     Tick("ogre");
     return true;
   }

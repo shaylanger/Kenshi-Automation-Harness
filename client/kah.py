@@ -35,6 +35,7 @@ Built-in commands:
   job <npc> <building> [task <t>] [radius <m>] | jobs|clearjobs <npc>
   buildings [radius] [filter] [near <npc>] | building <name> [radius] | time
   build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | unbuild <name> [radius]
+  produced <building> [reset] [radius <m>]   units made since tracking/reset, per game hour
   power <building> on|off|charge [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>]
   (radius: building searches, default 300, max 5000)
   setname <npc> <name> | faction <npc> <faction> | sleep <npc> [bed <b>] | wake <npc>

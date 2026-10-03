@@ -38,6 +38,8 @@ std::string Phase(GameWorld *world);
 bool LoadPending();
 // Notices loads the game signals (load menu too) for "status"; every frame.
 void WatchLoads();
+// Samples the output of buildings "produced" tracks; every frame.
+void SampleProduction(GameWorld *world);
 
 bool IsBuiltinCommand(const std::string &name);
 

@@ -7,6 +7,7 @@
 #include "Harness.h"
 #include "SearchRadius.h"
 #include "BuildArgs.h"
+#include "ProductionCounter.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -477,7 +478,7 @@ const char *const kBuiltins[] = {
     "tasks", "ui", "click", "messages", "screenshot", "time", "building", "production",
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
-    "trade", "eat", "blood", "build", "unbuild", "fps"};
+    "trade", "eat", "blood", "build", "unbuild", "fps", "produced"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
@@ -497,7 +498,7 @@ const char *const kHelp =
     "cage|uncage <npc> [cage] | shopstock <trader> [radius <m>] | trade <buyer> <trader> <item> [radius <m>] | "
     "eat <npc> <food> | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
-    "power <building> on|off|charge [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
+    "produced <building> [reset] [radius <m>] | power <building> on|off|charge [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | "
     "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "
     "packweight <npc> <pack> | craftfinish <npc> <item> [at <bench>]. "
@@ -505,6 +506,13 @@ const char *const kHelp =
     "#serial, @player or @selected.";
 
 } // namespace
+
+void SampleProduction(GameWorld *world) {
+  try {
+    SampleTracked(world);
+  } catch (...) {
+  }
+}
 
 void WatchLoads() {
   try {
