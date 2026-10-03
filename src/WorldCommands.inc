@@ -1105,29 +1105,55 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
         traderInv->addItem(back, 1, false, true);
       steps += " returned to " + fromName;
     }
-    // buyItem takes the money and hands the item back detached (no inventory, not on the
-    // ground): place it like the trade window does, into the buyer's inventory or at her feet.
-    // giveItem refuses when the matching equipment slot is taken, so the plain inventory
-    // add (dropping at her feet when full) is the fallback.
+    // buyItem (and the hand sale) leave the item detached (no inventory, not on the ground).
+    // Place it the way `give`/`transfer` do (Inventory::addItem, which works for hats where
+    // giveItem did not: run m12), then Character::giveItem with drop-at-feet. If neither
+    // takes it, the buyer is refunded and the item goes back where it came from.
     std::string placed = ok ? "already" : "-";
     if (ok && !bought->isInInventory && !bought->_isPhysical) {
+      const int qty = bought->quantity > 0 ? bought->quantity : 1;
+      steps += " placing (qty=" + Int(qty) + " room=" +
+               (Valid(buyerInv) && itemData ? (buyerInv->hasRoomForItem(itemData) ? "1" : "0") : "?") +
+               " equipped=" + (bought->isEquipped ? "1" : "0") + ")";
       bool given = false;
-      try {
-        given = c->giveItem(bought, true, false);
-      } catch (...) {
-        given = false;
-      }
-      if (!given && Valid(buyerInv)) {
+      if (Valid(buyerInv)) {
         try {
-          given = buyerInv->addItem(bought, bought->quantity > 0 ? bought->quantity : 1, true, false);
+          given = buyerInv->addItem(bought, qty, false, false);
         } catch (...) {
           given = false;
         }
+        steps += std::string(" addItem=") + (given ? "1" : "0");
+      }
+      if (!given) {
+        try {
+          given = c->giveItem(bought, true, false);
+        } catch (...) {
+          given = false;
+        }
+        steps += std::string(" giveItem(drop)=") + (given ? "1" : "0");
       }
       placed = given ? (bought->isInInventory ? "inventory" : (bought->_isPhysical ? "ground" : "unknown"))
                      : "failed";
-      if (!given)
-        problems.push_back("the buyer's inventory refused the item and it could not be dropped");
+      if (!given) {
+        // No money lost: refund what moved and put the item back.
+        const int paidNow = buyerBefore - c->getMoney(), receivedNow = trader->getMoney() - traderBefore;
+        if (paidNow != 0)
+          c->takeMoney(-paidNow);
+        if (receivedNow != 0)
+          trader->takeMoney(receivedNow);
+        Inventory *home = storage ? storage : traderInv;
+        bool back = false;
+        try {
+          back = Valid(home) && home->addItem(bought, qty, false, false);
+          if (!back && storage && Valid(traderInv))
+            back = traderInv->addItem(bought, qty, false, false);
+        } catch (...) {
+          back = false;
+        }
+        steps += " refunded " + Int(paidNow) + (back ? " and put back" : " (item could NOT be put back)");
+        problems.push_back("the buyer's inventory refused the item and it could not be dropped; refunded");
+        ok = false;
+      }
     }
     const int arrived = (Valid(buyerInv) && itemData) ? CountAllSections(buyerInv, itemData) - countBefore : 0;
     const int paid = buyerBefore - c->getMoney(), received = trader->getMoney() - traderBefore;
