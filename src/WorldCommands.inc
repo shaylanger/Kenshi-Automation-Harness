@@ -697,6 +697,126 @@ void WalkTick(GameWorld *world) {
   }
 }
 
+// --- theft (KAH 22): crime readout and the player-style pickup order.
+std::string FactionName(Faction *f) { return Valid(f) ? f->getName() : std::string("none"); }
+
+int StolenCount(Character *c) {
+  Inventory *inv = Valid(c) ? c->getInventory() : nullptr;
+  if (!Valid(inv))
+    return 0;
+  lektor<Item *> stolen;
+  inv->getAllStolenItems(stolen, false);
+  return (int)stolen.size();
+}
+
+// Bounty/wanted state of `c` and who is going after him: characters within
+// `radius` whose current goal targets him (HUNT_MY_THIEF and anything else).
+std::string CrimeReport(GameWorld *world, Character *c, float radius) {
+  std::string out;
+  try {
+    BountyManager &b = c->crimes;
+    out = c->getName() + " committing_crime=" +
+          (b.isCommittingCrime() ? BountyManager::crimeToStr(b.committingCrime) : std::string("none")) +
+          " against=" + FactionName(b.crimeAgainstFaction) + " crime_expiry=" + Num(b.crimeExpiry) +
+          " total_bounty=" + Int(b.getTotalBounty());
+    for (ogre_unordered_map<Faction *, Bounty>::type::const_iterator it = b.bounties.begin();
+         it != b.bounties.end(); ++it)
+      if (it->second.amount != 0 || it->second.crimes != 0)
+        out += " bounty[" + FactionName(it->first) + "]=" + Int(it->second.amount);
+    out += " stolen_items=" + Int(StolenCount(c));
+    std::vector<Character *> around;
+    CollectCharacters(world, c->getPosition(), radius, around);
+    const hand me = c->getHandle();
+    std::string hunters, others;
+    int nh = 0, no = 0;
+    for (size_t i = 0; i < around.size(); ++i) {
+      Character *o = around[i];
+      if (o == c)
+        continue;
+      OrdersReceiver *orders = o->getOrdersReciever();
+      if (!Valid(orders))
+        continue;
+      const TaskMatch &g = orders->currentGoal;
+      if (!g.taskData)
+        continue;
+      const TaskType key = g.key();
+      const bool onMe = SameHandle(g.subject, me);
+      if (key == HUNT_MY_THIEF) {
+        RootObjectBase *t = nullptr;
+        try {
+          t = g.subject.getRootObjectBase();
+        } catch (...) {
+          t = nullptr;
+        }
+        hunters += std::string(nh++ ? "; " : "") + o->getName() + " [" + FactionName(o->getFaction()) +
+                   "] HUNT_MY_THIEF -> " + (Valid(t) ? t->getName() : std::string("?"));
+      } else if (onMe && no < 12) {
+        others += std::string(no++ ? "; " : "") + o->getName() + " " + TaskName((int)key);
+      }
+    }
+    out += " hunters=" + Int(nh) + (nh ? " {" + hunters + "}" : "");
+    if (no)
+      out += " targeting_him={" + others + "}";
+  } catch (...) {
+    out += " (unreadable)";
+  }
+  return out;
+}
+
+struct StealTimer {
+  std::string id;
+  hand who, item;
+  std::string name, itemName, owner;
+  int stolenBefore;
+  DWORD startTick;
+};
+std::vector<StealTimer> g_steals;
+
+void StealTick(GameWorld *world) {
+  if (g_steals.empty())
+    return;
+  const DWORD now = GetTickCount();
+  for (size_t i = 0; i < g_steals.size();) {
+    StealTimer &s = g_steals[i];
+    Character *c = nullptr;
+    Item *it = nullptr;
+    try {
+      c = s.who.getCharacter();
+      it = s.item.getItem();
+    } catch (...) {
+    }
+    std::string done;
+    bool okDone = false;
+    if (!Valid(c)) {
+      done = s.name + " is gone";
+    } else {
+      const int stolen = StolenCount(c);
+      const bool inHisInv = Valid(it) && it->isInInventory &&
+                            SameHandle(it->getInventoryWeAreIn(), c->getHandle());
+      const bool merged = !Valid(it) && stolen > s.stolenBefore;
+      if (inHisInv || merged) {
+        okDone = true;
+        done = s.name + " picked up " + s.itemName + " (owner faction " + s.owner + ")" +
+               (merged ? " (merged into a stack)" : "") + " item_stolen=" +
+               (inHisInv ? (it->isStolen(false) ? "1" : "0") : "?") + " has_stolen_items=" +
+               (Valid(c->getInventory()) && c->getInventory()->hasStolenItems() ? "1" : "0") +
+               " stolen_items " + Int(s.stolenBefore) + " -> " + Int(stolen) +
+               " seconds=" + Num((now - s.startTick) / 1000.0f) + " | " + CrimeReport(world, c, 200.0f);
+      } else if (now - s.startTick > 120000) {
+        done = s.name + " did not pick up " + s.itemName + " within 120 s (path, KO, or someone took it) | " +
+               CrimeReport(world, c, 200.0f);
+      }
+    }
+    if (!done.empty()) {
+      Log("KAH: pickup(order) " + done);
+      WriteOutbox(s.id, okDone, done);
+      g_steals.erase(g_steals.begin() + i);
+    } else {
+      ++i;
+    }
+  }
+}
+
 // Squads "unload" streamed out this session (for "reload").
 struct Unloaded {
   std::string name;
@@ -1521,11 +1641,22 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
       out = "usage: pickup <npc> <item name|sid|#serial/index|nearest> [radius <m>]";
       return true;
     }
-    float radius = (float)atof(Option(f, 4, "radius", "20").c_str());
+    Ogre::Vector3 center = c->getPosition();
+    const std::string nearName = Option(f, 4, "near", "");
+    if (!nearName.empty()) {
+      Character *nc = FindCharacter(world, nearName);
+      float bd = 0;
+      Building *nb = nc ? nullptr : FindBuilding(world, origin, nearName, kDefaultSearchRadius, bd);
+      if (nc)
+        center = nc->getPosition();
+      else if (nb)
+        center = nb->getPosition();
+    }
+    float radius = (float)atof(Option(f, 4, "radius", nearName.empty() ? "20" : "30").c_str());
     if (!(radius > 0) || radius > 300)
       radius = 20;
     std::string why;
-    Item *item = FindGroundItem(world, c->getPosition(), f[3], radius, why);
+    Item *item = FindGroundItem(world, center, f[3], radius, why);
     if (!item) {
       out = why;
       return true;

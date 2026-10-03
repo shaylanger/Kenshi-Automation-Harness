@@ -42,7 +42,9 @@ Built-in commands:
   (radius: building searches, default 300, max 5000)
   setname <npc> <name> | faction <npc> <faction> | sleep <npc> [bed <b>] | wake <npc>
   damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | eat <npc> <food>
-  drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [radius <m>]   ground items (same instance)
+  drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now]
+                                          ground items; owned ones via the PICKUP order (theft path)
+  stealth <npc> on|off | crime <npc> [radius <m>]   sneak mode | bounty, crime, HUNT_MY_THIEF hunters
   protect [<npc> on|off]                  test cheat: kept at full health, a KO cleared at once
   sever <npc> left_arm|right_arm|left_leg|right_leg [noitem] [ko]   real amputation (limb state stump)
   unload <npc> | reload <name>            stream his squad out / back in (game streaming)
@@ -143,7 +145,7 @@ def write_command(d, line, deadline):
 
 
 # Commands the game answers later (seconds the client waits by default).
-LONG_COMMANDS = {'walktime': 200}
+LONG_COMMANDS = {'walktime': 200, 'pickup': 200}
 
 
 def send(d, cmd, args, timeout=None):

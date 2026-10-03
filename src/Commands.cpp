@@ -593,7 +593,7 @@ const char *const kBuiltins[] = {
     "tasks", "ui", "click", "messages", "screenshot", "time", "building", "production",
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
-    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "newgame", "import"};
+    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "newgame", "import", "stealth", "crime"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | newgame <start> | import <save> [flags] | speed <0|0.5..50> | "
@@ -611,7 +611,7 @@ const char *const kHelp =
     "faction <npc> <faction> | sleep <npc> [bed <name>] | wake <npc> | "
     "damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | protect [<npc> on|off] | shackle <npc> [owner <npc>] | unshackle <npc> | "
     "cage|uncage <npc> [cage] | shopstock <trader> [radius <m>] | trade <buyer> <trader> <item> [radius <m>] | "
-    "eat <npc> <food> | sever <npc> <limb> [noitem] [ko] | runspeed <npc> | walktime <npc> <dist> [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [radius <m>] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
+    "eat <npc> <food> | stealth <npc> on|off | crime <npc> [radius <m>] | sever <npc> <limb> [noitem] [ko] | runspeed <npc> | walktime <npc> <dist> [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | "
@@ -632,6 +632,10 @@ void SampleProduction(GameWorld *world) {
 void KeepWalkTimers() {
   try {
     WalkTick(ou);
+  } catch (...) {
+  }
+  try {
+    StealTick(ou);
   } catch (...) {
   }
 }
@@ -1214,6 +1218,83 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   Character *c = FindCharacter(world, f[2]);
   if (!c)
     return NotFound(f[2]);
+  if (cmd == "stealth") { // stealth <npc> on|off: sneak mode (KAH 22)
+    const std::string mode = f.size() >= 4 ? Lower(f[3]) : "";
+    if (mode != "on" && mode != "off")
+      return "usage: stealth <npc> on|off";
+    c->setStealthMode(mode == "on");
+    ok = c->isStealthMode() == (mode == "on");
+    Log("KAH: stealth " + c->getName() + " " + mode);
+    return c->getName() + " stealth_mode=" + (c->isStealthMode() ? "1" : "0");
+  }
+
+  if (cmd == "crime") { // crime <npc> [radius <m>]: bounty, crime, who hunts him (KAH 22)
+    float radius = (float)atof(Option(f, 3, "radius", "200").c_str());
+    if (!(radius > 0) || radius > 1000)
+      radius = 200;
+    ok = true;
+    return CrimeReport(world, c, radius);
+  }
+
+  if (cmd == "pickup") { // owned items (or "order"): the player's PICKUP order, answered when done (KAH 22)
+    bool forceOrder = false, forceNow = false;
+    for (size_t i = 4; i < f.size(); ++i) {
+      if (Lower(f[i]) == "order")
+        forceOrder = true;
+      if (Lower(f[i]) == "now")
+        forceNow = true;
+    }
+    if (f.size() >= 4 && !forceNow) {
+      Ogre::Vector3 center = c->getPosition();
+      const std::string nearName = Option(f, 4, "near", "");
+      if (!nearName.empty()) {
+        Character *nc = FindCharacter(world, nearName);
+        float bd = 0;
+        Building *nb = nc ? nullptr : FindBuilding(world, origin, nearName, kDefaultSearchRadius, bd);
+        if (nc)
+          center = nc->getPosition();
+        else if (nb)
+          center = nb->getPosition();
+        else
+          return "near: no character or building named " + nearName;
+      }
+      float radius = (float)atof(Option(f, 4, "radius", nearName.empty() ? "20" : "30").c_str());
+      if (!(radius > 0) || radius > 300)
+        radius = 20;
+      std::string why;
+      Item *item = FindGroundItem(world, center, f[3], radius, why);
+      if (!item)
+        return why;
+      Faction *ownerF = item->getFaction();
+      const bool owned = Valid(ownerF) && ownerF != c->getFaction();
+      if (owned || forceOrder) {
+        OrdersReceiver *orders = c->getOrdersReciever();
+        if (!Valid(orders))
+          return c->getName() + " takes no orders";
+        StealTimer s;
+        s.id = f[0];
+        s.who = c->getHandle();
+        s.item = item->getHandle();
+        s.name = c->getName();
+        s.itemName = item->getName();
+        s.owner = FactionName(ownerF);
+        s.stolenBefore = StolenCount(c);
+        s.startTick = GetTickCount();
+        Log("KAH: pickup(order) " + s.name + " -> " + s.itemName + " owner=" + s.owner + " stolen_before=" +
+            Int(s.stolenBefore) + " item_stolen_before=" + (item->isStolen(false) ? "1" : "0") +
+            " stealth=" + (c->isStealthMode() ? "1" : "0"));
+        // What a player's right-click on the item gives: he walks over and
+        // picks it up, and the game runs its own theft checks.
+        orders->addOrder(PICKUP, item->getHandle(), item->getPosition(), true, false);
+        g_steals.push_back(s);
+        pending = true; // StealTick answers when it is in his inventory (or after 120 s)
+        ok = true;
+        return "";
+      }
+    }
+    // unowned: the instant same-instance pickup (RunCharacterCommand)
+  }
+
   if (cmd == "runspeed") { // runspeed <npc>: movement speeds the game uses now (KAH 19)
     CharMovement *m = c->movement;
     if (!Valid(m))
