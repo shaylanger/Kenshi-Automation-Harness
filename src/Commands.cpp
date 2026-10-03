@@ -570,6 +570,9 @@ Character *g_loadOldLeader = nullptr; // squad leader object before the load
 // load the game signals (the load menu too), seen by WatchLoads() each frame.
 std::string g_loadedSave;
 int g_lastSignal = 0;
+// The current world came from New Game (and nothing was loaded or imported
+// since): the only state the game offers Import in (KAH 23).
+bool g_freshNewGame = false;
 
 std::string CurrentSave() {
   try {
@@ -669,6 +672,16 @@ void WatchLoads() {
         g_protected.clear();
       }
     }
+    if (signal != g_lastSignal) {
+      // Import is only safe into a fresh new game (KAH 23): remember
+      // whether the current world came from New Game.
+      if (signal == SaveManager::NEWGAME)
+        g_freshNewGame = true;
+      else if (signal == SaveManager::LOADGAME || signal == SaveManager::IMPORTGAME)
+        g_freshNewGame = false;
+      if (signal == SaveManager::NEWGAME || signal == SaveManager::IMPORTGAME)
+        Log(std::string("KAH: game signalled ") + (signal == SaveManager::NEWGAME ? "new game" : "import"));
+    }
     g_lastSignal = signal;
   } catch (...) {
   }
@@ -762,6 +775,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return "no save named: " + f[2] + " (in " + sm->getSavePath() + ")";
     Log("KAH: load save=" + f[2] + " phase=" + Phase(world));
     sm->load(f[2]);
+    g_freshNewGame = false;
     g_loadedSave = f[2];
     g_loadPending = true;
     g_loadSawEmpty = false;
@@ -779,12 +793,21 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     SaveManager *sm = SaveManager::getSingleton();
     if (!Valid(sm))
       return "no SaveManager";
+    // Names as "find start" prints them ("Wanderer"), with or without a
+    // leading "The" ("The Wanderer"), any case, or the sid (KAH 23).
     std::string error;
     GameData *start = FindData(world, NEW_GAME_STARTOFF, f[2], error);
-    if (!start)
-      return error;
+    if (!start) {
+      std::string alt, altError;
+      const std::string low = Lower(f[2]);
+      alt = low.compare(0, 4, "the ") == 0 ? f[2].substr(4) : "The " + f[2];
+      start = FindData(world, NEW_GAME_STARTOFF, alt, altError);
+      if (!start)
+        return error + " (also tried '" + alt + "'; find start <text> lists the starts)";
+    }
     Log("KAH: newgame start=" + start->name + " (" + start->stringID + ") phase=" + Phase(world));
     sm->newGame(start->stringID);
+    g_freshNewGame = true;
     g_loadedSave = "newgame:" + start->name;
     g_loadPending = true;
     g_loadSawEmpty = false;
@@ -809,6 +832,15 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
         return "unknown import flag: " + bad + " (squad,buildings,research,npcs,relations,reset,all)";
       flags = parsed;
     }
+    // The game offers Import only from New Game; importing into a world
+    // loaded from a save crashed the game ~2 s later in town code (KAH 23,
+    // kenshi_x64.exe+0x94d6db reading +0x270 of a null pointer).
+    if (!g_freshNewGame)
+      return "refused: import works only right after a new game (newgame <start>, wait-world, then "
+             "import); the current world came from a save (" +
+             (g_loadedSave.empty() ? std::string("?") : g_loadedSave) + ")";
+    if (Phase(world) != "world")
+      return "refused: wait until the new game has started (phase=" + Phase(world) + ")";
     lektor<SaveInfo> saves;
     sm->scanGames(saves, false);
     int at = -1;
@@ -823,6 +855,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     Log("KAH: import save=" + saves.stuff[at].name + " flags=" + ImportFlagNames(flags) + " phase=" +
         Phase(world));
     sm->import(saves.stuff[at], flags);
+    g_freshNewGame = false; // one import per new game
     g_loadedSave = "import:" + saves.stuff[at].name;
     g_loadPending = true;
     g_loadSawEmpty = false;
