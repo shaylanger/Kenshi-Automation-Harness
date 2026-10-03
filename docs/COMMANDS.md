@@ -107,8 +107,8 @@ Client side: `kah wait-game <minutes> [timeout_s]` waits for game time to pass.
 | `shackle <npc> [owner <npc>]` / `unshackle <npc>` | chain mode on/off |
 | `cage <npc> [cage name]` / `uncage <npc> [cage name]` | put into / release from the nearest matching cage (within 300) |
 | `eat <npc> <food>` | eat a food item from the inventory (hunger rises over time, as in the game) |
-| `shopstock <trader>` | a trader's goods: carried plus storage of her faction within 30 (where Kenshi keeps shop stock) |
-| `trade <buyer> <trader> <item>` | buy through the game's own purchase path (`Inventory::buyItem`): cats move, the game's trade event fires |
+| `shopstock <trader> [radius <m>]` | a trader's goods: carried plus storage of her faction within `radius` of her (default 60, max 300; traders walk around their shops) (where Kenshi keeps shop stock) |
+| `trade <buyer> <trader> <item> [radius <m>]` | buy (from the same goods `shopstock` lists, same `radius`) through the game's own purchase path (`Inventory::buyItem`): cats move, the game's trade event fires |
 
 ### UI
 

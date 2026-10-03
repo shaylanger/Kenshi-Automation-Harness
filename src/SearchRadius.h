@@ -21,10 +21,14 @@ inline bool IsNumber(const std::string &text) {
   return end && !*end;
 }
 
+const float kDefaultShopRadius = 60.0f; // traders walk around their shops
+const float kMaxShopRadius = 300.0f;
+
 // out = the radius (fallback when none is given). False with `error` when
-// the value is not a number in (0, kMaxSearchRadius].
+// the value is not a number in (0, max].
 inline bool ParseSearchRadius(const std::vector<std::string> &f, size_t from, size_t positional,
-                              float fallback, float &out, std::string &error) {
+                              float fallback, float &out, std::string &error,
+                              float max = kMaxSearchRadius) {
   out = fallback;
   std::string text;
   for (size_t i = from; i + 1 < f.size(); ++i)
@@ -37,8 +41,8 @@ inline bool ParseSearchRadius(const std::vector<std::string> &f, size_t from, si
   if (text.empty())
     return true;
   double v = IsNumber(text) ? strtod(text.c_str(), nullptr) : -1.0;
-  if (!(v > 0.0) || v > kMaxSearchRadius) {
-    error = "radius must be a number above 0 and at most " + Num(kMaxSearchRadius) + ": " + text;
+  if (!(v > 0.0) || v > max) {
+    error = "radius must be a number above 0 and at most " + Num(max) + ": " + text;
     return false;
   }
   out = (float)v;

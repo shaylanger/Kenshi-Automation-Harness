@@ -28,11 +28,11 @@ void Check(bool cond, const char *what) {
 
 // f = id, command, then the arguments.
 std::vector<std::string> Args(const char *a, const char *b = 0, const char *c = 0,
-                              const char *d = 0, const char *e = 0) {
+                              const char *d = 0, const char *e = 0, const char *g = 0) {
   std::vector<std::string> f;
   f.push_back("1");
-  const char *all[] = {a, b, c, d, e};
-  for (int i = 0; i < 5 && all[i]; ++i)
+  const char *all[] = {a, b, c, d, e, g};
+  for (int i = 0; i < 6 && all[i]; ++i)
     f.push_back(all[i]);
   return f;
 }
@@ -78,6 +78,19 @@ int main() {
         "negative refused");
   Check(!ParseSearchRadius(Args("job", "Shay", "Mine", "RADIUS", "far"), 4, 0, 300.0f, r, err),
         "non-number refused (keyword is case-insensitive)");
+
+  Check(ParseSearchRadius(Args("shopstock", "Abia"), 3, 0, kDefaultShopRadius, r, err,
+                          kMaxShopRadius) && r == 60.0f,
+        "shopstock default 60");
+  Check(ParseSearchRadius(Args("trade", "Shay", "Abia", "Bandage", "radius"), 5, 0,
+                          kDefaultShopRadius, r, err, kMaxShopRadius) && r == 60.0f,
+        "trade: trailing 'radius' without a value is ignored");
+  Check(ParseSearchRadius(Args("trade", "Shay", "Abia", "Bandage", "radius", "120"), 5, 0,
+                          kDefaultShopRadius, r, err, kMaxShopRadius) && r == 120.0f,
+        "trade radius keyword");
+  Check(!ParseSearchRadius(Args("shopstock", "Abia", "radius", "301"), 3, 0, kDefaultShopRadius,
+                           r, err, kMaxShopRadius) && err.find("300") != std::string::npos,
+        "shop radius above 300 refused");
 
   printf(g_failed ? "%d FAILED\n" : "all search radius tests passed\n", g_failed);
   return g_failed ? 1 : 0;

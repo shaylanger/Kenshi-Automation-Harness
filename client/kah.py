@@ -38,8 +38,8 @@ Built-in commands:
   (radius: building searches, default 300, max 5000)
   setname <npc> <name> | faction <npc> <faction> | sleep <npc> [bed <b>] | wake <npc>
   damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | eat <npc> <food>
-  shackle|unshackle <npc> | cage|uncage <npc> [cage] | shopstock <trader>
-  trade <buyer> <trader> <item>
+  shackle|unshackle <npc> | cage|uncage <npc> [cage] | shopstock <trader> [radius <m>]
+  trade <buyer> <trader> <item> [radius <m>]   (shop storage radius: default 60, max 300)
   ui [filter] [all] | click <widget> | messages [n] | screenshot [name]
 <npc> is a name (exact match nearest the player wins), #serial, @player or @selected.
 

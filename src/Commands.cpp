@@ -492,7 +492,7 @@ const char *const kHelp =
     "job <npc> <building> [task <name>] [radius <m>] | jobs|clearjobs <npc> | setname <npc> <name> | "
     "faction <npc> <faction> | sleep <npc> [bed <name>] | wake <npc> | "
     "damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | shackle <npc> [owner <npc>] | unshackle <npc> | "
-    "cage|uncage <npc> [cage] | shopstock <trader> | trade <buyer> <trader> <item> | "
+    "cage|uncage <npc> [cage] | shopstock <trader> [radius <m>] | trade <buyer> <trader> <item> [radius <m>] | "
     "eat <npc> <food> | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "power <building> on|off|charge [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | "

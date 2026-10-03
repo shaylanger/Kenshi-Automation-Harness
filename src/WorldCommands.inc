@@ -479,13 +479,15 @@ void InventoryItems(Inventory *inv, std::vector<Item *> &out) {
 }
 
 // A trader's goods: her own inventory, plus storage in her shop (buildings
-// within 30 of her that belong to her faction: Kenshi keeps shop stock there).
-void CollectShopSources(GameWorld *world, Character *trader, std::vector<ShopSource> &out) {
+// within `radius` of her that belong to her faction: Kenshi keeps shop stock
+// there; traders walk around their shops, so the default is 60).
+void CollectShopSources(GameWorld *world, Character *trader, float radius,
+                        std::vector<ShopSource> &out) {
   ShopSource own = {trader->getName() + " (carried)", trader->getInventory()};
   out.push_back(own);
   Faction *fac = trader->getFaction();
   lektor<RootObject *> nearby;
-  world->getObjectsWithinSphere(nearby, trader->getPosition(), 30.0f, BUILDING, 256, nullptr);
+  world->getObjectsWithinSphere(nearby, trader->getPosition(), radius, BUILDING, 256, nullptr);
   for (uint32_t i = 0; i < nearby.size(); ++i) {
     Building *b = dynamic_cast<Building *>(nearby.stuff[i]);
     if (!Valid(b))
@@ -798,9 +800,12 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
           " away) state=" + Int((int)c->inSomething) + " (0 nothing, 1 bed, 2 prison)";
     return true;
   }
-  if (cmd == "shopstock") { // shopstock <trader>: goods for sale (own + shop storage)
+  if (cmd == "shopstock") { // shopstock <trader> [radius <m>]: goods for sale (own + shop storage)
+    float radius = 0;
+    if (!ParseSearchRadius(f, 3, 0, kDefaultShopRadius, radius, out, kMaxShopRadius))
+      return true;
     std::vector<ShopSource> sources;
-    CollectShopSources(world, c, sources);
+    CollectShopSources(world, c, radius, sources);
     out = c->getName() + " trader=" + (c->isATrader() ? "1" : "0") + " money=" + Int(c->getMoney());
     for (size_t i = 0; i < sources.size(); ++i) {
       out += " || " + sources[i].name + ":";
@@ -813,18 +818,21 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
     ok = true;
     return true;
   }
-  if (cmd == "trade") { // trade <buyer> <trader> <item>: buy through the game's purchase path
+  if (cmd == "trade") { // trade <buyer> <trader> <item> [radius <m>]: buy through the game's purchase path
     if (f.size() < 5) {
-      out = "usage: trade <buyer> <trader> <item>";
+      out = "usage: trade <buyer> <trader> <item> [radius <m>]";
       return true;
     }
+    float radius = 0;
+    if (!ParseSearchRadius(f, 5, 0, kDefaultShopRadius, radius, out, kMaxShopRadius))
+      return true;
     Character *trader = FindCharacter(world, f[3]);
     if (!trader) {
       out = "no character named: " + f[3];
       return true;
     }
     std::vector<ShopSource> sources;
-    CollectShopSources(world, trader, sources);
+    CollectShopSources(world, trader, radius, sources);
     const std::string wanted = Lower(f[4]);
     Item *item = nullptr;
     Inventory *from = nullptr;
