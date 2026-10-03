@@ -32,9 +32,10 @@ Built-in commands:
   transfer <from npc> <to npc> <item> | craftfinish <npc> <item> [at <bench>]
   packput <npc> <pack> <item> [n] | packweight <npc> <pack>
   order <npc> <task> [target <npc>] [building <b>] [keep] | tasks [filter] | fight <a> <b>
-  job <npc> <building> [task <t>] | jobs|clearjobs <npc>
-  buildings [radius] [filter] [near <npc>] | building <name> | time
-  power <building> on|off|charge | fill <building> <item> [n] [section <s>]
+  job <npc> <building> [task <t>] [radius <m>] | jobs|clearjobs <npc>
+  buildings [radius] [filter] [near <npc>] | building <name> [radius] | time
+  power <building> on|off|charge [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>]
+  (radius: building searches, default 300, max 5000)
   setname <npc> <name> | faction <npc> <faction> | sleep <npc> [bed <b>] | wake <npc>
   damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | eat <npc> <food>
   shackle|unshackle <npc> | cage|uncage <npc> [cage] | shopstock <trader>

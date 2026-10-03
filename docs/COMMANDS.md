@@ -65,7 +65,7 @@ Everything else needs a loaded game.
 | `packput <npc> <pack> <item> [n]` | create items directly inside a backpack the npc owns |
 | `packweight <npc> <pack>` | a backpack's equipped state, raw content weight and total weight |
 | `craftfinish <npc> <item> [at <bench>]` | queue a craft of the item at the nearest crafting bench (within 300; `at` = part of the bench name) and run the bench's real finish step with the npc as crafter (mods hooking it see a real craft); reports what reached the bench output. A repeat needs room in the output |
-| `benches [radius] [crafts]` | crafting benches nearby: queue (first craft and its progress), missing materials (`needs:`), number of available crafts (`crafts` lists them), inventory sections (sizes, limits, items with grid position) |
+| `benches [radius] [crafts]` | crafting benches within `radius` (default 300, max 5000; also `radius <m>`): queue (first craft and its progress), missing materials (`needs:`), number of available crafts (`crafts` lists them), inventory sections (sizes, limits, items with grid position) |
 | `craft <npc> <item> [at <bench>] [count n]` | a **real** craft: queues the item from the bench's own craft menu (the game picks the material/grade) and gives the npc the bench as a job. Then supply materials (give them to the npc: workers carry them in; generic storage chests weren't used) and run the game (`speed`); `benches` shows progress. Works for weapons too |
 | `research <name>` | complete a research entry (TEST ONLY cheat; `find research <text>` lists names). Weapon crafting needs e.g. `Basic Weapon Smithing`, `Basic Weapon Grades` and the weapon type (`Katanas`) |
 | `blueprint <item>` | complete the research the game links to crafting that item (`getBlueprintsFor`); for weapons it finds nothing, use `research` |
@@ -77,18 +77,20 @@ Everything else needs a loaded game.
 | `order <npc> <task> [target <npc>] [building <name>] [keep]` | give a real AI order, any of the game's 291 tasks by name or number (`FIRST_AID_ORDER`, `LIFT_PERSON_PLAYER_ORDER`, `PUT_IN_CAGE`, `LOOT_TARGET`, `USE_BED_ORDER`, `CHAIN_TARGET`…); `keep` adds instead of replacing orders |
 | `tasks [filter]` | list task names with their numbers |
 | `fight <a> <b>` | make two characters of different factions fight (their factions go to -100, both get an attack order) |
-| `job <npc> <building> [task <name>]` | add a permanent job at a building (default: the building's own job, e.g. OPERATE_MACHINERY) |
+| `job <npc> <building> [task <name>] [radius <m>]` | add a permanent job at the nearest matching building within `radius` of the npc (default 300, max 5000) (default task: the building's own job, e.g. OPERATE_MACHINERY) |
 | `jobs <npc>` / `clearjobs <npc>` | list / remove permanent jobs |
 
 ### Buildings and time
 
 | Command | Does |
 |---|---|
-| `buildings [radius] [filter] [near <npc>]` | buildings nearby with owner faction and whether they have an inventory |
-| `building <name>` (alias `production`) | power (on, has power, battery, output), production (product, quantity, state, inputs), farm state, inventory sections |
-| `power <building> on\|off\|charge` | switch power; `charge` fills a battery |
-| `fill <building> <item> [n] [section <name>]` | put items into a building's inventory (inputs, storage); reports how many fitted |
+| `buildings [radius] [filter] [near <npc>]` | buildings within `radius` (default 100, max 5000; at most 60 listed, use a filter for big radii) with owner faction and whether they have an inventory |
+| `building <name> [radius]` (alias `production`) | the nearest matching building within `radius` of the player (default 300, max 5000; also `radius <m>`): power (on, has power, battery, output), production (product, quantity, state, inputs), farm state, inventory sections |
+| `power <building> on\|off\|charge [radius <m>]` | switch power; `charge` fills a battery |
+| `fill <building> <item> [n] [section <name>] [radius <m>]` | put items into a building's inventory (inputs, storage); reports how many fitted |
 | `time` | game hours, day, time of day, speed |
+
+Building names match the nearest exact name, else the nearest name containing the text. `radius` is above 0 and at most 5000; anything else is refused.
 
 Client side: `kah wait-game <minutes> [timeout_s]` waits for game time to pass.
 

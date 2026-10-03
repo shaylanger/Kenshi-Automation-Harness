@@ -69,8 +69,8 @@ T *FindBuildingT(GameWorld *world, const Ogre::Vector3 &at, const std::string &n
 }
 
 Building *FindBuilding(GameWorld *world, const Ogre::Vector3 &at, const std::string &name,
-                       float &dist) {
-  return FindBuildingT<Building>(world, at, name, 300.0f, dist);
+                       float radius, float &dist) {
+  return FindBuildingT<Building>(world, at, name, radius, dist);
 }
 
 std::string BuildingInfo(Building *b, const Ogre::Vector3 &origin) {
@@ -282,15 +282,17 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     ok = true;
     return true;
   }
-  if (cmd == "building" || cmd == "production") { // building <name>: state, power, production, inventory
+  if (cmd == "building" || cmd == "production") { // building <name> [radius]: state, power, production, inventory
     if (f.size() < 3) {
-      out = "usage: " + cmd + " <building name>";
+      out = "usage: " + cmd + " <building name> [radius]";
       return true;
     }
-    float dist = 0;
-    Building *b = FindBuilding(world, origin, f[2], dist);
+    float radius = 0, dist = 0;
+    if (!ParseSearchRadius(f, 3, 3, kDefaultSearchRadius, radius, out))
+      return true;
+    Building *b = FindBuilding(world, origin, f[2], radius, dist);
     if (!b) {
-      out = "no building matching '" + f[2] + "' within 300 of the player";
+      out = "no building matching '" + f[2] + "' within " + Num(radius) + " of the player";
       return true;
     }
     ok = true;
@@ -298,7 +300,9 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     return true;
   }
   if (cmd == "buildings") { // buildings [radius] [filter] [near <npc>]
-    float radius = f.size() >= 3 ? (float)atof(f[2].c_str()) : 100.0f;
+    float radius = 0;
+    if (!ParseSearchRadius(f, f.size(), 2, 100.0f, radius, out)) // positional only
+      return true;
     const std::string filter = f.size() >= 4 && Lower(f[3]) != "near" ? Lower(f[3]) : "";
     Ogre::Vector3 at = origin;
     const std::string nearName = Option(f, 3, "near", "");
@@ -344,15 +348,17 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     out = Int(n) + " buildings within " + Num(radius) + ":" + out;
     return true;
   }
-  if (cmd == "power") { // power <building> on|off|charge
+  if (cmd == "power") { // power <building> on|off|charge [radius <m>]
     if (f.size() < 4) {
-      out = "usage: power <building> on|off|charge";
+      out = "usage: power <building> on|off|charge [radius <m>]";
       return true;
     }
-    float dist = 0;
-    Building *b = FindBuilding(world, origin, f[2], dist);
+    float radius = 0, dist = 0;
+    if (!ParseSearchRadius(f, 4, 0, kDefaultSearchRadius, radius, out))
+      return true;
+    Building *b = FindBuilding(world, origin, f[2], radius, dist);
     if (!b) {
-      out = "no building matching '" + f[2] + "' within 300 of the player";
+      out = "no building matching '" + f[2] + "' within " + Num(radius) + " of the player";
       return true;
     }
     const std::string what = Lower(f[3]);
@@ -374,15 +380,17 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     out = BuildingInfo(b, origin);
     return true;
   }
-  if (cmd == "fill") { // fill <building> <item> [n] [section <name>]: put items in a building
+  if (cmd == "fill") { // fill <building> <item> [n] [section <name>] [radius <m>]: put items in a building
     if (f.size() < 4) {
-      out = "usage: fill <building> <item> [n] [section <name>]";
+      out = "usage: fill <building> <item> [n] [section <name>] [radius <m>]";
       return true;
     }
-    float dist = 0;
-    Building *b = FindBuilding(world, origin, f[2], dist);
+    float radius = 0, dist = 0;
+    if (!ParseSearchRadius(f, 4, 0, kDefaultSearchRadius, radius, out))
+      return true;
+    Building *b = FindBuilding(world, origin, f[2], radius, dist);
     if (!b) {
-      out = "no building matching '" + f[2] + "' within 300 of the player";
+      out = "no building matching '" + f[2] + "' within " + Num(radius) + " of the player";
       return true;
     }
     Inventory *inv = b->getInventory();
@@ -582,15 +590,17 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
           "] fight (factions set to -100)";
     return true;
   }
-  if (cmd == "job") { // job <npc> <building> [task <name>]: add a permanent job
+  if (cmd == "job") { // job <npc> <building> [task <name>] [radius <m>]: add a permanent job
     if (f.size() < 4) {
-      out = "usage: job <npc> <building> [task <name>]";
+      out = "usage: job <npc> <building> [task <name>] [radius <m>]";
       return true;
     }
-    float dist = 0;
-    Building *b = FindBuildingT<Building>(world, c->getPosition(), f[3], 300.0f, dist);
+    float radius = 0, dist = 0;
+    if (!ParseSearchRadius(f, 4, 0, kDefaultSearchRadius, radius, out))
+      return true;
+    Building *b = FindBuildingT<Building>(world, c->getPosition(), f[3], radius, dist);
     if (!b) {
-      out = "no building matching '" + f[3] + "' within 300 of " + c->getName();
+      out = "no building matching '" + f[3] + "' within " + Num(radius) + " of " + c->getName();
       return true;
     }
     TaskType task = b->getDefaultTask();

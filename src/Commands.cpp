@@ -5,6 +5,7 @@
 #define NOMINMAX // OgreRoot.h uses std::min/max
 #endif
 #include "Harness.h"
+#include "SearchRadius.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -420,7 +421,7 @@ int CountArg(const std::vector<std::string> &f, size_t at) {
   if (f.size() <= at)
     return 1;
   const std::string v = Lower(f[at]);
-  if (v == "at" || v == "near")
+  if (v == "at" || v == "near" || v == "section" || v == "radius")
     return 1;
   return atoi(f[at].c_str());
 }
@@ -488,12 +489,12 @@ const char *const kHelp =
     "attack <attacker> <target> | money <npc> <delta> | buy <buyer> <seller> <item> <price> | "
     "give <npc> <item> [n] | relation <npc> <-100..100> | "
     "order <npc> <task> [target <npc>] [building <name>] [keep] | tasks [filter] | fight <a> <b> | "
-    "job <npc> <building> [task <name>] | jobs|clearjobs <npc> | setname <npc> <name> | "
+    "job <npc> <building> [task <name>] [radius <m>] | jobs|clearjobs <npc> | setname <npc> <name> | "
     "faction <npc> <faction> | sleep <npc> [bed <name>] | wake <npc> | "
     "damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | shackle <npc> [owner <npc>] | unshackle <npc> | "
     "cage|uncage <npc> [cage] | shopstock <trader> | trade <buyer> <trader> <item> | "
-    "eat <npc> <food> | time | buildings [radius] [filter] [near <npc>] | building <name> | "
-    "power <building> on|off|charge | fill <building> <item> [n] [section <s>] | "
+    "eat <npc> <food> | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
+    "power <building> on|off|charge [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | "
     "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "
     "packweight <npc> <pack> | craftfinish <npc> <item> [at <bench>]. "
@@ -796,8 +797,11 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     return "spawned " + Int(made) + "/" + Int(count) + " " + charData->name + ": " + names;
   }
 
-  if (cmd == "benches") { // benches [radius]: crafting benches, their queue and inventory
-    float radius = f.size() >= 3 && Lower(f[2]) != "crafts" ? (float)atof(f[2].c_str()) : 300.0f;
+  if (cmd == "benches") { // benches [radius] [crafts]: crafting benches, their queue and inventory
+    float radius = 0;
+    std::string radiusError;
+    if (!ParseSearchRadius(f, 2, 2, kDefaultSearchRadius, radius, radiusError))
+      return radiusError;
     lektor<RootObject *> nearby;
     world->getObjectsWithinSphere(nearby, origin, radius, BUILDING, 512, nullptr);
     std::string out;
