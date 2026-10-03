@@ -121,7 +121,7 @@ Client side: `kah wait-game <minutes> [timeout_s]` waits for game time to pass.
 | `click <widget name or caption>` | fire a widget's click (e.g. `click INV` opens the inventory) |
 | `messages [n]` | the last on-screen player messages since launch |
 | `screenshot [name]` | the game's own frame, HUD and windows included, to `shots/<name>.png` in the mod folder |
-| `fps [reset]` | frame rate measured by the harness's own frame listener (QueryPerformanceCounter, every Ogre frame) since launch or the last reset: `avg=<fps> min=<fps> worst_ms=<longest frame> frames=<n> seconds=<s>`; `reset` returns the numbers and starts a new window. Works in every phase (loading screens and pauses count too, so reset after `wait-world`) |
+| `fps [reset]` | frame rate measured by the harness's own frame callback (QueryPerformanceCounter, every frame; in Kenshi that is MyGUI's frame event, Ogre's frameStarted does not fire; harness.log gets `KAH: fps frames=<n> source=… window: …` every 600 frames) since launch or the last reset: `avg=<fps> min=<fps> worst_ms=<longest frame> frames=<n> seconds=<s>`; `reset` returns the numbers and starts a new window. Works in every phase (loading screens and pauses count too, so reset after `wait-world`) |
 
 ### Scenario runner (client side)
 

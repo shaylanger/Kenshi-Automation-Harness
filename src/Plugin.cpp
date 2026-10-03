@@ -243,11 +243,29 @@ void MeasureFrame() {
   g_lastFrame = now;
 }
 
+// Per-frame work (fps timing, production sampling). Run m13: in Kenshi only
+// the MyGUI frame event fires, Ogre's frameStarted never did, so timing fed
+// from there stayed at 0 frames. Both sources call this; once Ogre frames
+// are seen they win and the MyGUI ones are skipped (no double counting).
+bool g_ogreFrames = false;
+long long g_framesSinceLaunch = 0;
+
+void FrameWork(bool fromOgre) {
+  if (fromOgre)
+    g_ogreFrames = true;
+  else if (g_ogreFrames)
+    return;
+  MeasureFrame();
+  SampleProduction(ou);
+  if (++g_framesSinceLaunch % 600 == 0)
+    Log("KAH: fps frames=" + Int(g_framesSinceLaunch) + " source=" + (fromOgre ? "ogre" : "mygui") +
+        " window: " + g_frameStats.Report());
+}
+
 class AutomationFrameListener : public Ogre::FrameListener {
 public:
   virtual bool frameStarted(const Ogre::FrameEvent &) {
-    MeasureFrame();
-    SampleProduction(ou);
+    FrameWork(true);
     Tick("ogre");
     return true;
   }
@@ -266,7 +284,10 @@ std::string FpsReport(bool reset) {
 
 namespace {
 
-void OnGuiFrame(float) { Tick("mygui"); }
+void OnGuiFrame(float) {
+  FrameWork(false);
+  Tick("mygui");
+}
 
 // On-screen player messages ("X is attacking!", "No room in ... pack"), kept
 // so tests can check them: both GameWorld::showPlayerAMessage variants.
