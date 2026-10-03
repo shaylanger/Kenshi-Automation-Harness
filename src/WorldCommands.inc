@@ -268,18 +268,25 @@ bool RunAnyPhaseCommand(const std::vector<std::string> &f, bool &ok, std::string
 // Buildings made by "build" this session (unbuild only removes these).
 std::vector<hand> g_built;
 
-// Ground height at x,z; `fallback` when the terrain query gives nothing
-// usable (not loaded, NaN, or far off the reference height).
-float GroundHeight(float x, float z, float fallback) {
-  float h = fallback;
+// Terrain height at x,z; false when the query gives nothing usable.
+bool TerrainHeight(float x, float z, float &h) {
   try {
     h = UtilityT::getTerrainHeight(x, z);
   } catch (...) {
-    return fallback;
+    return false;
   }
-  if (!(h == h) || fabs(h - fallback) > 100.0f)
-    return fallback;
-  return h;
+  return h == h && fabs(h) < 1.0e6f;
+}
+
+float HorizontalDistance(const Ogre::Vector3 &a, const Ogre::Vector3 &b) {
+  const float dx = a.x - b.x, dz = a.z - b.z;
+  return sqrt(dx * dx + dz * dz);
+}
+
+Building *CreateBuilding(GameWorld *world, GameData *data, const Ogre::Vector3 &pos, Faction *owner) {
+  return world->theFactory->createBuilding(data, pos, nullptr, owner, Ogre::Quaternion::IDENTITY,
+                                           nullptr, nullptr, nullptr, nullptr, nullptr, false, true,
+                                           false, 0, false);
 }
 
 bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const Ogre::Vector3 &origin,
@@ -307,27 +314,51 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
       pos = n->getPosition();
       pos.x += a.dist;
     }
-    pos.y = GroundHeight(pos.x, pos.z, pos.y);
     Faction *owner = a.faction.empty() ? world->player->getFaction() : FindFaction(world, a.faction);
     if (!Valid(owner)) {
       out = "no faction named: " + a.faction;
       return true;
     }
-    Building *b = world->theFactory->createBuilding(data, pos, nullptr, owner,
-                                                    Ogre::Quaternion::IDENTITY, nullptr, nullptr,
-                                                    nullptr, nullptr, nullptr, false, true, false, 0,
-                                                    false);
+    // Target height: the npc's (or the given) y, or the terrain there when
+    // that is within 20 of it. Run m9: the factory adds the terrain height to
+    // the y it gets (a bed asked for at y 641 stood at 1283), so the y passed
+    // is the wanted height minus the terrain height, and the result is
+    // checked: if it is still off by more than 5, it is rebuilt once with
+    // the measured offset taken out.
+    const float wantY = pos.y;
+    float terrain = 0;
+    const bool haveTerrain = TerrainHeight(pos.x, pos.z, terrain);
+    const float targetY = haveTerrain && fabs(terrain - wantY) <= 20.0f ? terrain : wantY;
+    pos.y = haveTerrain ? targetY - terrain : targetY;
+    Building *b = CreateBuilding(world, data, pos, owner);
     if (!Valid(b)) {
       out = "the game could not create " + data->name;
       return true;
     }
+    std::string note;
+    float offBy = b->getPosition().y - targetY;
+    if (fabs(offBy) > 5.0f) {
+      Log("KAH: build " + data->name + " off by " + Num(offBy) + " in height, rebuilding");
+      world->destroy(b, false, "KAH build height fix");
+      pos.y -= offBy;
+      b = CreateBuilding(world, data, pos, owner);
+      if (!Valid(b)) {
+        out = "the game could not create " + data->name + " (second try for the height)";
+        return true;
+      }
+      note = " (rebuilt once: first try was " + Num(offBy) + " off in height)";
+      offBy = b->getPosition().y - targetY;
+      if (fabs(offBy) > 5.0f)
+        note += " WARNING still " + Num(offBy) + " off the target height " + Num(targetY);
+    }
     g_built.push_back(b->getHandle());
     const Ogre::Vector3 bp = b->getPosition();
     ok = true;
-    Log("KAH: build " + b->getName() + " serial=" + Int(b->getHandle().serial));
+    Log("KAH: build " + b->getName() + " serial=" + Int(b->getHandle().serial) + " y=" + Num(bp.y) +
+        " target=" + Num(targetY) + " terrain=" + (haveTerrain ? Num(terrain) : std::string("?")));
     out = "built " + b->getName() + " serial=" + Int(b->getHandle().serial) + " pos=" + Num(bp.x) +
           "," + Num(bp.y) + "," + Num(bp.z) + " [" + owner->getName() + "] dist=" +
-          Num(bp.distance(origin));
+          Num(bp.distance(origin)) + note;
     return true;
   }
   if (cmd == "unbuild") { // unbuild <name> [radius]: destroy the nearest building "build" made
@@ -351,7 +382,7 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
       }
       if (!Valid(b))
         continue;
-      const float d = b->getPosition().distance(origin);
+      const float d = HorizontalDistance(b->getPosition(), origin); // x,z only
       if (d > radius || Lower(b->getName()).find(wanted) == std::string::npos)
         continue;
       if (!best || d < bestDist) {
