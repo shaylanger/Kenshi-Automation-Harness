@@ -38,7 +38,7 @@ Everything else needs a loaded game.
 | `save <name>` | save the game |
 | `speed <0\|0.5..50>` | game speed; 0 pauses |
 | `chars [radius]` | characters within radius (default 100) of the player |
-| `traders [radius]` | characters the game itself treats as traders (`isATrader`), default radius 300 |
+| `traders [radius]` | characters the game itself treats as traders (`isATrader`), default radius 300; shop keepers in towns, or spawn a trader squad such as `"Skeleton Traders Animals" "Traders Guild"` (a lone "Trader" character doesn't count) |
 | `find <character\|squad\|item\|weapon\|armour\|container> <text>` | look up game data by name |
 | `spawn <template> <faction> [near <npc> \| at x y z] [count n] [dist m] [target <npc>] [size <mult>]` | spawn characters, or a squad template (`target`: the squad's AI goes for that character; `size`: scale the squad) |
 | `stash <item> <n> [near <npc>]` | put items into the nearest storage chest |
