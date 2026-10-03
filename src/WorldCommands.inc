@@ -999,11 +999,16 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
     Inventory *buyerInv = c->getInventory();
     Inventory *traderInv = trader->getInventory();
     std::vector<std::string> problems;
+    std::string steps; // what happened, in order (reply + harness.log)
     // Shop storage (counters, barrels) is not something the game sells from:
-    // its items have no price (value 0) and buyItem there pays nobody (run m9).
-    // The trader's own inventory is what the trade window sells, so the item
-    // moves there first (the trader "takes it from the shelf"), then the
-    // normal purchase runs: price and payment come from the trader.
+    // its items read value 0 and buyItem there pays nobody (run m9). The
+    // trader's own inventory is what the trade window sells, so the item moves
+    // there first (the trader "takes it from the shelf"), then the normal
+    // purchase runs. If the game still prices it at 0 (run m10: armour made
+    // by fill/give), or the move equipped it on the trader, or buyItem
+    // refuses, the item is sold by hand: taken out, the buyer pays the
+    // fallback price (game value, else average price, else game data value),
+    // the trader gets the cats, the item goes to the buyer.
     Inventory *storage = nullptr;
     if (from != traderInv) {
       if (!Valid(traderInv)) {
@@ -1024,8 +1029,7 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
       storage = from;
       from = traderInv;
       // A stackable item may merge into a stack the trader has: find what
-      // is there now (the moved instance if it still exists, else the stack)
-      // without touching `moved` itself.
+      // is there now (the moved instance if it still exists, else the stack).
       item = nullptr;
       std::vector<Item *> held;
       InventoryItems(traderInv, held);
@@ -1040,26 +1044,72 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
               trader->getName();
         return true;
       }
+      steps += " moved " + fromName + " -> " + trader->getName() + " (section '" +
+               item->inventorySection + "'" + (item->isEquipped ? ", equipped" : "") + ")";
     }
-    const int price = item->getValueSingle(true);
-    if (price <= 0)
-      problems.push_back("the game prices it at 0");
-    const int countBefore = (Valid(buyerInv) && itemData) ? CountAllSections(buyerInv, itemData) : 0;
-    Item *bought = from->buyItem(item, c);
-    ok = Valid(bought);
-    if (!ok) {
-      problems.push_back("buyItem refused (not enough cats? buyer " + Int(c->getMoney()) + ")");
-      if (storage) { // put it back on the shelf
-        Item *back = traderInv->removeItemDontDestroy_returnsItem(item, 1, true);
-        if (Valid(back) && !storage->addItem(back, 1, false, false))
-          traderInv->addItem(back, 1, false, true);
+    int price = item->getValueSingle(true);
+    int fallbackPrice = price;
+    if (price <= 0) {
+      // Why the game says 0: the item's own numbers.
+      std::string diag = "the game prices it at 0 (level=" + Int(item->getLevel()) +
+                         " quality=" + Num(item->quality) +
+                         " material=" + (Valid(item->materialData) ? item->materialData->name : std::string("-")) +
+                         " maker=" + (Valid(item->manufacturerData) ? item->manufacturerData->name : std::string("-")) +
+                         " stolen=" + (item->isStolen(false) ? "1" : "0");
+      const int avg = item->getAvgPrice();
+      int dataValue = 0;
+      if (Valid(itemData)) {
+        try {
+          if (itemData->idata.find("value") != itemData->idata.end())
+            dataValue = itemData->idata.find("value")->second;
+        } catch (...) {
+          dataValue = 0;
+        }
       }
+      diag += " avg_price=" + Int(avg) + " data_value=" + Int(dataValue) + ")";
+      problems.push_back(diag);
+      fallbackPrice = avg > 0 ? avg : (dataValue > 0 ? dataValue : 0);
+    }
+    const int countBefore = (Valid(buyerInv) && itemData) ? CountAllSections(buyerInv, itemData) : 0;
+    Item *bought = nullptr;
+    bool manual = item->isEquipped || price <= 0;
+    if (!manual) {
+      bought = from->buyItem(item, c);
+      if (!Valid(bought)) {
+        problems.push_back("buyItem refused (buyer cats " + Int(c->getMoney()) + ", price " + Int(price) + ")");
+        manual = true;
+      }
+    }
+    if (manual) {
+      if (c->getMoney() < fallbackPrice) {
+        problems.push_back("buyer can't afford " + Int(fallbackPrice));
+      } else if (Valid(item) && item->isEquipped && !storage) {
+        problems.push_back("the trader wears it");
+      } else {
+        Item *taken = from->removeItemDontDestroy_returnsItem(item, 1, true);
+        if (Valid(taken)) {
+          c->takeMoney(fallbackPrice);
+          trader->takeMoney(-fallbackPrice);
+          bought = taken;
+          price = fallbackPrice;
+          steps += " sold by hand for " + Int(fallbackPrice);
+        } else {
+          problems.push_back("could not take it out of " + trader->getName() + "'s inventory");
+        }
+      }
+    }
+    ok = Valid(bought);
+    if (!ok && storage) { // put it back on the shelf
+      Item *back = traderInv->removeItemDontDestroy_returnsItem(item, 1, true);
+      if (Valid(back) && !storage->addItem(back, 1, false, false))
+        traderInv->addItem(back, 1, false, true);
+      steps += " returned to " + fromName;
     }
     // buyItem takes the money and hands the item back detached (no inventory, not on the
     // ground): place it like the trade window does, into the buyer's inventory or at her feet.
     // giveItem refuses when the matching equipment slot is taken, so the plain inventory
     // add (dropping at her feet when full) is the fallback.
-    std::string placed = "already";
+    std::string placed = ok ? "already" : "-";
     if (ok && !bought->isInInventory && !bought->_isPhysical) {
       bool given = false;
       try {
@@ -1089,16 +1139,16 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
       problems.push_back("nothing arrived in the buyer's inventory");
     std::string why;
     for (size_t i = 0; i < problems.size(); ++i)
-      why += (i ? "; " : " problems: ") + problems[i];
+      why += std::string(i ? "; " : " problems: ") + problems[i];
     const std::string source = storage ? fromName + " via " + trader->getName() : fromName;
     Log("KAH: trade " + c->getName() + " <- " + trader->getName() + " (" + source + ") " + itemName +
         " ok=" + (ok ? "1" : "0") + " placed=" + placed + " arrived=" + Int(arrived) + " buyer " +
         Int(buyerBefore) + " -> " + Int(c->getMoney()) + " trader " + Int(traderBefore) + " -> " +
-        Int(trader->getMoney()) + why);
+        Int(trader->getMoney()) + " steps:" + steps + why);
     out = std::string(ok ? "bought " : "trade failed: ") + itemName + " from " + source +
-          " (value " + Int(price) + ") arrived=" + Int(arrived) + " placed=" + placed + ", buyer cats " +
+          " (price " + Int(price) + ") arrived=" + Int(arrived) + " placed=" + placed + ", buyer cats " +
           Int(buyerBefore) + " -> " + Int(c->getMoney()) + ", trader cats " + Int(traderBefore) + " -> " +
-          Int(trader->getMoney()) + why;
+          Int(trader->getMoney()) + " steps:" + (steps.empty() ? std::string(" buyItem") : steps) + why;
     return true;
   }
   if (cmd == "eat") { // eat <npc> <food item in inventory>
