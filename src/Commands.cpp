@@ -9,6 +9,7 @@
 #include "BuildArgs.h"
 #include "CharacterRef.h"
 #include "ProductionCounter.h"
+#include "ImportFlags.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -39,6 +40,7 @@
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/SaveManager.h>
+#include <kenshi/SaveInfo.h>
 #include <kenshi/Town.h>
 #include <kenshi/util/hand.h>
 #include <kenshi/util/UtilityT.h>
@@ -591,10 +593,10 @@ const char *const kBuiltins[] = {
     "tasks", "ui", "click", "messages", "screenshot", "time", "building", "production",
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
-    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever"};
+    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "newgame", "import"};
 
 const char *const kHelp =
-    "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
+    "built-in: help | status | load <save> | save <name> | newgame <start> | import <save> [flags] | speed <0|0.5..50> | "
     "chars [radius] | traders [radius] | benches [radius] [crafts] | research <name> | research start|stop <name> | research status | "
     "blueprint <item> | craft <npc> <item> [at <bench>] [count n] | find <character|squad|item|weapon|armour|container> <text> | "
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
@@ -765,6 +767,68 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     return "loading " + f[2];
   }
 
+  if (cmd == "newgame") { // newgame <start name|sid>: the game's New Game with that start (KAH 21)
+    if (f.size() < 3 || f[2].empty())
+      return "usage: newgame <start name|sid> (find start <text> lists starts)";
+    if (!Valid(world))
+      return "the game is not ready yet (phase=starting)";
+    SaveManager *sm = SaveManager::getSingleton();
+    if (!Valid(sm))
+      return "no SaveManager";
+    std::string error;
+    GameData *start = FindData(world, NEW_GAME_STARTOFF, f[2], error);
+    if (!start)
+      return error;
+    Log("KAH: newgame start=" + start->name + " (" + start->stringID + ") phase=" + Phase(world));
+    sm->newGame(start->stringID);
+    g_loadedSave = "newgame:" + start->name;
+    g_loadPending = true;
+    g_loadSawEmpty = false;
+    g_loadStarted = GetTickCount();
+    g_loadOldLeader = FirstPlayerCharacter(world);
+    ok = true;
+    return "starting a new game: " + start->name + " (" + start->stringID + "); wait-world, then status";
+  }
+
+  if (cmd == "import") { // import <save> [squad,buildings,research,npcs,relations,reset]: the game's Import (KAH 21)
+    if (f.size() < 3 || f[2].empty())
+      return "usage: import <save> [flags: squad,buildings,research,npcs,relations,reset | all]";
+    SaveManager *sm = SaveManager::getSingleton();
+    if (!Valid(sm))
+      return "no SaveManager";
+    int flags = SaveManager::IMPORT_SQUAD | SaveManager::IMPORT_BUILDINGS | SaveManager::IMPORT_RESEARCH |
+                SaveManager::IMPORT_NPC_STATES | SaveManager::IMPORT_RELATIONS;
+    if (f.size() >= 4) {
+      std::string bad;
+      const int parsed = ParseImportFlags(f[3], bad);
+      if (parsed < 0)
+        return "unknown import flag: " + bad + " (squad,buildings,research,npcs,relations,reset,all)";
+      flags = parsed;
+    }
+    lektor<SaveInfo> saves;
+    sm->scanGames(saves, false);
+    int at = -1;
+    for (uint32_t i = 0; i < saves.size() && at < 0; ++i)
+      if (saves.stuff[i].name == f[2])
+        at = (int)i;
+    for (uint32_t i = 0; i < saves.size() && at < 0; ++i)
+      if (Lower(saves.stuff[i].name) == Lower(f[2]))
+        at = (int)i;
+    if (at < 0)
+      return "no save named: " + f[2] + " (" + Int(saves.size()) + " saves in " + sm->getSavePath() + ")";
+    Log("KAH: import save=" + saves.stuff[at].name + " flags=" + ImportFlagNames(flags) + " phase=" +
+        Phase(world));
+    sm->import(saves.stuff[at], flags);
+    g_loadedSave = "import:" + saves.stuff[at].name;
+    g_loadPending = true;
+    g_loadSawEmpty = false;
+    g_loadStarted = GetTickCount();
+    g_loadOldLeader = FirstPlayerCharacter(world);
+    ok = true;
+    return "importing " + saves.stuff[at].name + " (" + ImportFlagNames(flags) +
+           ") into the current game; wait-world, then status";
+  }
+
   if (cmd == "save") {
     if (f.size() < 3 || f[2].empty())
       return "usage: save <save name>";
@@ -860,7 +924,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
 
   if (cmd == "find") { // find <character|squad|item|faction> <substring>
     if (f.size() < 4)
-      return "usage: find <character|squad|item|weapon|armour|container|research> <text>";
+      return "usage: find <character|squad|item|weapon|armour|container|research|start> <text>";
     const std::string kind = Lower(f[2]);
     itemType type = kind == "squad" ? SQUAD_TEMPLATE
                     : kind == "item" ? ITEM
@@ -868,6 +932,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
                     : kind == "armour" ? ARMOUR
                     : kind == "container" ? CONTAINER
                     : kind == "research" ? RESEARCH
+                    : kind == "start" ? NEW_GAME_STARTOFF
                                        : CHARACTER;
     std::string error;
     GameData *data = FindData(world, type, f[3], error);
