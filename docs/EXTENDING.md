@@ -84,6 +84,11 @@ static int CmdMyAction(const char *id, int argc, const char *const *argv,
 //   g_kah.complete(request[0].c_str(), ok ? KAH_OK : KAH_ERROR, text.c_str());
 ```
 
+To take the same `<npc>` forms as the built-ins (name, `#serial/index`, `#serial`,
+`@player`, `@selected`), call `api.findCharacter(ref, error, sizeof error)` from your
+handler (game thread): it returns the `Character*` or NULL with the reason in `error`.
+It is NULL with a harness older than 2026-10-03, so check it before use.
+
 A pending command never completed just times out on the client side; a
 `complete` for an unknown or already answered id is ignored (and logged).
 

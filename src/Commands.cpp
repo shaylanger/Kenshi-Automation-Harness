@@ -304,6 +304,8 @@ std::string Describe(Character *c, const Ogre::Vector3 *origin) {
       out += " DEAD";
     else if (c->isUnconcious())
       out += " KO";
+    if (c->isUnique()) // the game's own flag: named, non-template NPC (KAH 13)
+      out += " unique=1";
   } catch (...) {
     out += " (unreadable)";
   }
@@ -461,6 +463,39 @@ Research *Tech(GameWorld *world) {
 }
 
 // A count argument at f[at], unless that field is already an option name.
+// "research status": the queue (progress 0..1 as the game reports it, raw
+// progress, ETA), the research rate, researchers working this frame, the
+// desk level and every research bench with its distance (KAH 14).
+std::string ResearchStatus(GameWorld *world, Research *tech, const Ogre::Vector3 &origin) {
+  std::string out;
+  try {
+    std::deque<ResearchItem, Ogre::STLAllocator<ResearchItem, Ogre::GeneralAllocPolicy> > &q =
+        tech->getResearchQueue();
+    out = "queue=" + Int(q.size());
+    for (size_t i = 0; i < q.size(); ++i) {
+      ResearchItem &it = q[i];
+      if (!Valid(it.data))
+        continue;
+      out += " [" + it.data->name + " progress=" + Num(tech->getResearchProgress(&it)) +
+             " raw=" + Num(it.progress) + " eta=" + OneLine(tech->getETA(it.data, true)) + "]";
+    }
+    out += " rate=" + Num(tech->getCurrentResearchRate()) + " researchers=" + Int(tech->numResearchers) +
+           " desk_level=" + Int(tech->getResearchDeskLevel());
+    lektor<Building *> benches;
+    tech->getAllResearchBenches(benches);
+    out += " benches=" + Int(benches.size());
+    for (uint32_t i = 0; i < benches.size() && i < 8; ++i) {
+      Building *b = benches.stuff[i];
+      if (Valid(b))
+        out += " {" + b->getName() + " dist=" + Num(b->getPosition().distance(origin)) +
+               (b->isPowerOn() ? "" : " power_off") + "}";
+    }
+  } catch (...) {
+    out += " (unreadable)";
+  }
+  return out;
+}
+
 int CountArg(const std::vector<std::string> &f, size_t at) {
   if (f.size() <= at)
     return 1;
@@ -523,7 +558,7 @@ const char *const kBuiltins[] = {
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
-    "chars [radius] | traders [radius] | benches [radius] [crafts] | research <name> | "
+    "chars [radius] | traders [radius] | benches [radius] [crafts] | research <name> | research start|stop <name> | research status | "
     "blueprint <item> | craft <npc> <item> [at <bench>] [count n] | find <character|squad|item|weapon|armour|container> <text> | "
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
     "[size <mult>] | stash <item> <n> [near <npc>] | stat <npc> <stat> | "
@@ -924,10 +959,48 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
 
   if (cmd == "research") { // research <name>: complete a research entry (TEST ONLY cheat)
     if (f.size() < 3)
-      return "usage: research <research name> (find research <text> lists names)";
+      return "usage: research <research name> | research start|stop <name> | research status "
+             "(find research <text> lists names)";
     Research *tech = Tech(world);
     if (!tech)
       return "no player research";
+    const std::string sub = Lower(f[2]);
+    if (sub == "status") { // queue with progress, rate, researchers, benches (KAH 14)
+      ok = true;
+      return ResearchStatus(world, tech, origin);
+    }
+    if ((sub == "start" || sub == "stop") && f.size() >= 4) { // real research at a bench (KAH 14)
+      std::string error;
+      GameData *d = FindData(world, RESEARCH, f[3], error);
+      if (!d)
+        return error;
+      if (sub == "stop") {
+        const bool queued = tech->isInQueue(d);
+        tech->stopResearch(d);
+        ok = queued && !tech->isInQueue(d);
+        Log("KAH: research stop " + d->name + " ok=" + (ok ? "1" : "0"));
+        return d->name + (queued ? (ok ? ": stopped" : ": still queued") : ": was not queued") + " | " +
+               ResearchStatus(world, tech, origin);
+      }
+      if (tech->isFinished(d))
+        return d->name + " is already finished";
+      bool started = tech->isInQueue(d);
+      if (!started)
+        started = tech->startResearch(d);
+      ok = started && tech->isInQueue(d);
+      std::string why;
+      if (!ok) {
+        why = " requirements=" + std::string(tech->checkRequirements(d, false, false) ? "ok" : "missing") +
+              " can_pay=" + (tech->canPayCosts(d) ? "1" : "0") +
+              " paid=" + (tech->hasPaidFor(d) ? "1" : "0") +
+              " needs_bench_level=" + Int(tech->needsATechBench(d)) +
+              " desk_level=" + Int(tech->getResearchDeskLevel()) +
+              " (give the cost items to the bench or squad, build a research bench of that level)";
+      }
+      Log("KAH: research start " + d->name + " ok=" + (ok ? "1" : "0") + why);
+      return d->name + (ok ? ": queued, in progress" : ": NOT started") + why + " | " +
+             ResearchStatus(world, tech, origin);
+    }
     std::string error;
     GameData *d = FindData(world, RESEARCH, f[2], error);
     if (!d)
@@ -1609,4 +1682,27 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   }
 
   return "unknown command: " + cmd;
+}
+
+// For other mods' commands (include/KenshiAutomationHarness.h,
+// api.findCharacter): the harness's own character lookup, so a mod command
+// takes the same <npc> forms as the built-ins (name, #serial/index, #serial,
+// @player, @selected). Game thread only (call it from your command
+// handler). Returns a Character*, or NULL with the reason in error.
+extern "C" __declspec(dllexport) void *KAH_FindCharacter(const char *ref, char *error,
+                                                        int errorSize) {
+  std::string why;
+  Character *c = nullptr;
+  try {
+    c = ref ? FindCharacter(ou, ref) : nullptr;
+    if (!c)
+      why = ref ? NotFound(ref) : "no character reference";
+  } catch (...) {
+    c = nullptr;
+    why = "lookup failed";
+  }
+  if (error && errorSize > 0) {
+    strncpy_s(error, errorSize, why.c_str(), _TRUNCATE);
+  }
+  return c;
 }

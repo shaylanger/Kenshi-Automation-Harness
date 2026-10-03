@@ -18,6 +18,7 @@ Built-in commands:
   benches [radius] [crafts]               crafting benches: queue, needs, craft menu, contents
   craft <npc> <item> [at <bench>] [count n]   real craft worked by <npc> (supply materials, run the game)
   research <name> | blueprint <item>      complete research (test cheat); find research <text>
+  research start|stop <name> | research status   real research at a bench: queue, progress, rate, benches
   find <character|squad|item|weapon|armour|container> <text>
   spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] [size <mult>]
   where|inv|hp|sections|select|recruit|kill <npc>  (inv: inventory JSON incl. worn items;

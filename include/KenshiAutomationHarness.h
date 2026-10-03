@@ -59,6 +59,10 @@ typedef int (*KAH_RegisterCommandFn)(const char *name, const char *usage,
 typedef int (*KAH_RegisterBeforeAttackFn)(KAH_AttackFn fn, void *user);
 typedef void (*KAH_LogFn)(const char *message);
 typedef void (*KAH_CompleteFn)(const char *id, int ok, const char *text);
+/* Character lookup with the harness's own <npc> forms (name, #serial/index,
+ * #serial, @player, @selected); game thread only. Returns a Character* or
+ * NULL with the reason in error (errorSize bytes, may be 0). */
+typedef void *(*KAH_FindCharacterFn)(const char *ref, char *error, int errorSize);
 
 typedef struct KAH_Api {
   int version;
@@ -69,6 +73,8 @@ typedef struct KAH_Api {
   KAH_LogFn log;
   /* Answers a command whose handler returned KAH_PENDING (any thread). */
   KAH_CompleteFn complete;
+  /* Optional: NULL with a harness older than 2026-10-03 (check before use). */
+  KAH_FindCharacterFn findCharacter;
 } KAH_Api;
 
 /* Fills *api and returns 1 when the harness is loaded, else returns 0. */
@@ -90,6 +96,7 @@ static int KAH_Connect(KAH_Api *api) {
       (KAH_RegisterBeforeAttackFn)GetProcAddress(dll, "KAH_RegisterBeforeAttack");
   api->log = (KAH_LogFn)GetProcAddress(dll, "KAH_Log");
   api->complete = (KAH_CompleteFn)GetProcAddress(dll, "KAH_Complete");
+  api->findCharacter = (KAH_FindCharacterFn)GetProcAddress(dll, "KAH_FindCharacter");
   return api->registerCommand && api->registerBeforeAttack && api->log && api->complete ? 1
                                                                                          : 0;
 }

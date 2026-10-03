@@ -49,7 +49,7 @@ Everything else needs a loaded game.
 | `find <character\|squad\|item\|weapon\|armour\|container\|research> <text>` | look up game data by name |
 | `spawn <template> <faction> [near <npc> \| at x y z] [count n] [dist m] [target <npc>] [size <mult>]` | spawn characters, or a squad template (`target`: the squad's AI goes for that character; `size`: scale the squad) |
 | `stash <item> <n> [near <npc>]` | put items into the nearest storage chest |
-| `where <npc>` | name, serial, faction, position, distance, KO/DEAD |
+| `where <npc>` | name, serial, faction, position, distance, KO/DEAD, ` unique=1` for unique (named, non-template) NPCs (the game's `Character::isUnique`; KAH 13; also in `chars` and every character line) |
 | `sections <npc>` | inventory sections (size, equip/container slot) with their items, and the worn backpack |
 | `hp <npc>` | flesh/max per body part, worst part %, blood, KO |
 | `inv <npc>` | inventory incl. worn items and backpack as JSON (works on bodies) |
@@ -75,7 +75,7 @@ Everything else needs a loaded game.
 | `craftfinish <npc> <item> [at <bench>]` | queue a craft of the item at the nearest crafting bench (within 300; `at` = part of the bench name) and run the bench's real finish step with the npc as crafter (mods hooking it see a real craft); reports what reached the bench output. A repeat needs room in the output |
 | `benches [radius] [crafts]` | crafting benches within `radius` (default 300, max 5000; also `radius <m>`): queue (first craft and its progress), missing materials (`needs:`), number of available crafts (`crafts` lists them), inventory sections (sizes, limits, items with grid position) |
 | `craft <npc> <item> [at <bench>] [count n]` | a **real** craft: queues the item from the bench's own craft menu (the game picks the material/grade) and gives the npc the bench as a job. Then supply materials (give them to the npc: workers carry them in; generic storage chests weren't used) and run the game (`speed`); `benches` shows progress. Works for weapons too |
-| `research <name>` | complete a research entry (TEST ONLY cheat; `find research <text>` lists names). Weapon crafting needs e.g. `Basic Weapon Smithing`, `Basic Weapon Grades` and the weapon type (`Katanas`) |
+| `research <name>` | complete a research entry (TEST ONLY cheat; `find research <text>` lists names). Weapon crafting needs e.g. `Basic Weapon Smithing`, `Basic Weapon Grades` and the weapon type (`Katanas`). `research start <name>` (KAH 14) queues it the game's way (`Research::startResearch`), so it shows in progress and advances only while researchers work at a research bench; if it doesn't start, the reply says why (`requirements`, `can_pay`, `paid`, `needs_bench_level`, `desk_level`). `research stop <name>` takes it off the queue. `research status`: `queue=<n> [<name> progress=<0..1> raw=<n> eta=<text>] rate=<research rate> researchers=<n> desk_level=<n> benches=<n> {<bench> dist=<m>}`; start and stop end with the same status |
 | `blueprint <item>` | complete the research the game links to crafting that item (`getBlueprintsFor`); for weapons it finds nothing, use `research` |
 
 ### Orders, fights and jobs
