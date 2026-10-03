@@ -12,8 +12,8 @@ Built-in commands:
   status                                  phase (menu|loading|world), save, speed, squad
   load <save> | save <name>
   speed <0|0.5..50>                       0 pauses
-  chars [radius]                          characters near the player
-  find <character|squad|item|weapon|armour> <text>
+  chars [radius] | traders [radius]       characters near the player | real traders
+  find <character|squad|item|weapon|armour|container> <text>
   spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] [size <mult>]
   where|inv|hp|select|recruit|kill <npc>  (inv: inventory JSON incl. worn items)
   stat <npc> <stat> | setstat <npc> <stat> <value> | weight <npc>
@@ -23,6 +23,8 @@ Built-in commands:
   attack <attacker> <target> | give <npc> <item> [n] | relation <npc> <-100..100>
   money <npc> <delta> | buy <buyer> <seller> <item> <price>
   stash <item> <n> [near <npc>]
+  transfer <from npc> <to npc> <item> | craftfinish <npc> <item>
+  packput <npc> <pack> <item> [n] | packweight <npc> <pack>
 <npc> is a name (exact match nearest the player wins), #serial, @player or @selected.
 
 The harness folder is the installed mod folder (Kenshi\\mods\\AutomationHarness):

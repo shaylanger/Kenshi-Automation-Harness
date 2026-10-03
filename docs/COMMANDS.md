@@ -38,7 +38,8 @@ Everything else needs a loaded game.
 | `save <name>` | save the game |
 | `speed <0\|0.5..50>` | game speed; 0 pauses |
 | `chars [radius]` | characters within radius (default 100) of the player |
-| `find <character\|squad\|item\|weapon\|armour> <text>` | look up game data by name |
+| `traders [radius]` | characters the game itself treats as traders (`isATrader`), default radius 300 |
+| `find <character\|squad\|item\|weapon\|armour\|container> <text>` | look up game data by name |
 | `spawn <template> <faction> [near <npc> \| at x y z] [count n] [dist m] [target <npc>] [size <mult>]` | spawn characters, or a squad template (`target`: the squad's AI goes for that character; `size`: scale the squad) |
 | `stash <item> <n> [near <npc>]` | put items into the nearest storage chest |
 | `where <npc>` | name, serial, faction, position, distance, KO/DEAD |
@@ -59,6 +60,10 @@ Everything else needs a loaded game.
 | `recruit <npc>` | recruit into the player's squad (changes the selection) |
 | `give <npc> <item> [n]` | create items in the inventory (reports how many really arrived) |
 | `relation <npc> <-100..100>` | set the relation between the npc's faction and the player's |
+| `transfer <from npc> <to npc> <item>` | move the same (unequipped) item instance between inventories |
+| `packput <npc> <pack> <item> [n]` | create items directly inside a backpack the npc owns |
+| `packweight <npc> <pack>` | a backpack's equipped state, raw content weight and total weight |
+| `craftfinish <npc> <item>` | finish a craft of the item at the nearest real crafting building (within 300), with the npc as crafter |
 
 Stats: labouring, science, engineering, robotics, weapon_smith, armour_smith,
 crossbow_smith, medic, turrets, farming, cooking, stealth, athletics,
@@ -67,7 +72,10 @@ maxrunspeed, currentrunspeed, encumbrance.
 
 ## Notes
 
-- `give` and `stash` can't create weapons;
-  `find` shows exact names.
+- `give` and `stash` can't create weapons; `find` shows exact names. Items can
+  be named by game-data string ID too (`find` prints `sid=`).
+- `give` of a backpack fails while the character already wears one.
+- `unequip` leaves the item in its equipment section, so `equip` of the same item
+  then fails.
 - Same-faction NPCs ignore `attack` orders against each other.
 - Characters teleported next to a hostile squad get attacked.

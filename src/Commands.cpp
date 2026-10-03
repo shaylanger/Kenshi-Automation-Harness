@@ -9,6 +9,7 @@
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
 #include <kenshi/CharStats.h>
+#include <kenshi/Building/CraftingBuilding.h>
 #include <kenshi/Damages.h>
 #include <kenshi/Faction.h>
 #include <kenshi/FactionRelations.h>
@@ -185,8 +186,13 @@ Item *FindInventoryItem(Character *c, const std::string &wanted, bool &ambiguous
       Item *item = items[i].item;
       if (!Valid(item))
         continue;
-      std::string name;
-      try { name = Lower(item->getName()); } catch (...) { continue; }
+      std::string name, dataId;
+      try {
+        name = Lower(item->getName());
+        if (item->data) dataId = Lower(item->data->stringID);
+      } catch (...) { continue; }
+      if (!dataId.empty() && dataId == needle)
+        return item;
       if (name == needle)
         return item;
       if (name.find(needle) != std::string::npos) {
@@ -203,8 +209,20 @@ std::string DescribeItem(Item *item) {
     return "invalid item";
   std::ostringstream s;
   try {
+    const hand h = item->getHandle();
     s << item->getName()
-      << " handle=" << item->getHandle().toString()
+      << " handle=" << h.toString()
+      << " h.index=" << h.index
+      << " h.serial=" << h.serial
+      << " h.type=" << (int)h.type
+      << " h.container=" << h.container
+      << " h.containerSerial=" << h.containerSerial
+      << " persistent=" << item->persistant.toString()
+      << " properOwner=" << item->properOwner.toString()
+      << " inventoryOwner=" << item->getInventoryWeAreIn().toString()
+      << " invPos=" << item->inventoryPos.x << "," << item->inventoryPos.y
+      << " slotType=" << (int)item->slotType
+      << " objectType=" << (int)item->objectType
       << " base=" << (item->data ? item->data->stringID : "")
       << " section=" << item->inventorySection
       << " equipped=" << (item->isEquipped ? 1 : 0)
@@ -248,6 +266,9 @@ GameData *FindData(GameWorld *world, itemType type, const std::string &name,
       GameData *data = it->second;
       if (!Valid(data))
         continue;
+      const std::string dataId = Lower(data->stringID);
+      if (!dataId.empty() && dataId == wanted)
+        return data;
       std::string dataName = Lower(data->name);
       if (dataName == wanted)
         return data;
@@ -348,18 +369,21 @@ const char *const kBuiltins[] = {
     "help",  "status", "load",     "save",    "speed",  "chars",   "find",  "spawn",
     "stash", "stat",   "setstat",  "weight",  "iteminfo", "equip", "unequip",
     "where", "hp",     "inv",      "teleport", "ko",    "health",  "kill",  "hunger",
-    "attack", "money", "buy",      "select",  "recruit", "give",   "relation"};
+    "attack", "money", "buy",      "select",  "recruit", "give",   "relation",
+    "traders", "transfer", "packput", "packweight", "craftfinish"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
-    "chars [radius] | find <character|squad|item|weapon|armour> <text> | "
+    "chars [radius] | traders [radius] | find <character|squad|item|weapon|armour|container> <text> | "
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
     "[size <mult>] | stash <item> <n> [near <npc>] | stat <npc> <stat> | "
     "setstat <npc> <stat> <value> | weight <npc> | iteminfo|equip|unequip <npc> <item> | "
     "where|hp|inv|select|recruit|kill <npc> | teleport <npc> <npc2 | x y z> [dist m] | "
     "ko <npc> [seconds] | health <npc> <percent> | hunger <npc> <0..300> | "
     "attack <attacker> <target> | money <npc> <delta> | buy <buyer> <seller> <item> <price> | "
-    "give <npc> <item> [n] | relation <npc> <-100..100>. "
+    "give <npc> <item> [n] | relation <npc> <-100..100> | "
+    "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "
+    "packweight <npc> <pack> | craftfinish <npc> <item>. "
     "<npc> = name (exact match nearest the player wins, else nearest substring), "
     "#serial, @player or @selected.";
 
@@ -378,6 +402,7 @@ bool LoadPending() {
     Phase(ou);
   return g_loadPending;
 }
+
 
 std::string Phase(GameWorld *world) {
   if (!Valid(world))
@@ -402,6 +427,7 @@ std::string Phase(GameWorld *world) {
   return inWorld ? "world" : "menu";
 }
 
+
 std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool &ok,
                        bool &pending) {
   ok = false;
@@ -410,6 +436,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
 
   if (HasExtensionCommand(cmd))
     return RunExtensionCommand(f, ok, pending);
+  if (!IsBuiltinCommand(cmd))
+    return "unknown command: " + f[1] + " (help lists them)";
 
   if (cmd == "help") {
     ok = true;
@@ -464,6 +492,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   if (!InWorld(world))
     return "no game loaded (phase=" + Phase(world) + ")";
   Character *player = FirstPlayerCharacter(world);
+  Ogre::Vector3 origin = player->getPosition();
 
   if (cmd == "speed") { // speed <0|0.5..50>: 0 pauses
     float v = f.size() >= 3 ? (float)atof(f[2].c_str()) : -1.0f;
@@ -486,7 +515,6 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     ok = true;
     return "speed " + Num(before) + " -> " + Num(after) + " paused=" + (paused ? "1" : "0");
   }
-  Ogre::Vector3 origin = player->getPosition();
 
   if (cmd == "chars") {
     float radius = f.size() >= 3 ? (float)atof(f[2].c_str()) : 100.0f;
@@ -509,14 +537,40 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     return Int(n) + " within " + Num(radius) + ": " + out;
   }
 
+  if (cmd == "traders") {
+    float radius = f.size() >= 3 ? (float)atof(f[2].c_str()) : 300.0f;
+    std::string out;
+    int n = 0;
+    std::vector<Character *> chars;
+    CollectCharacters(world, origin, radius, chars);
+    for (size_t i = 0; i < chars.size() && n < 40; ++i) {
+      Character *c = chars[i];
+      bool trader = false;
+      try {
+        if (c->getPosition().distance(origin) > radius)
+          continue;
+        trader = c->isATrader();
+      } catch (...) {
+        continue;
+      }
+      if (!trader)
+        continue;
+      out += (n ? " | " : "") + Describe(c, &origin);
+      ++n;
+    }
+    ok = true;
+    return Int(n) + " traders within " + Num(radius) + ": " + out;
+  }
+
   if (cmd == "find") { // find <character|squad|item|faction> <substring>
     if (f.size() < 4)
-      return "usage: find <character|squad|item|weapon|armour> <text>";
+      return "usage: find <character|squad|item|weapon|armour|container> <text>";
     const std::string kind = Lower(f[2]);
     itemType type = kind == "squad" ? SQUAD_TEMPLATE
                     : kind == "item" ? ITEM
                     : kind == "weapon" ? WEAPON
                     : kind == "armour" ? ARMOUR
+                    : kind == "container" ? CONTAINER
                                        : CHARACTER;
     std::string error;
     GameData *data = FindData(world, type, f[3], error);
@@ -606,8 +660,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     if (f.size() >= 6 && Lower(f[4]) == "near" && !ResolvePosition(world, f, 5, at, error))
       return error;
     GameData *data = nullptr;
-    const itemType types[] = {ITEM, WEAPON, ARMOUR};
-    for (int t = 0; t < 3 && !data; ++t)
+    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER};
+    for (int t = 0; t < 4 && !data; ++t)
       data = FindData(world, types[t], f[2], error);
     if (!data)
       return error;
@@ -663,6 +717,140 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   Character *c = FindCharacter(world, f[2]);
   if (!c)
     return "no character named: " + f[2];
+
+  if (cmd == "transfer") { // transfer <from npc> <to npc> <item name|stringID>
+    if (f.size() < 5)
+      return "usage: transfer <from npc> <to npc> <item name|stringID>";
+    Character *to = FindCharacter(world, f[3]);
+    if (!to)
+      return "no target character named: " + f[3];
+    bool ambiguous = false;
+    Item *item = FindInventoryItem(c, f[4], ambiguous);
+    if (ambiguous)
+      return "ambiguous source inventory item: " + f[4];
+    if (!Valid(item))
+      return "no source inventory item matching: " + f[4];
+    if (item->isEquipped)
+      return "refusing to transfer equipped item: " + DescribeItem(item);
+    Inventory *fromInv = c->getInventory();
+    Inventory *toInv = to->getInventory();
+    if (!Valid(fromInv) || !Valid(toInv))
+      return "missing source/target inventory";
+    Item *moved = fromInv->removeItemDontDestroy_returnsItem(item, 1, true);
+    if (!Valid(moved))
+      return "remove-without-destroy failed";
+    bool added = toInv->addItem(moved, 1, false, true);
+    if (!added) {
+      fromInv->addItem(moved, 1, false, true);
+      return "target add failed; item returned to source";
+    }
+    ok = true;
+    Log("KAH: transfer " + c->getName() + " -> " + to->getName() + " " + DescribeItem(moved));
+    return "transferred " + DescribeItem(moved) + " from " + c->getName() + " to " + to->getName();
+  }
+
+  if (cmd == "packput") { // packput <npc> <pack name|stringID> <item name|stringID> [count]
+    if (f.size() < 5)
+      return "usage: packput <npc> <pack name|stringID> <item name|stringID> [count]";
+    bool ambiguous = false;
+    Item *packItem = FindInventoryItem(c, f[3], ambiguous);
+    if (ambiguous)
+      return "ambiguous backpack: " + f[3];
+    ContainerItem *pack = dynamic_cast<ContainerItem *>(packItem);
+    if (!Valid(pack))
+      return "no container item matching: " + f[3];
+    std::string error;
+    GameData *data = nullptr;
+    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER};
+    for (int t = 0; t < 4 && !data; ++t)
+      data = FindData(world, types[t], f[4], error);
+    if (!data)
+      return error;
+    int count = f.size() >= 6 ? atoi(f[5].c_str()) : 1;
+    if (count < 1 || count > 50)
+      return "count must be 1..50";
+    Inventory *pinv = pack->getInventory();
+    if (!Valid(pinv))
+      return "backpack inventory unavailable";
+    int added = 0;
+    for (int i = 0; i < count; ++i) {
+      Item *item = world->theFactory->createItem(data, hand(), nullptr, nullptr, -1, nullptr);
+      if (!Valid(item) || !pinv->addItem(item, 1, false, true))
+        break;
+      ++added;
+    }
+    ok = added > 0;
+    Log("KAH: packput " + c->getName() + " pack=" + pack->getName() +
+        " item=" + data->name + " added=" + Int(added));
+    return "packput " + Int(added) + "/" + Int(count) + " " + data->name +
+           " into " + pack->getName();
+  }
+
+  if (cmd == "packweight") { // packweight <npc> <pack name|stringID>
+    if (f.size() < 4)
+      return "usage: packweight <npc> <pack name|stringID>";
+    bool ambiguous = false;
+    Item *packItem = FindInventoryItem(c, f[3], ambiguous);
+    if (ambiguous)
+      return "ambiguous backpack: " + f[3];
+    ContainerItem *pack = dynamic_cast<ContainerItem *>(packItem);
+    if (!Valid(pack))
+      return "no container item matching: " + f[3];
+    Inventory *pinv = pack->getInventory();
+    if (!Valid(pinv))
+      return "backpack inventory unavailable";
+    float raw = 0.0f;
+    const lektor<Item*>& contents = pinv->getAllItems();
+    for (unsigned int i = 0; i < contents.size(); ++i)
+      if (Valid(contents[i])) raw += contents[i]->getItemWeight();
+    pinv->recalculateTotalWeight();
+    float total = pinv->getTotalWeight();
+    ok = true;
+    return c->getName() + " pack=" + pack->getName() +
+           " equipped=" + std::string(pack->isEquipped ? "1" : "0") +
+           " items=" + Int(contents.size()) +
+           " raw=" + Num(raw) + " total=" + Num(total);
+  }
+
+  if (cmd == "craftfinish") { // craftfinish <npc> <item name|stringID>
+    if (f.size() < 4)
+      return "usage: craftfinish <npc> <item name|stringID>";
+    std::string error;
+    GameData *data = nullptr;
+    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER};
+    for (int t = 0; t < 4 && !data; ++t)
+      data = FindData(world, types[t], f[3], error);
+    if (!data)
+      return error;
+    lektor<RootObject *> nearby;
+    world->getObjectsWithinSphere(nearby, c->getPosition(), 300.0f, BUILDING, 512, nullptr);
+    CraftingBuilding *best = nullptr;
+    float bestDist = 0.0f;
+    for (uint32_t i = 0; i < nearby.size(); ++i) {
+      CraftingBuilding *b = dynamic_cast<CraftingBuilding *>(nearby.stuff[i]);
+      if (!Valid(b))
+        continue;
+      float dist = b->getPosition().distance(c->getPosition());
+      if (!best || dist < bestDist) {
+        best = b;
+        bestDist = dist;
+      }
+    }
+    if (!best)
+      return "no CraftingBuilding within 300";
+    Item *item = world->theFactory->createItem(
+        data, hand(), CraftingBuilding::playerManufacturerData(), nullptr, -1, nullptr);
+    if (!Valid(item))
+      return "could not create craft-finish item";
+    const std::string itemName = data->name;
+    const std::string buildingName = best->getName();
+    best->whosCrafting = c->getHandle();
+    best->addFinishedCraftItem(item);
+    ok = true;
+    Log("KAH: craftfinish crafter=" + c->getName() + " building=" + buildingName +
+        " item=" + itemName);
+    return "craftfinish " + itemName + " via " + buildingName + " crafter=" + c->getName();
+  }
 
   if (cmd == "stat") { // stat <npc> <stat>
     if (f.size() < 4)
@@ -857,8 +1045,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     int price = atoi(f[5].c_str());
     std::string error;
     GameData *data = nullptr;
-    const itemType types[] = {ITEM, WEAPON, ARMOUR};
-    for (int t = 0; t < 3 && !data; ++t)
+    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER};
+    for (int t = 0; t < 4 && !data; ++t)
       data = FindData(world, types[t], f[4], error);
     if (!data)
       return error;
@@ -895,8 +1083,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return "count must be 1..50";
     std::string error;
     GameData *data = nullptr;
-    const itemType types[] = {ITEM, WEAPON, ARMOUR};
-    for (int t = 0; t < 3 && !data; ++t)
+    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER};
+    for (int t = 0; t < 4 && !data; ++t)
       data = FindData(world, types[t], f[3], error);
     if (!data)
       return error;
