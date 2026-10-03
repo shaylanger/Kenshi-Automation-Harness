@@ -13,11 +13,11 @@ static int CmdMyState(const char *id, int argc, const char *const *argv,
                       KAH_Reply *reply, void *user) {
   if (argc < 2) {
     reply->append(reply, "usage: mystate <npc>");
-    return 0; // error
+    return KAH_ERROR;
   }
   // ... look the character up, build the text ...
   reply->append(reply, "{\"ok\":true}");
-  return 1; // ok
+  return KAH_OK;
 }
 
 static void BeforeAttack(void *attacker, void *target, void *user) {
@@ -50,11 +50,44 @@ Rules:
 - **Threading:** handlers run on the game thread, from the frame listener, at
   the main menu too: check a game is loaded before touching the world.
 - **Arguments:** `argv[0]` is the command name, `argv[1..argc-1]` its
-  arguments; `id` is the request id (for your own logging). Strings are valid
+  arguments; `id` is the request id. Strings are valid
   only during the call.
 - **Reply:** call `reply->append` as often as you like; tabs and newlines
-  become spaces. Return 1 for `ok`, 0 for `error`.
+  become spaces. Return `KAH_OK`, `KAH_ERROR`, or `KAH_PENDING` (below).
 - **Exceptions** in handlers are caught and reported as errors, but don't rely
   on it: a crash in your handler is a crash in the game.
 - `registerBeforeAttack` hooks run, in registration order, just before the
   built-in `attack` command gives its order.
+
+## Answering later (KAH_PENDING)
+
+Handlers run from the harness frame listener. If your command has to run
+somewhere else (inside one of your own game hooks, say, or after something
+finishes), queue it and return `KAH_PENDING`; answer later, from any thread,
+with `api.complete(id, KAH_OK or KAH_ERROR, text)`. Until then the client sees
+no reply (its timeout applies). Copy `id`: it's only valid during the call.
+
+```cpp
+static KAH_Api g_kah;
+static std::vector<std::vector<std::string> > g_queue; // guard with your own lock
+
+static int CmdMyAction(const char *id, int argc, const char *const *argv,
+                       KAH_Reply *reply, void *user) {
+  std::vector<std::string> request(argv, argv + argc);
+  request.insert(request.begin(), id);
+  g_queue.push_back(request);
+  return KAH_PENDING;
+}
+
+// in your own game-thread hook:
+//   for each queued request: run it, then
+//   g_kah.complete(request[0].c_str(), ok ? KAH_OK : KAH_ERROR, text.c_str());
+```
+
+A pending command never completed just times out on the client side; a
+`complete` for an unknown or already answered id is ignored (and logged).
+
+## Testing
+
+`tests\run_tests.bat` builds and runs an offline test of the registry and
+reply handling (no game needed).

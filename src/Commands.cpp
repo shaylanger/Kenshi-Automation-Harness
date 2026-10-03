@@ -402,12 +402,14 @@ std::string Phase(GameWorld *world) {
   return inWorld ? "world" : "menu";
 }
 
-std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool &ok) {
+std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool &ok,
+                       bool &pending) {
   ok = false;
+  pending = false;
   const std::string cmd = Lower(f[1]);
 
   if (HasExtensionCommand(cmd))
-    return RunExtensionCommand(f, ok);
+    return RunExtensionCommand(f, ok, pending);
 
   if (cmd == "help") {
     ok = true;

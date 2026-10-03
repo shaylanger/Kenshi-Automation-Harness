@@ -32,9 +32,13 @@
 namespace {
 
 CRITICAL_SECTION g_logLock;
-struct LogLockInit {
-  LogLockInit() { InitializeCriticalSection(&g_logLock); }
-} g_logLockInit;
+CRITICAL_SECTION g_outboxLock;
+struct LockInit {
+  LockInit() {
+    InitializeCriticalSection(&g_logLock);
+    InitializeCriticalSection(&g_outboxLock);
+  }
+} g_lockInit;
 
 DWORD g_lastPoll = 0;
 bool g_loggedFirstTick = false;
@@ -76,6 +80,13 @@ void Log(const std::string &msg) {
   std::ofstream out((HarnessDir() + "\\harness.log").c_str(), std::ios::app);
   out << stamp << msg << "\n";
   LeaveCriticalSection(&g_logLock);
+}
+
+void WriteOutbox(const std::string &id, bool ok, const std::string &detail) {
+  EnterCriticalSection(&g_outboxLock);
+  std::ofstream out((HarnessDir() + "\\outbox.txt").c_str(), std::ios::app);
+  out << OneLine(id) << "\t" << (ok ? "ok" : "error") << "\t" << OneLine(detail) << "\n";
+  LeaveCriticalSection(&g_outboxLock);
 }
 
 std::string Lower(const std::string &value) {
@@ -142,16 +153,15 @@ void ProcessInbox(GameWorld *world) {
     f.push_back("autoload");
     f.push_back("load");
     f.push_back(name);
-    bool ok = false;
+    bool ok = false, pending = false;
     std::string detail;
     try {
-      detail = RunCommand(world, f, ok);
+      detail = RunCommand(world, f, ok, pending);
     } catch (...) {
       detail = "exception";
     }
     Log("KAH: autoload " + name + ": " + detail);
-    std::ofstream out((dir + "\\outbox.txt").c_str(), std::ios::app);
-    out << "autoload\t" << (ok ? "ok" : "error") << "\t" << OneLine(detail) << "\n";
+    WriteOutbox("autoload", ok, detail);
   }
 
   const std::string inboxPath = dir + "\\inbox.txt";
@@ -169,22 +179,23 @@ void ProcessInbox(GameWorld *world) {
     }
   }
   DeleteFileA(inboxPath.c_str());
-  std::ofstream out((dir + "\\outbox.txt").c_str(), std::ios::app);
   for (size_t i = 0; i < lines.size(); ++i) {
     std::vector<std::string> fields = SplitTabs(lines[i]);
-    bool ok = false;
+    bool ok = false, pending = false;
     std::string detail;
     if (fields.size() < 2) {
       detail = "malformed line";
     } else {
       try {
-        detail = RunCommand(world, fields, ok);
+        detail = RunCommand(world, fields, ok, pending);
       } catch (...) {
         detail = "exception";
+        pending = false;
       }
     }
-    out << fields[0] << "\t" << (ok ? "ok" : "error") << "\t" << OneLine(detail) << "\n";
-    out.flush();
+    if (pending)
+      continue; // the mod answers later through KAH_Complete
+    WriteOutbox(fields[0], ok, detail);
     if (!ok)
       Log("KAH: error id=" + fields[0] + " " + detail);
   }

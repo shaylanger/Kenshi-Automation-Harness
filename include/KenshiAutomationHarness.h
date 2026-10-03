@@ -35,9 +35,15 @@ typedef struct KAH_Reply {
   void (*append)(struct KAH_Reply *reply, const char *text);
 } KAH_Reply;
 
+#define KAH_ERROR 0
+#define KAH_OK 1
+/* The handler will answer later with complete() (the reply text is ignored). */
+#define KAH_PENDING 2
+
 /* A registered command. id = the request id from the inbox line,
  * argv[0] = the command name, argv[1..argc-1] = its arguments.
- * Return 1 for ok, 0 for error. */
+ * Return KAH_OK, KAH_ERROR, or KAH_PENDING to answer later (e.g. from your
+ * own game-thread hook) with api.complete(id, ok, text). */
 typedef int (*KAH_CommandFn)(const char *id, int argc, const char *const *argv,
                              KAH_Reply *reply, void *user);
 
@@ -52,6 +58,7 @@ typedef int (*KAH_RegisterCommandFn)(const char *name, const char *usage,
                                      KAH_CommandFn fn, void *user);
 typedef int (*KAH_RegisterBeforeAttackFn)(KAH_AttackFn fn, void *user);
 typedef void (*KAH_LogFn)(const char *message);
+typedef void (*KAH_CompleteFn)(const char *id, int ok, const char *text);
 
 typedef struct KAH_Api {
   int version;
@@ -60,6 +67,8 @@ typedef struct KAH_Api {
   KAH_RegisterBeforeAttackFn registerBeforeAttack;
   /* Writes one line to the harness log (harness.log). */
   KAH_LogFn log;
+  /* Answers a command whose handler returned KAH_PENDING (any thread). */
+  KAH_CompleteFn complete;
 } KAH_Api;
 
 /* Fills *api and returns 1 when the harness is loaded, else returns 0. */
@@ -80,7 +89,9 @@ static int KAH_Connect(KAH_Api *api) {
   api->registerBeforeAttack =
       (KAH_RegisterBeforeAttackFn)GetProcAddress(dll, "KAH_RegisterBeforeAttack");
   api->log = (KAH_LogFn)GetProcAddress(dll, "KAH_Log");
-  return api->registerCommand && api->registerBeforeAttack && api->log ? 1 : 0;
+  api->complete = (KAH_CompleteFn)GetProcAddress(dll, "KAH_Complete");
+  return api->registerCommand && api->registerBeforeAttack && api->log && api->complete ? 1
+                                                                                         : 0;
 }
 
 #ifdef __cplusplus

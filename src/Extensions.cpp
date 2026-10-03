@@ -29,6 +29,8 @@ struct LockInit {
 
 std::map<std::string, ExtensionCommand> g_commands;
 std::vector<AttackHook> g_attackHooks;
+// Ids a handler answered with KAH_PENDING and hasn't completed yet.
+std::map<std::string, std::string> g_pending; // id -> command
 
 void AppendReply(KAH_Reply *reply, const char *text) {
   if (reply && reply->impl && text)
@@ -55,8 +57,9 @@ bool HasExtensionCommand(const std::string &name) {
   return found;
 }
 
-std::string RunExtensionCommand(const std::vector<std::string> &f, bool &ok) {
+std::string RunExtensionCommand(const std::vector<std::string> &f, bool &ok, bool &pending) {
   ok = false;
+  pending = false;
   ExtensionCommand command;
   EnterCriticalSection(&g_lock);
   std::map<std::string, ExtensionCommand>::const_iterator it = g_commands.find(Lower(f[1]));
@@ -74,12 +77,26 @@ std::string RunExtensionCommand(const std::vector<std::string> &f, bool &ok) {
   KAH_Reply reply;
   reply.impl = &text;
   reply.append = &AppendReply;
+  // Marked pending before the call: the mod may complete it (from another
+  // thread) before the handler even returns.
+  EnterCriticalSection(&g_lock);
+  g_pending[f[0]] = f[1];
+  LeaveCriticalSection(&g_lock);
+  int result = KAH_ERROR;
   try {
-    ok = command.fn(f[0].c_str(), (int)argv.size(), &argv[0], &reply, command.user) != 0;
+    result = command.fn(f[0].c_str(), (int)argv.size(), &argv[0], &reply, command.user);
   } catch (...) {
-    ok = false;
+    result = KAH_ERROR;
     text = "exception in extension command " + f[1];
   }
+  if (result == KAH_PENDING) {
+    pending = true; // KAH_Complete writes the reply
+    return "";
+  }
+  EnterCriticalSection(&g_lock);
+  g_pending.erase(f[0]);
+  LeaveCriticalSection(&g_lock);
+  ok = result == KAH_OK;
   return text;
 }
 
@@ -142,6 +159,21 @@ __declspec(dllexport) int KAH_RegisterBeforeAttack(KAH_AttackFn fn, void *user) 
   LeaveCriticalSection(&g_lock);
   Log("KAH: register before-attack hook");
   return 1;
+}
+
+__declspec(dllexport) void KAH_Complete(const char *id, int ok, const char *text) {
+  const std::string key = id ? id : "";
+  EnterCriticalSection(&g_lock);
+  std::map<std::string, std::string>::iterator it = g_pending.find(key);
+  bool known = it != g_pending.end();
+  if (known)
+    g_pending.erase(it);
+  LeaveCriticalSection(&g_lock);
+  if (!known) {
+    Log("KAH: complete for an unknown or already answered id: " + key);
+    return;
+  }
+  WriteOutbox(key, ok == KAH_OK, text ? text : "");
 }
 
 __declspec(dllexport) void KAH_Log(const char *message) {
