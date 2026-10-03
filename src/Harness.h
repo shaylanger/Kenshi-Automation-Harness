@@ -30,6 +30,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
 std::string Phase(GameWorld *world);
 // Notices the end of a pending load (call every tick while one is pending).
 bool LoadPending();
+// Notices loads the game signals (load menu too) for "status"; every frame.
+void WatchLoads();
 
 bool IsBuiltinCommand(const std::string &name);
 

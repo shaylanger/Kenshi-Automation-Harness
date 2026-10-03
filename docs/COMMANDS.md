@@ -33,7 +33,7 @@ Everything else needs a loaded game.
 | Command | Does |
 |---|---|
 | `help` | list all commands, including ones registered by other mods |
-| `status` | `phase=menu|loading|world save=... paused=... speed=... squad=N player=...` |
+| `status` | `phase=menu|loading|world save=<loaded save> last_saved=<last name saved> paused=... speed=... squad=N player=...` (`save` = the save loaded this session, by `load` or the game's load menu; `?` until one is seen) |
 | `load <save>` | load a save (phase stays `loading` until the new squad is in) |
 | `save <name>` | save the game |
 | `speed <0\|0.5..50>` | game speed; 0 pauses |
@@ -43,11 +43,12 @@ Everything else needs a loaded game.
 | `spawn <template> <faction> [near <npc> \| at x y z] [count n] [dist m] [target <npc>] [size <mult>]` | spawn characters, or a squad template (`target`: the squad's AI goes for that character; `size`: scale the squad) |
 | `stash <item> <n> [near <npc>]` | put items into the nearest storage chest |
 | `where <npc>` | name, serial, faction, position, distance, KO/DEAD |
+| `sections <npc>` | inventory sections (size, equip/container slot) with their items, and the worn backpack |
 | `hp <npc>` | flesh/max per body part, worst part %, blood, KO |
 | `inv <npc>` | inventory incl. worn items and backpack as JSON (works on bodies) |
 | `stat <npc> <stat>` / `setstat <npc> <stat> <value>` | read/set a skill (base and effective) |
 | `weight <npc>` | inventory weight |
-| `iteminfo\|equip\|unequip <npc> <item>` | an inventory item by name |
+| `iteminfo\|equip\|unequip <npc> <item>` | an inventory item by name; `unequip` moves it to the main inventory (dropped next to the character if there's no room) |
 | `teleport <npc> <npc2 \| x y z> [dist m]` | move a character |
 | `ko <npc> [seconds]` | knock out (default 30 s) |
 | `health <npc> <percent>` | set every body part to a percentage of its max (negative values too) |
@@ -58,7 +59,7 @@ Everything else needs a loaded game.
 | `buy <buyer> <seller> <item> <price>` | one atomic purchase: item + cats in the same frame |
 | `select <npc>` | select the character |
 | `recruit <npc>` | recruit into the player's squad (changes the selection) |
-| `give <npc> <item> [n]` | create items in the inventory (reports how many really arrived) |
+| `give <npc> <item> [n]` | create items in the inventory (reports how many really arrived, counting every section; a backpack goes on the back if that slot is free, else into the main inventory) |
 | `relation <npc> <-100..100>` | set the relation between the npc's faction and the player's |
 | `transfer <from npc> <to npc> <item>` | move the same (unequipped) item instance between inventories |
 | `packput <npc> <pack> <item> [n]` | create items directly inside a backpack the npc owns |
@@ -74,8 +75,5 @@ maxrunspeed, currentrunspeed, encumbrance.
 
 - `give` and `stash` can't create weapons; `find` shows exact names. Items can
   be named by game-data string ID too (`find` prints `sid=`).
-- `give` of a backpack fails while the character already wears one.
-- `unequip` leaves the item in its equipment section, so `equip` of the same item
-  then fails.
 - Same-faction NPCs ignore `attack` orders against each other.
 - Characters teleported next to a hostile squad get attacked.

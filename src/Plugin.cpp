@@ -210,6 +210,7 @@ void Tick(const char *source) {
     Log(std::string("KAH: frame listener running (source=") + source +
         " phase=" + Phase(world) + " thread=" + Int(GetCurrentThreadId()) + ")");
   }
+  WatchLoads();
   DWORD now = GetTickCount();
   if (now - g_lastPoll < 250)
     return;

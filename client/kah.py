@@ -15,7 +15,8 @@ Built-in commands:
   chars [radius] | traders [radius]       characters near the player | real traders
   find <character|squad|item|weapon|armour|container> <text>
   spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] [size <mult>]
-  where|inv|hp|select|recruit|kill <npc>  (inv: inventory JSON incl. worn items)
+  where|inv|hp|sections|select|recruit|kill <npc>  (inv: inventory JSON incl. worn items;
+                                          sections: inventory sections and their items)
   stat <npc> <stat> | setstat <npc> <stat> <value> | weight <npc>
   iteminfo|equip|unequip <npc> "<item name>"
   teleport <npc> <npc2 | x y z> [dist m]

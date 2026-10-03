@@ -334,6 +334,28 @@ std::string Option(const std::vector<std::string> &f, size_t from, const std::st
   return fallback;
 }
 
+// Items of one kind in every section, the worn backpack slot included
+// (Inventory::countItems skips that slot, so a given backpack that was put
+// on straight away looked like it never arrived).
+int CountAllSections(Inventory *inv, GameData *data) {
+  int total = 0;
+  if (!Valid(inv))
+    return 0;
+  lektor<InventorySection *> &sections = inv->getAllSections();
+  for (uint32_t si = 0; si < sections.size(); ++si) {
+    InventorySection *section = sections.stuff[si];
+    if (!Valid(section))
+      continue;
+    const Ogre::vector<InventorySection::SectionItem>::type &items = section->getItems();
+    for (size_t i = 0; i < items.size(); ++i) {
+      Item *item = items[i].item;
+      if (Valid(item) && item->data == data)
+        total += item->quantity > 0 ? item->quantity : 1;
+    }
+  }
+  return total;
+}
+
 void SetAllParts(Character *c, float fraction) {
   MedicalSystem &med = c->medical;
   int count = med.getPartCount();
@@ -355,6 +377,12 @@ bool g_loadSawEmpty = false;
 DWORD g_loadStarted = 0;
 Character *g_loadOldLeader = nullptr; // squad leader object before the load
 
+// getCurrentGame() is the last name *saved* (Kenshi doesn't update it on a
+// load), so the harness remembers what was loaded: its own "load", and any
+// load the game signals (the load menu too), seen by WatchLoads() each frame.
+std::string g_loadedSave;
+int g_lastSignal = 0;
+
 std::string CurrentSave() {
   try {
     SaveManager *sm = SaveManager::getSingleton();
@@ -370,7 +398,7 @@ const char *const kBuiltins[] = {
     "stash", "stat",   "setstat",  "weight",  "iteminfo", "equip", "unequip",
     "where", "hp",     "inv",      "teleport", "ko",    "health",  "kill",  "hunger",
     "attack", "money", "buy",      "select",  "recruit", "give",   "relation",
-    "traders", "transfer", "packput", "packweight", "craftfinish"};
+    "traders", "transfer", "packput", "packweight", "craftfinish", "sections"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
@@ -378,7 +406,7 @@ const char *const kHelp =
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
     "[size <mult>] | stash <item> <n> [near <npc>] | stat <npc> <stat> | "
     "setstat <npc> <stat> <value> | weight <npc> | iteminfo|equip|unequip <npc> <item> | "
-    "where|hp|inv|select|recruit|kill <npc> | teleport <npc> <npc2 | x y z> [dist m] | "
+    "where|hp|inv|sections|select|recruit|kill <npc> | teleport <npc> <npc2 | x y z> [dist m] | "
     "ko <npc> [seconds] | health <npc> <percent> | hunger <npc> <0..300> | "
     "attack <attacker> <target> | money <npc> <delta> | buy <buyer> <seller> <item> <price> | "
     "give <npc> <item> [n] | relation <npc> <-100..100> | "
@@ -388,6 +416,22 @@ const char *const kHelp =
     "#serial, @player or @selected.";
 
 } // namespace
+
+void WatchLoads() {
+  try {
+    SaveManager *sm = SaveManager::getSingleton();
+    if (!Valid(sm))
+      return;
+    int signal = sm->signal;
+    if (signal == SaveManager::LOADGAME && g_lastSignal != SaveManager::LOADGAME &&
+        !sm->name.empty()) {
+      g_loadedSave = sm->name;
+      Log("KAH: game load signalled save=" + g_loadedSave);
+    }
+    g_lastSignal = signal;
+  } catch (...) {
+  }
+}
 
 bool IsBuiltinCommand(const std::string &name) {
   const std::string n = Lower(name);
@@ -446,7 +490,11 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
 
   if (cmd == "status") {
     ok = true;
-    std::string out = "phase=" + Phase(world) + " save=" + CurrentSave();
+    // save = the save loaded this session (as far as the harness saw it),
+    // last_saved = Kenshi's own "current game" (the last name saved).
+    std::string out = "phase=" + Phase(world) + " save=" +
+                      (g_loadedSave.empty() ? std::string("?") : g_loadedSave) +
+                      " last_saved=" + CurrentSave();
     if (Valid(world)) {
       out += " paused=" + std::string(world->paused ? "1" : "0");
       out += " speed=" + Num(world->frameSpeedMult);
@@ -467,6 +515,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return "no save named: " + f[2] + " (in " + sm->getSavePath() + ")";
     Log("KAH: load save=" + f[2] + " phase=" + Phase(world));
     sm->load(f[2]);
+    g_loadedSave = f[2];
     g_loadPending = true;
     g_loadSawEmpty = false;
     g_loadStarted = GetTickCount();
@@ -914,11 +963,34 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     }
 
     if (cmd == "unequip") {
-      std::string section = item->inventorySection;
-      c->unequipItem(section, item);
-      ok = !item->isEquipped;
-      Log("KAH: unequip " + c->getName() + " " + DescribeItem(item) + " ok=" + (ok ? "1" : "0"));
-      return std::string(ok ? "unequipped " : "unequip failed ") + DescribeItem(item);
+      // As a player drag does: take the item out of its equipment section
+      // (the game runs its unequip callbacks) and put it in the main
+      // inventory; if there's no room there it is dropped next to the
+      // character.
+      if (!item->isEquipped)
+        return "not equipped: " + DescribeItem(item);
+      Inventory *inv = c->getInventory();
+      if (!Valid(inv))
+        return "no inventory";
+      const std::string from = item->inventorySection;
+      const int qty = item->quantity > 0 ? item->quantity : 1;
+      Item *moved = inv->removeItemDontDestroy_returnsItem(item, qty, false);
+      if (!Valid(moved))
+        return "unequip failed (remove): " + DescribeItem(item);
+      InventorySection *main = inv->getSection("main");
+      bool placed = false;
+      if (Valid(main))
+        placed = main->addItem(moved, qty);
+      std::string where = "main";
+      if (!placed) {
+        inv->dropItem(moved);
+        where = "ground";
+      }
+      ok = !moved->isEquipped;
+      Log("KAH: unequip " + c->getName() + " from=" + from + " to=" + where + " " +
+          DescribeItem(moved) + " ok=" + (ok ? "1" : "0"));
+      return std::string(ok ? "unequipped " : "unequip failed ") + "(" + from + " -> " + where +
+             ") " + DescribeItem(moved);
     }
 
     ok = true;
@@ -928,6 +1000,30 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   if (cmd == "where") {
     ok = true;
     return Describe(c, &origin);
+  }
+
+  if (cmd == "sections") { // sections <npc>: inventory sections, sizes and items
+    Inventory *inv = c->getInventory();
+    if (!Valid(inv))
+      return "no inventory";
+    std::string out;
+    lektor<InventorySection *> &sections = inv->getAllSections();
+    for (uint32_t si = 0; si < sections.size(); ++si) {
+      InventorySection *section = sections.stuff[si];
+      if (!Valid(section))
+        continue;
+      out += " | " + section->name + " " + Int(section->width) + "x" + Int(section->height) +
+             (section->isAnEquippedItemSection ? " equip" : "") + (section->containerSlot ? " container" : "") +
+             (section->enabled ? "" : " disabled") + ":";
+      const Ogre::vector<InventorySection::SectionItem>::type &items = section->getItems();
+      for (size_t i = 0; i < items.size(); ++i)
+        if (Valid(items[i].item))
+          out += " [" + items[i].item->getName() + "]";
+    }
+    ContainerItem *pack = c->hasABackpackOn();
+    ok = true;
+    return c->getName() + " backpack=" + (Valid(pack) ? pack->getName() : std::string("none")) +
+           out;
   }
 
   if (cmd == "hp") { // per body part flesh/max, and the worst part in %
@@ -1092,7 +1188,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     if (!Valid(inv))
       return "no inventory";
     int added = 0;
-    int countBefore = inv->countItems(data);
+    int countBefore = CountAllSections(inv, data);
     for (int i = 0; i < count; ++i) {
       Item *item = world->theFactory->createItem(data, hand(), nullptr, nullptr, -1, nullptr);
       if (!Valid(item) || !inv->addItem(item, 1, false, true))
@@ -1100,7 +1196,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       ++added;
     }
     // addItem can report success for items that don't stay: report what really arrived.
-    int real = inv->countItems(data) - countBefore;
+    int real = CountAllSections(inv, data) - countBefore;
     Log("KAH: give " + c->getName() + " item=" + data->name + " added=" + Int(added) +
         " real=" + Int(real) + " now=" + Int(countBefore + real));
     ok = real > 0;
