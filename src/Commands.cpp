@@ -38,6 +38,7 @@
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/SaveManager.h>
+#include <kenshi/Town.h>
 #include <kenshi/util/hand.h>
 #include <kenshi/util/UtilityT.h>
 
@@ -538,7 +539,7 @@ const char *const kHelp =
     "cage|uncage <npc> [cage] | shopstock <trader> [radius <m>] | trade <buyer> <trader> <item> [radius <m>] | "
     "eat <npc> <food> | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
-    "produced <building> [reset] [radius <m>] | power <building> on|off|charge [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
+    "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | "
     "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "
     "packweight <npc> <pack> | craftfinish <npc> <item> [at <bench>]. "
@@ -550,6 +551,13 @@ const char *const kHelp =
 void SampleProduction(GameWorld *world) {
   try {
     SampleTracked(world);
+  } catch (...) {
+  }
+}
+
+void KeepSuppliedPowered() {
+  try {
+    TopUpSupplied();
   } catch (...) {
   }
 }

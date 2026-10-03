@@ -18,6 +18,7 @@
 #include <kenshi/Globals.h> // ou
 #include <kenshi/Kenshi.h>
 #include <kenshi/SaveManager.h>
+#include <kenshi/Town.h>
 #include <mygui/MyGUI_Delegate.h>
 #include <mygui/MyGUI_Gui.h>
 #include <ogre/OgreFrameListener.h>
@@ -265,6 +266,7 @@ void FrameWork(bool fromOgre) {
     return;
   MeasureFrame();
   SampleProduction(ou);
+  KeepSuppliedPowered();
   if (++g_framesSinceLaunch % 600 == 0)
     Log("KAH: fps frames=" + Int(g_framesSinceLaunch) + " source=" + (fromOgre ? "ogre" : "mygui") +
         " window: " + g_frameStats.Report());
@@ -357,7 +359,25 @@ void __fastcall Hook_UpdateAutoSave(SaveManager *sm) {
     g_updateAutoSaveOrig(sm);
 }
 
+// "power <b> supply": the town's grid resets and hands out power in
+// updatePowerGrid; top the supplied buildings up right after it (KAH 10).
+typedef void(__fastcall *UpdatePowerGridFn)(Town *);
+UpdatePowerGridFn g_updatePowerGridOrig = nullptr;
+
+void __fastcall Hook_UpdatePowerGrid(Town *town) {
+  g_updatePowerGridOrig(town);
+  KeepSuppliedPowered();
+}
+
 void InstallHooks() {
+  __int64 gridAddr = KenshiLib::GetRealAddress(&Town::_NV_updatePowerGrid);
+  if (gridAddr) {
+    int s = (int)KenshiLib::AddHook((void *)gridAddr, (void *)Hook_UpdatePowerGrid,
+                                    (void **)&g_updatePowerGridOrig);
+    Log("KAH: Town::updatePowerGrid hook status=" + Int(s));
+  } else {
+    Log("KAH: Town::updatePowerGrid not found; power supply is per frame only");
+  }
   __int64 autoSaveAddr = KenshiLib::GetRealAddress(&SaveManager::updateAutoSave);
   if (autoSaveAddr) {
     KenshiLib::HookStatus autoSaveStatus = KenshiLib::AddHook(

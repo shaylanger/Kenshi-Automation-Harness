@@ -73,6 +73,87 @@ Building *FindBuilding(GameWorld *world, const Ogre::Vector3 &at, const std::str
   return FindBuildingT<Building>(world, at, name, radius, dist);
 }
 
+// "power <building> supply": buildings kept at full power (test cheat, KAH
+// 10). Topped up after every power-grid update of a town (hook in
+// Plugin.cpp) and every frame, so the grid's own reset can't undo it.
+std::vector<hand> g_supplied;
+
+// The power a consumer wants at most (0: it uses no power).
+float PowerWanted(UseableStuff *u) {
+  float want = 0;
+  try {
+    want = u->howMuchPowerDoYouWantMax();
+    const float maxp = u->getMaxPower();
+    if (maxp > want)
+      want = maxp;
+  } catch (...) {
+    want = 0;
+  }
+  return want;
+}
+
+int TopUpSupplied() {
+  int n = 0;
+  for (size_t i = 0; i < g_supplied.size(); ++i) {
+    Building *b = nullptr;
+    try {
+      b = g_supplied[i].getBuilding();
+    } catch (...) {
+      b = nullptr;
+    }
+    UseableStuff *u = Valid(b) ? dynamic_cast<UseableStuff *>(b) : nullptr;
+    if (!Valid(u))
+      continue;
+    const float want = PowerWanted(u);
+    if (want > 0 && u->currentPower < want)
+      u->currentPower = want;
+    ++n;
+  }
+  return n;
+}
+
+bool SameHandle(const hand &a, const hand &b) {
+  return a.serial == b.serial && a.index == b.index && a.type == b.type;
+}
+
+// Which town's power grid a building belongs to, its role there, and the
+// grid's totals (why a bench reads out_of_power=1).
+std::string GridInfo(Building *b) {
+  std::string out;
+  try {
+    UseableStuff *u = dynamic_cast<UseableStuff *>(b);
+    if (Valid(u))
+      out += " current_power=" + Num(u->currentPower) + " wants=" + Num(PowerWanted(u)) +
+             " battery_fed=" + (u->_recievesBatteryPower ? "1" : "0");
+    Town *t = b->getRealTown();
+    if (!Valid(t))
+      return out + " grid=none (not in a town)";
+    const hand h = b->getHandle();
+    std::string role;
+    for (size_t i = 0; i < t->powerInList.size(); ++i)
+      if (SameHandle(t->powerInList[i], h))
+        role += "+consumer";
+    for (ogre_unordered_set<hand>::type::const_iterator it = t->powerOutList.begin();
+         it != t->powerOutList.end(); ++it)
+      if (SameHandle(*it, h))
+        role += "+generator";
+    for (ogre_unordered_set<hand>::type::const_iterator it = t->batteryList.begin();
+         it != t->batteryList.end(); ++it)
+      if (SameHandle(*it, h))
+        role += "+battery";
+    out += " grid=\"" + t->getName() + "\" grid_role=" + (role.empty() ? "none" : role.substr(1)) +
+           " grid_power=" + Num(t->power_Stat) + "/" + Num(t->maxPower_Stat) +
+           " grid_needed=" + Num(t->neededPowerTotal_Stat) +
+           " grid_battery=" + Num(t->batteryCharge_Stat) + "/" + Num(t->batteryChargeMax_Stat) +
+           " grid_members=" + Int(t->powerInList.size()) + "in/" + Int(t->powerOutList.size()) +
+           "out/" + Int(t->batteryList.size()) + "bat" +
+           " player_town=" + (t->playerHasBuildingsInThisTown ? "1" : "0");
+  } catch (...) {
+    out += " grid=?";
+  }
+  return out;
+}
+
 std::string BuildingInfo(Building *b, const Ogre::Vector3 &origin) {
   std::string out = b->getName() + " dist=" + Num(b->getPosition().distance(origin));
   UseableStuff *u = dynamic_cast<UseableStuff *>(b);
@@ -89,6 +170,10 @@ std::string BuildingInfo(Building *b, const Ogre::Vector3 &origin) {
     out += " broken=" + std::string(b->isBroken() ? "1" : "0");
   } catch (...) {
   }
+  out += GridInfo(b);
+  for (size_t i = 0; i < g_supplied.size(); ++i)
+    if (SameHandle(g_supplied[i], b->getHandle()))
+      out += " supplied=1";
   StorageBuilding *s = dynamic_cast<StorageBuilding *>(b);
   if (Valid(s)) {
     try {
@@ -614,9 +699,9 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     out = Int(n) + " buildings within " + Num(radius) + ":" + out;
     return true;
   }
-  if (cmd == "power") { // power <building> on|off|charge [radius <m>]
+  if (cmd == "power") { // power <building> on|off|charge|supply|unsupply [radius <m>]
     if (f.size() < 4) {
-      out = "usage: power <building> on|off|charge [radius <m>]";
+      out = "usage: power <building> on|off|charge|supply|unsupply [radius <m>]";
       return true;
     }
     float radius = 0, dist = 0;
@@ -637,8 +722,28 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
         return true;
       }
       u->powerTimeStored = u->_powerTimeStoreMax;
+    } else if (what == "supply" || what == "unsupply") {
+      UseableStuff *u = dynamic_cast<UseableStuff *>(b);
+      if (!Valid(u)) {
+        out = b->getName() + " can't take power";
+        return true;
+      }
+      const hand h = b->getHandle();
+      for (size_t i = 0; i < g_supplied.size(); ++i)
+        if (SameHandle(g_supplied[i], h)) {
+          g_supplied.erase(g_supplied.begin() + i);
+          break;
+        }
+      if (what == "supply") {
+        if (PowerWanted(u) <= 0) {
+          out = b->getName() + " uses no power (wants=0)" + GridInfo(b);
+          return true;
+        }
+        g_supplied.push_back(h);
+        TopUpSupplied();
+      }
     } else {
-      out = "usage: power <building> on|off|charge";
+      out = "usage: power <building> on|off|charge|supply|unsupply";
       return true;
     }
     ok = true;

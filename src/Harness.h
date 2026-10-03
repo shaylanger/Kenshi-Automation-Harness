@@ -40,6 +40,9 @@ bool LoadPending();
 void WatchLoads();
 // Samples the output of buildings "produced" tracks; every frame.
 void SampleProduction(GameWorld *world);
+// Keeps buildings "power <b> supply" picked at full power; every frame and
+// after each town power-grid update.
+void KeepSuppliedPowered();
 
 bool IsBuiltinCommand(const std::string &name);
 
