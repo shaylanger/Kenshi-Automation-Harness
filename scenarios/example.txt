@@ -1,0 +1,17 @@
+# Example scenario: kah run scenarios/example.txt --csv result.csv
+# Uses only built-in commands; adjust names to your save.
+@wait-world
+speed 0
+status ~ phase=world
+spawn "Hungry Bandit" Drifters near @player dist 40 count 1 ~ spawned 1/1
+@set DUMMY chars 80 ~ Hungry Bandit (#\d+)
+where ${DUMMY} ~ Hungry Bandit
+damage ${DUMMY} left_leg 40 ~ flesh
+hp ${DUMMY} ~ worst=
+give @player "Basic First Aid Kit" 2 ~ got 2/2
+order @player FIRST_AID_ORDER target ${DUMMY} ~ FIRST_AID_ORDER
+speed 2
+@until 60 hp ${DUMMY} ~ bandaged
+speed 0
+! give @player "Katana"
+screenshot example ~ png

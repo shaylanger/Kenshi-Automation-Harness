@@ -5,6 +5,8 @@
                                      is off and the game runs unfocused while enabled)
   kah autoload <save>                load <save> as soon as the main menu is up
   kah wait-world [timeout_s]         wait until a save is loaded and the world runs
+  kah wait-game <minutes> [timeout_s]  wait for game time to pass (game must be running)
+  kah run <scenario file> [--csv out.csv] [--stop]   run a test scenario (kah run --help)
   kah help                           every command the running game knows (incl. mods)
   kah <command> [args...]            send one command, print the reply
 
@@ -29,12 +31,22 @@ Built-in commands:
   stash <item> <n> [near <npc>]
   transfer <from npc> <to npc> <item> | craftfinish <npc> <item> [at <bench>]
   packput <npc> <pack> <item> [n] | packweight <npc> <pack>
+  order <npc> <task> [target <npc>] [building <b>] [keep] | tasks [filter] | fight <a> <b>
+  job <npc> <building> [task <t>] | jobs|clearjobs <npc>
+  buildings [radius] [filter] [near <npc>] | building <name> | time
+  power <building> on|off|charge | fill <building> <item> [n] [section <s>]
+  setname <npc> <name> | faction <npc> <faction> | sleep <npc> [bed <b>] | wake <npc>
+  damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | eat <npc> <food>
+  shackle|unshackle <npc> | cage|uncage <npc> [cage] | shopstock <trader>
+  trade <buyer> <trader> <item>
+  ui [filter] [all] | click <widget> | messages [n] | screenshot [name]
 <npc> is a name (exact match nearest the player wins), #serial, @player or @selected.
 
 The harness folder is the installed mod folder (Kenshi\\mods\\AutomationHarness):
 set KAH_DIR to it, or pass --dir <path> first. Works from Windows and WSL.
 """
 import os
+import re
 import sys
 import time
 
@@ -95,6 +107,161 @@ def send(d, cmd, args, timeout=20):
     sys.exit('no answer within %ds (Kenshi not running or stuck loading?)' % timeout)
 
 
+def wait_world(d, limit):
+    end = time.time() + limit
+    detail = ''
+    while time.time() < end:
+        try:
+            ok, detail = send(d, 'status', [], timeout=10)
+        except SystemExit:
+            ok, detail = False, 'no answer (loading?)'
+        if ok and 'phase=world' in detail:
+            return True, detail
+        time.sleep(2)
+    return False, 'world not ready after %ds: %s' % (limit, detail)
+
+
+def game_hours(d):
+    ok, detail = send(d, 'time', [], timeout=15)
+    m = re.search(r'game_hours=([0-9.]+)', detail) if ok else None
+    if not m:
+        sys.exit('time: ' + detail)
+    return float(m.group(1)), detail
+
+
+def wait_game(d, minutes, limit):
+    """Waits until <minutes> of game time have passed (the game must be running)."""
+    start, detail = game_hours(d)
+    if 'paused=1' in detail:
+        return False, 'the game is paused (speed 0): game time does not pass'
+    end = time.time() + limit
+    while time.time() < end:
+        now, detail = game_hours(d)
+        if (now - start) * 60.0 >= minutes:
+            return True, '%.1f game minutes passed' % ((now - start) * 60.0)
+        time.sleep(1)
+    now, detail = game_hours(d)
+    return False, 'only %.1f of %s game minutes after %ds' % ((now - start) * 60.0, minutes, limit)
+
+
+SCENARIO_HELP = """Scenario file (kah run <file> [--csv out.csv] [--stop]): one step per line.
+  <command args...>                   must answer ok
+  ! <command args...>                 must answer error
+  <command ...> ~ <regex>             must answer ok and match <regex>
+  @sleep <seconds>
+  @wait-world [timeout_s]
+  @wait-game <minutes> [timeout_s]
+  @until <timeout_s> <command ...> ~ <regex>   repeat (every 2 s) until the reply matches
+  @set NAME <command ...> ~ <regex with one (group)>   capture; later steps use ${NAME}
+  @log <file> ~ <regex>               a line added to <file> since the run started matches
+  @echo <text>
+  # comment (blank lines ignored). Arguments are shell-quoted ("Dried Meat")."""
+
+
+def run_scenario(d, path, csv_path=None, stop=False):
+    import csv as csvmod
+    import shlex
+    variables = {}
+    log_offsets = {}
+    rows = []
+    passed = failed = 0
+
+    def subst(text):
+        return re.sub(r'\$\{(\w+)\}', lambda m: variables.get(m.group(1), m.group(0)), text)
+
+    def log_since(file):
+        file = to_local(file)
+        if not os.path.exists(file):
+            return ''
+        with open(file, 'rb') as f:
+            f.seek(log_offsets.get(file, 0))
+            return f.read().decode('utf-8', 'replace')
+
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().splitlines()
+    # Note the size of every log a step will look at, before anything runs.
+    for line in lines:
+        m = re.match(r'\s*@log\s+(\S+)', line)
+        if m:
+            file = to_local(m.group(1))
+            log_offsets[file] = os.path.getsize(file) if os.path.exists(file) else 0
+    for number, raw in enumerate(lines, 1):
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        line = subst(line)
+        regex = None
+        if ' ~ ' in line:
+            line, regex = line.split(' ~ ', 1)
+            line = line.strip()
+        ok_step, detail = True, ''
+        try:
+            if line.startswith('@'):
+                words = shlex.split(line[1:])
+                kind = words[0]
+                if kind == 'sleep':
+                    time.sleep(float(words[1]))
+                elif kind == 'echo':
+                    detail = ' '.join(words[1:])
+                elif kind == 'wait-world':
+                    ok_step, detail = wait_world(d, float(words[1]) if len(words) > 1 else 300)
+                elif kind == 'wait-game':
+                    ok_step, detail = wait_game(d, float(words[1]),
+                                                float(words[2]) if len(words) > 2 else 600)
+                elif kind == 'until':
+                    end = time.time() + float(words[1])
+                    ok_step = False
+                    while time.time() < end:
+                        ok_reply, detail = send(d, words[2], words[3:])
+                        if ok_reply and (not regex or re.search(regex, detail)):
+                            ok_step = True
+                            break
+                        time.sleep(2)
+                elif kind == 'set':
+                    name = words[1]
+                    ok_reply, detail = send(d, words[2], words[3:])
+                    m = re.search(regex or '(.*)', detail) if ok_reply else None
+                    ok_step = bool(m)
+                    if m:
+                        variables[name] = m.group(1)
+                        detail = '%s=%s' % (name, m.group(1))
+                elif kind == 'log':
+                    # The path is taken raw (shlex would eat Windows backslashes).
+                    words[1] = re.match(r'\s*@log\s+(\S+)', line).group(1)
+                    text = log_since(words[1])
+                    ok_step = bool(regex and re.search(regex, text))
+                    detail = 'matched' if ok_step else 'no new line matching in ' + words[1]
+                else:
+                    ok_step, detail = False, 'unknown step @' + kind
+            else:
+                expect_error = line.startswith('!')
+                words = shlex.split(line.lstrip('!').strip())
+                ok_reply, detail = send(d, words[0], words[1:])
+                ok_step = ok_reply != expect_error
+                if ok_step and regex and not re.search(regex, detail):
+                    ok_step = False
+                    detail = 'no match for /%s/: %s' % (regex, detail)
+        except SystemExit as e:
+            ok_step, detail = False, str(e)
+        except Exception as e:  # malformed step
+            ok_step, detail = False, 'step error: %s' % e
+        passed += ok_step
+        failed += not ok_step
+        rows.append((number, 'PASS' if ok_step else 'FAIL', raw.strip(), detail))
+        print('%s %3d %s => %s' % ('PASS' if ok_step else 'FAIL', number, raw.strip()[:90],
+                                   detail.replace('\n', ' ')[:200]))
+        sys.stdout.flush()
+        if stop and not ok_step:
+            break
+    print('== %d passed, %d failed (%s)' % (passed, failed, path))
+    if csv_path:
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            w = csvmod.writer(f)
+            w.writerow(['line', 'result', 'step', 'detail'])
+            w.writerows(rows)
+    return 0 if failed == 0 else 1
+
+
 def main():
     d, argv = harness_dir(sys.argv[1:])
     if not argv or argv[0] in ('-h', '--help'):
@@ -120,20 +287,21 @@ def main():
         print('autoload %s' % args[0])
         return 0
     if cmd == 'wait-world':
-        limit = float(args[0]) if args else 300
-        end = time.time() + limit
-        detail = ''
-        while time.time() < end:
-            try:
-                ok, detail = send(d, 'status', [], timeout=10)
-            except SystemExit:
-                ok, detail = False, 'no answer (loading?)'
-            if ok and 'phase=world' in detail:
-                print(detail)
-                return 0
-            time.sleep(2)
-        print('world not ready after %ds: %s' % (limit, detail))
-        return 1
+        ok, detail = wait_world(d, float(args[0]) if args else 300)
+        print(detail)
+        return 0 if ok else 1
+    if cmd == 'wait-game':
+        if not args:
+            sys.exit('usage: kah wait-game <game minutes> [timeout_s]')
+        ok, detail = wait_game(d, float(args[0]), float(args[1]) if len(args) > 1 else 600)
+        print(detail)
+        return 0 if ok else 1
+    if cmd == 'run':
+        if not args or args[0] in ('-h', '--help'):
+            print(SCENARIO_HELP)
+            return 0
+        csv_path = args[args.index('--csv') + 1] if '--csv' in args else None
+        return run_scenario(d, args[0], csv_path, '--stop' in args)
     ok, detail = send(d, cmd, args)
     print(('' if ok else 'ERROR: ') + detail)
     return 0 if ok else 1
