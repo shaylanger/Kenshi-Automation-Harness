@@ -89,6 +89,8 @@ Everything else needs a loaded game.
 | `building <name> [radius]` (alias `production`) | the nearest matching building within `radius` of the player (default 300, max 5000; also `radius <m>`): power (on, has power, battery, output), production (product, quantity, state, inputs), farm state, inventory sections |
 | `power <building> on\|off\|charge [radius <m>]` | switch power; `charge` fills a battery |
 | `fill <building> <item> [n] [section <name>] [radius <m>]` | put items into a building's inventory (inputs, storage); reports how many fitted |
+| `build <building name\|sid> [near <npc> [dist m] \| at x y z] [faction <f>]` | create a **finished** building or furniture (`Bed`, `Prisoner Cage`, ...) through the game's factory (`RootObjectFactory::createBuilding`, completed). Data is looked up like `find` (exact name or string ID, else a unique partial name). Default place: `dist` 10 (max 200) along x from the npc (default the player's first squad member); the height snaps to the terrain at x,z (kept as is if the terrain query gives nothing usable). Identity rotation, no town. Owner: the player's faction unless `faction`. Reply: name, serial, `pos=x,y,z`, faction |
+| `unbuild <name> [radius]` | destroy the nearest building that `build` made this session (name contains the text, within `radius` of the player, default 300, max 5000) via `GameWorld::destroy`; other buildings are never touched |
 | `time` | game hours, day, time of day, speed |
 
 Building names match the nearest exact name, else the nearest name containing the text. `radius` is above 0 and at most 5000; anything else is refused.

@@ -6,6 +6,7 @@
 #endif
 #include "Harness.h"
 #include "SearchRadius.h"
+#include "BuildArgs.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -36,6 +37,7 @@
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/SaveManager.h>
 #include <kenshi/util/hand.h>
+#include <kenshi/util/UtilityT.h>
 
 #include <windows.h>
 #include <algorithm>
@@ -475,7 +477,7 @@ const char *const kBuiltins[] = {
     "tasks", "ui", "click", "messages", "screenshot", "time", "building", "production",
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
-    "trade", "eat", "blood"};
+    "trade", "eat", "blood", "build", "unbuild"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
@@ -493,7 +495,8 @@ const char *const kHelp =
     "faction <npc> <faction> | sleep <npc> [bed <name>] | wake <npc> | "
     "damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | shackle <npc> [owner <npc>] | unshackle <npc> | "
     "cage|uncage <npc> [cage] | shopstock <trader> [radius <m>] | trade <buyer> <trader> <item> [radius <m>] | "
-    "eat <npc> <food> | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
+    "eat <npc> <food> | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
+    "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "power <building> on|off|charge [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | "
     "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "

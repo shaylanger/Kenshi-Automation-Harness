@@ -265,9 +265,114 @@ bool RunAnyPhaseCommand(const std::vector<std::string> &f, bool &ok, std::string
 }
 
 // World commands that don't start with a character.
+// Buildings made by "build" this session (unbuild only removes these).
+std::vector<hand> g_built;
+
+// Ground height at x,z; `fallback` when the terrain query gives nothing
+// usable (not loaded, NaN, or far off the reference height).
+float GroundHeight(float x, float z, float fallback) {
+  float h = fallback;
+  try {
+    h = UtilityT::getTerrainHeight(x, z);
+  } catch (...) {
+    return fallback;
+  }
+  if (!(h == h) || fabs(h - fallback) > 100.0f)
+    return fallback;
+  return h;
+}
+
 bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const Ogre::Vector3 &origin,
                      bool &ok, std::string &out) {
   const std::string cmd = Lower(f[1]);
+  if (cmd == "build") { // build <name|sid> [near <npc> [dist m] | at x y z] [faction <f>]
+    BuildArgs a;
+    if (!ParseBuildArgs(f, a, out))
+      return true;
+    std::string error;
+    GameData *data = FindData(world, BUILDING, a.name, error);
+    if (!data) {
+      out = error;
+      return true;
+    }
+    Ogre::Vector3 pos;
+    if (a.at) {
+      pos = Ogre::Vector3(a.x, a.y, a.z);
+    } else {
+      Character *n = a.nearName.empty() ? FirstPlayerCharacter(world) : FindCharacter(world, a.nearName);
+      if (!n) {
+        out = "no character named: " + a.nearName;
+        return true;
+      }
+      pos = n->getPosition();
+      pos.x += a.dist;
+    }
+    pos.y = GroundHeight(pos.x, pos.z, pos.y);
+    Faction *owner = a.faction.empty() ? world->player->getFaction() : FindFaction(world, a.faction);
+    if (!Valid(owner)) {
+      out = "no faction named: " + a.faction;
+      return true;
+    }
+    Building *b = world->theFactory->createBuilding(data, pos, nullptr, owner,
+                                                    Ogre::Quaternion::IDENTITY, nullptr, nullptr,
+                                                    nullptr, nullptr, nullptr, false, true, false, 0,
+                                                    false);
+    if (!Valid(b)) {
+      out = "the game could not create " + data->name;
+      return true;
+    }
+    g_built.push_back(b->getHandle());
+    const Ogre::Vector3 bp = b->getPosition();
+    ok = true;
+    Log("KAH: build " + b->getName() + " serial=" + Int(b->getHandle().serial));
+    out = "built " + b->getName() + " serial=" + Int(b->getHandle().serial) + " pos=" + Num(bp.x) +
+          "," + Num(bp.y) + "," + Num(bp.z) + " [" + owner->getName() + "] dist=" +
+          Num(bp.distance(origin));
+    return true;
+  }
+  if (cmd == "unbuild") { // unbuild <name> [radius]: destroy the nearest building "build" made
+    if (f.size() < 3) {
+      out = "usage: unbuild <name> [radius]";
+      return true;
+    }
+    float radius = 0;
+    if (!ParseSearchRadius(f, 3, 3, kDefaultSearchRadius, radius, out))
+      return true;
+    const std::string wanted = Lower(f[2]);
+    Building *best = nullptr;
+    size_t bestIndex = 0;
+    float bestDist = 0;
+    for (size_t i = 0; i < g_built.size(); ++i) {
+      Building *b = nullptr;
+      try {
+        b = g_built[i].getBuilding();
+      } catch (...) {
+        b = nullptr;
+      }
+      if (!Valid(b))
+        continue;
+      const float d = b->getPosition().distance(origin);
+      if (d > radius || Lower(b->getName()).find(wanted) == std::string::npos)
+        continue;
+      if (!best || d < bestDist) {
+        best = b;
+        bestIndex = i;
+        bestDist = d;
+      }
+    }
+    if (!best) {
+      out = "no building made by build matching '" + f[2] + "' within " + Num(radius) +
+            " of the player";
+      return true;
+    }
+    const std::string name = best->getName();
+    g_built.erase(g_built.begin() + bestIndex);
+    ok = world->destroy(best, false, "KAH unbuild");
+    Log("KAH: unbuild " + name + " ok=" + (ok ? "1" : "0"));
+    out = std::string(ok ? "destroyed " : "destroy refused: ") + name + " (" + Num(bestDist) +
+          " from the player)";
+    return true;
+  }
   if (cmd == "time") { // time: game time
     TimeOfDay t = world->getTimeStamp_inGameHours();
     double hours = t.getTotalHours();
