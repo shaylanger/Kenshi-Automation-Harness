@@ -51,6 +51,19 @@ While the harness is on:
 **Use test saves.** Commands change the loaded game (kill, teleport, give,
 relations...); copy a save and test on the copy.
 
+## Using it with an AI agent
+
+The harness was built to let a coding agent (Claude Code, Codex, etc.) run a
+full test loop alone: launch the game, load a test save, set up a situation,
+exercise a mod, read the game state back, log bugs, close the game, fix,
+rebuild, relaunch. Point the agent at [AGENTS.md](AGENTS.md) (Claude Code
+picks it up through `CLAUDE.md`): it covers pre-flight checks, the loop,
+how to verify results against game state instead of replies, and the traps
+that waste the most time.
+
+Give the agent the paths (`KAH_DIR`, `-Kenshi`), the name of a test save it
+may load, and the rule that only one session drives the game at a time.
+
 ## How it works
 
 The DLL adds an Ogre frame listener, so commands run on the game thread and
@@ -80,4 +93,9 @@ MyGUI libs) and Boost headers. Set `KAH_TOOLS`, `KAH_SDK` and `KAH_BOOST`
 build.bat
 ```
 
-Output: `out\AutomationHarness.dll`.
+Output: `out\AutomationHarness.dll`. `tests\run_tests.bat` runs the offline
+tests (extension registry and replies; no game needed).
+
+## Licence
+
+MIT, see [LICENSE](LICENSE).
