@@ -166,6 +166,10 @@ std::string GridInfo(Building *b) {
     UseableStuff *u = dynamic_cast<UseableStuff *>(b);
     if (Valid(u))
       out += " current_power=" + Num(u->currentPower) + " wants=" + Num(PowerWanted(u)) +
+             " wants_now=" + Num(u->howMuchPowerDoYouWantNow()) +
+             " needs_power_now=" + (u->needPowerRightNow() ? "1" : "0") +
+             " operators=" + Int(u->currentOperators.size()) + "/" + Int(u->numOperatorsMax) +
+             " needs_operating=" + (u->needsOperating ? "1" : "0") +
              " battery_fed=" + (u->_recievesBatteryPower ? "1" : "0");
     Town *t = b->getRealTown();
     if (!Valid(t))
