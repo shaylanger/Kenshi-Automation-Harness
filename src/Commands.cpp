@@ -11,6 +11,15 @@
 #include <kenshi/CharStats.h>
 #include <kenshi/Building/CraftingBuilding.h>
 #include <kenshi/Research.h>
+#include <kenshi/Building/Building.h>
+#include <kenshi/Building/FarmBuilding.h>
+#include <kenshi/Building/ProductionBuilding.h>
+#include <kenshi/Building/StorageBuilding.h>
+#include <kenshi/Building/UseableStuff.h>
+#include <kenshi/util/TimeOfDay.h>
+#include <mygui/MyGUI_Gui.h>
+#include <mygui/MyGUI_TextBox.h>
+#include <mygui/MyGUI_Widget.h>
 #include <kenshi/Damages.h>
 #include <kenshi/Faction.h>
 #include <kenshi/FactionRelations.h>
@@ -453,13 +462,19 @@ std::string CurrentSave() {
   return "";
 }
 
+#include "WorldCommands.inc"
+
 const char *const kBuiltins[] = {
     "help",  "status", "load",     "save",    "speed",  "chars",   "find",  "spawn",
     "stash", "stat",   "setstat",  "weight",  "iteminfo", "equip", "unequip",
     "where", "hp",     "inv",      "teleport", "ko",    "health",  "kill",  "hunger",
     "attack", "money", "buy",      "select",  "recruit", "give",   "relation",
     "traders", "transfer", "packput", "packweight", "craftfinish", "sections",
-    "benches", "craft", "research", "blueprint"};
+    "benches", "craft", "research", "blueprint",
+    "tasks", "ui", "click", "messages", "screenshot", "time", "building", "production",
+    "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
+    "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
+    "trade", "eat", "blood"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
@@ -472,6 +487,14 @@ const char *const kHelp =
     "ko <npc> [seconds] | health <npc> <percent> | hunger <npc> <0..300> | "
     "attack <attacker> <target> | money <npc> <delta> | buy <buyer> <seller> <item> <price> | "
     "give <npc> <item> [n] | relation <npc> <-100..100> | "
+    "order <npc> <task> [target <npc>] [building <name>] [keep] | tasks [filter] | fight <a> <b> | "
+    "job <npc> <building> [task <name>] | jobs|clearjobs <npc> | setname <npc> <name> | "
+    "faction <npc> <faction> | sleep <npc> [bed <name>] | wake <npc> | "
+    "damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | shackle <npc> [owner <npc>] | unshackle <npc> | "
+    "cage|uncage <npc> [cage] | shopstock <trader> | trade <buyer> <trader> <item> | "
+    "eat <npc> <food> | time | buildings [radius] [filter] [near <npc>] | building <name> | "
+    "power <building> on|off|charge | fill <building> <item> [n] [section <s>] | "
+    "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | "
     "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "
     "packweight <npc> <pack> | craftfinish <npc> <item> [at <bench>]. "
     "<npc> = name (exact match nearest the player wins, else nearest substring), "
@@ -544,6 +567,12 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     return RunExtensionCommand(f, ok, pending);
   if (!IsBuiltinCommand(cmd))
     return "unknown command: " + f[1] + " (help lists them)";
+
+  {
+    std::string reply;
+    if (RunAnyPhaseCommand(f, ok, reply))
+      return reply;
+  }
 
   if (cmd == "help") {
     ok = true;
@@ -625,6 +654,12 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
         " paused=" + (paused ? "1" : "0"));
     ok = true;
     return "speed " + Num(before) + " -> " + Num(after) + " paused=" + (paused ? "1" : "0");
+  }
+
+  {
+    std::string reply;
+    if (RunWorldCommand(world, f, origin, ok, reply))
+      return reply;
   }
 
   if (cmd == "chars") {
@@ -923,6 +958,11 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   Character *c = FindCharacter(world, f[2]);
   if (!c)
     return "no character named: " + f[2];
+  {
+    std::string reply;
+    if (RunCharacterCommand(world, f, c, origin, ok, reply))
+      return reply;
+  }
 
   if (cmd == "transfer") { // transfer <from npc> <to npc> <item name|stringID>
     if (f.size() < 5)
@@ -1287,6 +1327,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       if (maxHp > 0.0f && part->flesh / maxHp < worst)
         worst = part->flesh / maxHp;
       out += " " + Int(i) + ":" + Num(part->flesh) + "/" + Num(maxHp);
+      if (part->bandaging > 0.0f)
+        out += "(bandaged " + Num(part->bandaging) + ")";
     }
     ok = true;
     return c->getName() + " worst=" + Int((long long)(worst * 100.0f)) + "% blood=" +

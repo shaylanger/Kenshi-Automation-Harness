@@ -19,6 +19,22 @@ Paths: set `KAH_DIR` to `<Kenshi>\mods\AutomationHarness` (or pass
 `--dir <path>` first), and pass `-Kenshi <game folder>` to `kenshi-ctl.ps1`
 (or set `KENSHI_DIR`). From WSL, `kah.py` accepts Windows paths.
 
+## What you can set up without a human
+
+- Situations: `spawn`, `teleport`, `fight <a> <b>` (NPC vs NPC), `faction`, `relation`,
+  `damage` + `order <medic> FIRST_AID_ORDER target <npc>`, `ko`, `blood`, `cage`, `shackle`,
+  `sleep`, `order <npc> LIFT_PERSON_PLAYER_ORDER target <ko'd npc>` (carry), `eat`.
+- Economy: `give`, `money`, `trade` (real purchase; `shopstock` shows a trader's goods), `stash`.
+- Work: `job <npc> <building>`, `fill <building> <item> n`, `power`, `building` (production
+  state), `time` + `kah wait-game <minutes>` for rates per game hour.
+- Crafting: `research <name>` (test cheat), `craft <npc> <item> at <bench>`, `benches crafts`.
+- UI: `ui <filter>` (widget text/position), `click <widget>`, `messages`, `screenshot`
+  (the game's own frame with HUD; open it as an image to look).
+- Mod commands: `help` lists commands other mods registered (e.g. first-person input,
+  item affixes); see docs/EXTENDING.md.
+- Whole tests: write a scenario file and `kah run <file> --csv out.csv` (format:
+  `kah run --help`, example: scenarios/example.txt).
+
 ## Before you start (pre-flight)
 
 1. `kenshi-ctl.ps1 status`: is the game already running, and is it yours?

@@ -235,6 +235,46 @@ AutomationFrameListener g_frameListener;
 
 void OnGuiFrame(float) { Tick("mygui"); }
 
+// On-screen player messages ("X is attacking!", "No room in ... pack"), kept
+// so tests can check them: both GameWorld::showPlayerAMessage variants.
+typedef void(__fastcall *ShowMessageFn)(GameWorld *, const std::string &, bool);
+ShowMessageFn g_showMessageOrig = nullptr;
+ShowMessageFn g_showMessageLogOrig = nullptr;
+CRITICAL_SECTION g_messagesLock;
+struct MessagesLockInit {
+  MessagesLockInit() { InitializeCriticalSection(&g_messagesLock); }
+} g_messagesLockInit;
+std::vector<std::string> g_messages;
+
+void RecordMessage(const std::string &message) {
+  static std::string last;
+  static DWORD lastTick = 0;
+  DWORD now = GetTickCount();
+  EnterCriticalSection(&g_messagesLock);
+  if (!(message == last && now - lastTick < 200)) { // _withLog may call the plain one
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    char stamp[16];
+    sprintf_s(stamp, "%02d:%02d:%02d ", t.wHour, t.wMinute, t.wSecond);
+    g_messages.push_back(stamp + OneLine(message));
+    if (g_messages.size() > 100)
+      g_messages.erase(g_messages.begin());
+  }
+  last = message;
+  lastTick = now;
+  LeaveCriticalSection(&g_messagesLock);
+}
+
+void __fastcall Hook_ShowMessage(GameWorld *w, const std::string &message, bool queued) {
+  RecordMessage(message);
+  g_showMessageOrig(w, message, queued);
+}
+
+void __fastcall Hook_ShowMessageLog(GameWorld *w, const std::string &message, bool queued) {
+  RecordMessage(message);
+  g_showMessageLogOrig(w, message, queued);
+}
+
 // Test sessions must not overwrite the player's autosave slots: skip the
 // autosave update while the harness is enabled (checked once a second).
 typedef void(__fastcall *UpdateAutoSaveFn)(SaveManager *);
@@ -263,6 +303,18 @@ void InstallHooks() {
     Log("KAH: SaveManager::updateAutoSave hook status=" + Int((int)autoSaveStatus));
   } else {
     Log("KAH: SaveManager::updateAutoSave not found; autosave stays on");
+  }
+
+  __int64 msgAddr = KenshiLib::GetRealAddress(&GameWorld::showPlayerAMessage);
+  __int64 msgLogAddr = KenshiLib::GetRealAddress(&GameWorld::showPlayerAMessage_withLog);
+  if (msgAddr && msgLogAddr) {
+    int a = (int)KenshiLib::AddHook((void *)msgAddr, (void *)Hook_ShowMessage,
+                                    (void **)&g_showMessageOrig);
+    int b = (int)KenshiLib::AddHook((void *)msgLogAddr, (void *)Hook_ShowMessageLog,
+                                    (void **)&g_showMessageLogOrig);
+    Log("KAH: player message hooks status=" + Int(a) + "," + Int(b));
+  } else {
+    Log("KAH: player message functions not found; messages command off");
   }
 
   Ogre::Root *root = Ogre::Root::getSingletonPtr();
@@ -298,6 +350,56 @@ void InstallHooks() {
 }
 
 } // namespace
+
+std::string RecentMessages(int n) {
+  if (n < 1)
+    n = 10;
+  EnterCriticalSection(&g_messagesLock);
+  std::string out = Int((long long)g_messages.size()) + " message(s) since launch";
+  size_t from = g_messages.size() > (size_t)n ? g_messages.size() - n : 0;
+  for (size_t i = from; i < g_messages.size(); ++i)
+    out += " | " + g_messages[i];
+  LeaveCriticalSection(&g_messagesLock);
+  if (!g_showMessageOrig)
+    out += " (message hook not installed)";
+  return out;
+}
+
+// Grabs the game's last rendered frame (HUD and menus included) to
+// <mod folder>\shots\<name>.png.
+std::string TakeScreenshot(const std::string &name, bool &ok) {
+  ok = false;
+  Ogre::Root *root = Ogre::Root::getSingletonPtr();
+  Ogre::RenderSystem *rs = root ? root->getRenderSystem() : nullptr;
+  Ogre::RenderWindow *win = nullptr;
+  if (rs) {
+    Ogre::RenderSystem::RenderTargetIterator it = rs->getRenderTargetIterator();
+    while (!win && it.hasMoreElements())
+      win = dynamic_cast<Ogre::RenderWindow *>(it.getNext());
+  }
+  if (!win)
+    return "no render window";
+  const std::string dir = HarnessDir() + "\\shots";
+  CreateDirectoryA(dir.c_str(), nullptr);
+  std::string file = name;
+  if (file.empty()) {
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    char buf[32];
+    sprintf_s(buf, "shot-%02d%02d%02d", t.wHour, t.wMinute, t.wSecond);
+    file = buf;
+  }
+  const std::string path = dir + "\\" + file + ".png";
+  try {
+    win->writeContentsToFile(path);
+  } catch (...) {
+    return "screenshot failed: " + path;
+  }
+  ok = FileExists(path);
+  Log("KAH: screenshot " + path + " ok=" + (ok ? "1" : "0"));
+  return (ok ? "" : "screenshot not written: ") + path + " (" + Int(win->getWidth()) + "x" +
+         Int(win->getHeight()) + ")";
+}
 
 // RE_Kenshi plugin entry point.
 __declspec(dllexport) void startPlugin() {

@@ -70,6 +70,60 @@ Everything else needs a loaded game.
 | `research <name>` | complete a research entry (TEST ONLY cheat; `find research <text>` lists names). Weapon crafting needs e.g. `Basic Weapon Smithing`, `Basic Weapon Grades` and the weapon type (`Katanas`) |
 | `blueprint <item>` | complete the research the game links to crafting that item (`getBlueprintsFor`); for weapons it finds nothing, use `research` |
 
+### Orders, fights and jobs
+
+| Command | Does |
+|---|---|
+| `order <npc> <task> [target <npc>] [building <name>] [keep]` | give a real AI order, any of the game's 291 tasks by name or number (`FIRST_AID_ORDER`, `LIFT_PERSON_PLAYER_ORDER`, `PUT_IN_CAGE`, `LOOT_TARGET`, `USE_BED_ORDER`, `CHAIN_TARGET`…); `keep` adds instead of replacing orders |
+| `tasks [filter]` | list task names with their numbers |
+| `fight <a> <b>` | make two characters of different factions fight (their factions go to -100, both get an attack order) |
+| `job <npc> <building> [task <name>]` | add a permanent job at a building (default: the building's own job, e.g. OPERATE_MACHINERY) |
+| `jobs <npc>` / `clearjobs <npc>` | list / remove permanent jobs |
+
+### Buildings and time
+
+| Command | Does |
+|---|---|
+| `buildings [radius] [filter] [near <npc>]` | buildings nearby with owner faction and whether they have an inventory |
+| `building <name>` (alias `production`) | power (on, has power, battery, output), production (product, quantity, state, inputs), farm state, inventory sections |
+| `power <building> on\|off\|charge` | switch power; `charge` fills a battery |
+| `fill <building> <item> [n] [section <name>]` | put items into a building's inventory (inputs, storage); reports how many fitted |
+| `time` | game hours, day, time of day, speed |
+
+Client side: `kah wait-game <minutes> [timeout_s]` waits for game time to pass.
+
+### Characters
+
+| Command | Does |
+|---|---|
+| `setname <npc> <name>` | rename |
+| `faction <npc> <faction>` | move into an own squad of that faction (prints the new `#serial`: the character gets a new handle) |
+| `sleep <npc> [bed <name>]` / `wake <npc>` | sleep on the floor or in a bed (USE_BED_ORDER); `wake` gets up |
+| `damage <npc> <part> <cut> [blunt] [pierce] [bleed <x>]` | a real wound on a body part (0-6 or head, chest, stomach, left_arm, right_arm, left_leg, right_leg); can be bandaged with first aid. Wounds made this way don't bleed: use `blood` |
+| `blood <npc> <value\|pct%>` | set blood |
+| `shackle <npc> [owner <npc>]` / `unshackle <npc>` | chain mode on/off |
+| `cage <npc> [cage name]` / `uncage <npc> [cage name]` | put into / release from the nearest matching cage (within 300) |
+| `eat <npc> <food>` | eat a food item from the inventory (hunger rises over time, as in the game) |
+| `shopstock <trader>` | a trader's goods: carried plus storage of her faction within 30 (where Kenshi keeps shop stock) |
+| `trade <buyer> <trader> <item>` | buy through the game's own purchase path (`Inventory::buyItem`): cats move, the game's trade event fires |
+
+### UI
+
+| Command | Does |
+|---|---|
+| `ui [filter] [all]` | visible widgets (name, caption, position, size); `all` includes hidden ones |
+| `click <widget name or caption>` | fire a widget's click (e.g. `click INV` opens the inventory) |
+| `messages [n]` | the last on-screen player messages since launch |
+| `screenshot [name]` | the game's own frame, HUD and windows included, to `shots/<name>.png` in the mod folder |
+
+### Scenario runner (client side)
+
+`kah run <file> [--csv out.csv] [--stop]` runs a test file, one step per line (`kah run --help`):
+a command must answer ok, `! command` must answer error, `command ~ regex` must match;
+`@sleep`, `@wait-world`, `@wait-game <min>`, `@until <s> command ~ regex`,
+`@set NAME command ~ (group)` (use `${NAME}` later), `@log <file> ~ regex` (new lines since the
+run started), `@echo`. See `scenarios/example.txt`.
+
 Stats: labouring, science, engineering, robotics, weapon_smith, armour_smith,
 crossbow_smith, medic, turrets, farming, cooking, stealth, athletics,
 assassination, swimming, perception, lockpicking, thievery, plus maxcarry,

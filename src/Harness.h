@@ -15,6 +15,10 @@ bool FileExists(const std::string &path);
 bool HarnessEnabled();
 
 void Log(const std::string &msg);
+// Plugin.cpp: last on-screen player messages (hooked), and a frame grab.
+std::string RecentMessages(int n);
+std::string TakeScreenshot(const std::string &name, bool &ok);
+
 // Appends "id<TAB>ok|error<TAB>detail" to outbox.txt (any thread).
 void WriteOutbox(const std::string &id, bool ok, const std::string &detail);
 

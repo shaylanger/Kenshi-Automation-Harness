@@ -2,9 +2,12 @@
 
 In-game test automation for Kenshi mods: drive a running game from scripts.
 Load saves, spawn characters and squads, teleport, set health, hunger, stats
-and money, give items, start fights, change faction relations, set the game
-speed, and read character state back, all from a command line or a test
-script. It's an RE_Kenshi plugin built on KenshiLib.
+and money, give items, give any AI order (first aid, carry, cage, sleep...),
+start NPC-vs-NPC fights, assign jobs, fill and power buildings, measure
+production against game time, craft for real (research + bench + worker),
+trade through the game's purchase path, inspect and click the UI, take
+screenshots with the HUD, and run whole test scenarios with checks, all from
+a command line or a test script. It's an RE_Kenshi plugin built on KenshiLib.
 
 Made for mod development and automated testing. It does nothing unless you
 switch it on, and it's not meant for normal play.
