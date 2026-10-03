@@ -23,7 +23,7 @@ Built-in commands:
   spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] [size <mult>]
   where|inv|hp|sections|select|recruit|kill <npc>  (inv: inventory JSON incl. worn items;
                                           sections: inventory sections and their items)
-  stat <npc> <stat|all> | setstat <npc> <stat> <value> | weight <npc>   (stat names: stat <npc> all)
+  stat <npc> <stat|all> | setstat <npc> <stat> <value> | weight <npc|building>   (stat names: stat <npc> all)
   iteminfo|equip|unequip <npc> "<item name>"
   teleport <npc> <npc2 | x y z | building <name>> [dist m]
   ko <npc> [seconds] | health <npc> <percent> | hunger <npc> [0..300]
@@ -31,7 +31,7 @@ Built-in commands:
   money <npc> <delta> | buy <buyer> <seller> <item> <price>
   stash <item> <n> [near <npc>]
   transfer <from npc> <to npc> <item> | craftfinish <npc> <item> [at <bench>]
-  packput <npc> <pack> <item> [n] | packweight <npc> <pack>
+  packput <npc> <pack> <item> [n] | packweight <npc|building|ground> <pack>
   order <npc> <task> [target <npc>] [building <b>] [keep] | tasks [filter] | fight <a> <b>
   job <npc> <building> [task <t>] [radius <m>] | jobs|clearjobs <npc>
   buildings [radius] [filter] [near <npc>] | building <name> [radius] | time

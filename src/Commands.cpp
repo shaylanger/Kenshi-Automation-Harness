@@ -598,7 +598,7 @@ const char *const kHelp =
     "blueprint <item> | craft <npc> <item> [at <bench>] [count n] | find <character|squad|item|weapon|armour|container> <text> | "
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
     "[size <mult>] | stash <item> <n> [near <npc>] | stat <npc> <stat> | "
-    "setstat <npc> <stat> <value> | stat <npc> all | weight <npc> | iteminfo|equip|unequip <npc> <item> | "
+    "setstat <npc> <stat> <value> | stat <npc> all | weight <npc|building> | iteminfo|equip|unequip <npc> <item> | "
     "where|hp|inv|sections|select|recruit|kill <npc> | teleport <npc> <npc2 | x y z | building <name>> [dist m] | "
     "ko <npc> [seconds] | health <npc> <percent> | hunger <npc> [0..300] | "
     "attack <attacker> <target> | money <npc> <delta> | buy <buyer> <seller> <item> <price> | "
@@ -613,7 +613,7 @@ const char *const kHelp =
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | "
     "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "
-    "packweight <npc> <pack> | craftfinish <npc> <item> [at <bench>]. "
+    "packweight <npc|building|ground> <pack> | craftfinish <npc> <item> [at <bench>]. "
     "<npc> = name (exact match nearest the player wins, else nearest substring), "
     "#serial/index (exact, as printed) or #serial (refused if not unique), @player or @selected.";
 
@@ -1215,32 +1215,6 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
            " into " + pack->getName();
   }
 
-  if (cmd == "packweight") { // packweight <npc> <pack name|stringID>
-    if (f.size() < 4)
-      return "usage: packweight <npc> <pack name|stringID>";
-    bool ambiguous = false;
-    Item *packItem = FindInventoryItem(c, f[3], ambiguous);
-    if (ambiguous)
-      return "ambiguous backpack: " + f[3];
-    ContainerItem *pack = dynamic_cast<ContainerItem *>(packItem);
-    if (!Valid(pack))
-      return "no container item matching: " + f[3];
-    Inventory *pinv = pack->getInventory();
-    if (!Valid(pinv))
-      return "backpack inventory unavailable";
-    float raw = 0.0f;
-    const lektor<Item*>& contents = pinv->getAllItems();
-    for (unsigned int i = 0; i < contents.size(); ++i)
-      if (Valid(contents[i])) raw += contents[i]->getItemWeight();
-    pinv->recalculateTotalWeight();
-    float total = pinv->getTotalWeight();
-    ok = true;
-    return c->getName() + " pack=" + pack->getName() +
-           " equipped=" + std::string(pack->isEquipped ? "1" : "0") +
-           " items=" + Int(contents.size()) +
-           " raw=" + Num(raw) + " total=" + Num(total);
-  }
-
   if (cmd == "craft") { // craft <npc> <item> [at <bench>] [count n]: a real craft, worked by <npc>
     if (f.size() < 4)
       return "usage: craft <npc> <item> [at <bench name>] [count n]";
@@ -1406,15 +1380,6 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     ok = true;
     Log("KAH: setstat " + c->getName() + " " + f[3] + " " + Num(before) + " -> " + Num(after));
     return c->getName() + " " + f[3] + " " + Num(before) + " -> " + Num(after);
-  }
-
-  if (cmd == "weight") { // weight <npc>
-    Inventory *inv = c->getInventory();
-    if (!Valid(inv))
-      return "no inventory";
-    inv->recalculateTotalWeight();
-    ok = true;
-    return c->getName() + " inventory_weight=" + Num(inv->getTotalWeight());
   }
 
   if (cmd == "iteminfo" || cmd == "equip" || cmd == "unequip") {

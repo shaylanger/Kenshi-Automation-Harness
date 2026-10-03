@@ -512,6 +512,117 @@ bool PlacedOrDropping(Item *item, bool pendingBefore) {
   return !pendingBefore && (item->creatingPhysical || item->physicalShouldExist);
 }
 
+// --- weight / packweight (KAH 18): owners that are characters, buildings
+// or the ground, and packs nested in packs.
+void ItemsOf(Inventory *inv, std::vector<Item *> &out) {
+  if (!Valid(inv))
+    return;
+  lektor<InventorySection *> &sections = inv->getAllSections();
+  for (uint32_t si = 0; si < sections.size(); ++si) {
+    InventorySection *section = sections.stuff[si];
+    if (!Valid(section))
+      continue;
+    const Ogre::vector<InventorySection::SectionItem>::type &items = section->getItems();
+    for (size_t k = 0; k < items.size(); ++k)
+      if (Valid(items[k].item))
+        out.push_back(items[k].item);
+  }
+}
+
+// Depth-first: the first container matching `needle` (name or sid) inside
+// `inv` or in containers inside it; `path` = "Outer > Inner".
+ContainerItem *FindPack(Inventory *inv, const std::string &needle, int depth, std::string &path) {
+  if (!Valid(inv) || depth > 4)
+    return nullptr;
+  std::vector<Item *> items;
+  ItemsOf(inv, items);
+  ContainerItem *partial = nullptr;
+  std::string partialPath;
+  for (size_t i = 0; i < items.size(); ++i) {
+    ContainerItem *ci = dynamic_cast<ContainerItem *>(items[i]);
+    if (!Valid(ci))
+      continue;
+    const std::string n = Lower(ci->getName());
+    const std::string sid = Valid(ci->data) ? Lower(ci->data->stringID) : "";
+    if (n == needle || sid == needle) {
+      path = ci->getName();
+      return ci;
+    }
+    if (!partial && n.find(needle) != std::string::npos) {
+      partial = ci;
+      partialPath = ci->getName();
+    }
+  }
+  if (partial) {
+    path = partialPath;
+    return partial;
+  }
+  for (size_t i = 0; i < items.size(); ++i) {
+    ContainerItem *ci = dynamic_cast<ContainerItem *>(items[i]);
+    if (!Valid(ci))
+      continue;
+    std::string inner;
+    ContainerItem *found = FindPack(ci->getInventory(), needle, depth + 1, inner);
+    if (found) {
+      path = ci->getName() + " > " + inner;
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+// <owner> = a character, else a building (its inventory) within 300 of the
+// player, else "ground" (packs lying around). label = what was found.
+Inventory *OwnerInventory(GameWorld *world, const std::string &owner, const Ogre::Vector3 &origin,
+                          std::string &label, std::string &why) {
+  if (Lower(owner) == "ground") {
+    label = "ground";
+    return nullptr;
+  }
+  Character *c = FindCharacter(world, owner);
+  if (c) {
+    label = c->getName();
+    return c->getInventory();
+  }
+  const std::string charWhy = NotFound(owner);
+  float dist = 0;
+  Building *b = FindBuilding(world, origin, owner, kDefaultSearchRadius, dist);
+  if (b) {
+    label = b->getName() + " (building, " + Num(dist) + " away)";
+    Inventory *inv = b->getInventory();
+    if (!Valid(inv))
+      why = b->getName() + " has no inventory";
+    return inv;
+  }
+  why = charWhy + ", and no building matching '" + owner + "' within " + Num(kDefaultSearchRadius);
+  return nullptr;
+}
+
+std::string PackLine(ContainerItem *pack) {
+  Inventory *pinv = pack->getInventory();
+  std::vector<Item *> items;
+  ItemsOf(pinv, items);
+  float raw = 0;
+  int packs = 0;
+  for (size_t i = 0; i < items.size(); ++i) {
+    raw += items[i]->getItemWeight();
+    if (dynamic_cast<ContainerItem *>(items[i]))
+      ++packs;
+  }
+  float total = 0;
+  if (Valid(pinv)) {
+    pinv->recalculateTotalWeight();
+    total = pinv->getTotalWeight();
+  }
+  const hand h = pack->getHandle();
+  return "pack=" + pack->getName() + " " + FormatCharacterRef(h.serial, h.index) +
+         " equipped=" + (pack->isEquipped ? "1" : "0") + " in_inventory=" +
+         (pack->isInInventory ? "1" : "0") + " items=" + Int(items.size()) +
+         " nested_packs=" + Int(packs) + " raw=" + Num(raw) + " total=" + Num(total) +
+         " weight_as_item=" + Num(pack->getItemWeight()) +
+         " own_weight=" + Num(pack->getItemWeightSingle());
+}
+
 // Squads "unload" streamed out this session (for "reload").
 struct Unloaded {
   std::string name;
@@ -788,6 +899,58 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     Log("KAH: unbuild " + name + " ok=" + (ok ? "1" : "0"));
     out = std::string(ok ? "destroyed " : "destroy refused: ") + name + " (" + Num(bestDist) +
           " from the player)";
+    return true;
+  }
+  if (cmd == "weight") { // weight <npc|building>: total inventory weight (KAH 18: buildings too)
+    if (f.size() < 3) {
+      out = "usage: weight <npc|building>";
+      return true;
+    }
+    std::string label, why;
+    Inventory *inv = OwnerInventory(world, f[2], origin, label, why);
+    if (!Valid(inv)) {
+      out = why.empty() ? "usage: weight <npc|building>" : why;
+      return true;
+    }
+    inv->recalculateTotalWeight();
+    std::vector<Item *> items;
+    ItemsOf(inv, items);
+    ok = true;
+    out = label + " inventory_weight=" + Num(inv->getTotalWeight()) + " items=" + Int(items.size());
+    return true;
+  }
+  if (cmd == "packweight") { // packweight <npc|building|ground> <pack>: a pack's weight, nested packs found (KAH 18)
+    if (f.size() < 4) {
+      out = "usage: packweight <npc|building|ground> <pack name|stringID>";
+      return true;
+    }
+    const std::string needle = Lower(f[3]);
+    std::string label, why, path;
+    ContainerItem *pack = nullptr;
+    if (Lower(f[2]) == "ground") {
+      std::string gwhy;
+      Item *g = FindGroundItem(world, origin, f[3], 300.0f, gwhy);
+      pack = dynamic_cast<ContainerItem *>(g);
+      label = "ground";
+      if (!Valid(pack)) {
+        out = Valid(g) ? g->getName() + " is not a pack" : gwhy;
+        return true;
+      }
+      path = pack->getName();
+    } else {
+      Inventory *inv = OwnerInventory(world, f[2], origin, label, why);
+      if (!Valid(inv)) {
+        out = why;
+        return true;
+      }
+      pack = FindPack(inv, needle, 0, path);
+      if (!pack) {
+        out = "no pack matching '" + f[3] + "' in " + label + " (packs inside packs are searched too)";
+        return true;
+      }
+    }
+    ok = true;
+    out = label + " path=" + path + " " + PackLine(pack);
     return true;
   }
   if (cmd == "unload") { // unload <npc>: stream his squad out like the game does far away (KAH 17)
