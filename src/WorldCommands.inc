@@ -995,14 +995,70 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
     }
     const int buyerBefore = c->getMoney(), traderBefore = trader->getMoney();
     const std::string itemName = item->getName();
-    const int price = item->getValueSingle(true);
     GameData *itemData = item->data;
     Inventory *buyerInv = c->getInventory();
+    Inventory *traderInv = trader->getInventory();
+    std::vector<std::string> problems;
+    // Shop storage (counters, barrels) is not something the game sells from:
+    // its items have no price (value 0) and buyItem there pays nobody (run m9).
+    // The trader's own inventory is what the trade window sells, so the item
+    // moves there first (the trader "takes it from the shelf"), then the
+    // normal purchase runs: price and payment come from the trader.
+    Inventory *storage = nullptr;
+    if (from != traderInv) {
+      if (!Valid(traderInv)) {
+        out = "trade failed: " + trader->getName() + " has no inventory to sell " + itemName + " from";
+        return true;
+      }
+      Item *moved = from->removeItemDontDestroy_returnsItem(item, 1, true);
+      if (!Valid(moved)) {
+        out = "trade failed: could not take " + itemName + " out of " + fromName;
+        return true;
+      }
+      if (!traderInv->addItem(moved, 1, false, false)) {
+        from->addItem(moved, 1, false, true);
+        out = "trade failed: " + trader->getName() + "'s inventory has no room for " + itemName +
+              " from " + fromName + " (item left in " + fromName + ")";
+        return true;
+      }
+      storage = from;
+      from = traderInv;
+      // A stackable item may merge into a stack the trader has: find what
+      // is there now (the moved instance if it still exists, else the stack)
+      // without touching `moved` itself.
+      item = nullptr;
+      std::vector<Item *> held;
+      InventoryItems(traderInv, held);
+      for (size_t k = 0; k < held.size(); ++k)
+        if (held[k] == moved)
+          item = moved;
+      for (size_t k = 0; k < held.size() && !item; ++k)
+        if (held[k]->data == itemData && !held[k]->isEquipped)
+          item = held[k];
+      if (!item) {
+        out = "trade failed: " + itemName + " vanished after moving it from " + fromName + " to " +
+              trader->getName();
+        return true;
+      }
+    }
+    const int price = item->getValueSingle(true);
+    if (price <= 0)
+      problems.push_back("the game prices it at 0");
     const int countBefore = (Valid(buyerInv) && itemData) ? CountAllSections(buyerInv, itemData) : 0;
     Item *bought = from->buyItem(item, c);
     ok = Valid(bought);
+    if (!ok) {
+      problems.push_back("buyItem refused (not enough cats? buyer " + Int(c->getMoney()) + ")");
+      if (storage) { // put it back on the shelf
+        Item *back = traderInv->removeItemDontDestroy_returnsItem(item, 1, true);
+        if (Valid(back) && !storage->addItem(back, 1, false, false))
+          traderInv->addItem(back, 1, false, true);
+      }
+    }
     // buyItem takes the money and hands the item back detached (no inventory, not on the
     // ground): place it like the trade window does, into the buyer's inventory or at her feet.
+    // giveItem refuses when the matching equipment slot is taken, so the plain inventory
+    // add (dropping at her feet when full) is the fallback.
     std::string placed = "already";
     if (ok && !bought->isInInventory && !bought->_isPhysical) {
       bool given = false;
@@ -1011,18 +1067,38 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
       } catch (...) {
         given = false;
       }
+      if (!given && Valid(buyerInv)) {
+        try {
+          given = buyerInv->addItem(bought, bought->quantity > 0 ? bought->quantity : 1, true, false);
+        } catch (...) {
+          given = false;
+        }
+      }
       placed = given ? (bought->isInInventory ? "inventory" : (bought->_isPhysical ? "ground" : "unknown"))
                      : "failed";
+      if (!given)
+        problems.push_back("the buyer's inventory refused the item and it could not be dropped");
     }
     const int arrived = (Valid(buyerInv) && itemData) ? CountAllSections(buyerInv, itemData) - countBefore : 0;
-    Log("KAH: trade " + c->getName() + " <- " + trader->getName() + " (" + fromName + ") " + itemName +
+    const int paid = buyerBefore - c->getMoney(), received = trader->getMoney() - traderBefore;
+    if (ok && price > 0 && paid != price)
+      problems.push_back("buyer paid " + Int(paid) + " of " + Int(price));
+    if (ok && paid > 0 && received != paid)
+      problems.push_back("trader received " + Int(received) + " of " + Int(paid));
+    if (ok && arrived <= 0 && placed != "ground")
+      problems.push_back("nothing arrived in the buyer's inventory");
+    std::string why;
+    for (size_t i = 0; i < problems.size(); ++i)
+      why += (i ? "; " : " problems: ") + problems[i];
+    const std::string source = storage ? fromName + " via " + trader->getName() : fromName;
+    Log("KAH: trade " + c->getName() + " <- " + trader->getName() + " (" + source + ") " + itemName +
         " ok=" + (ok ? "1" : "0") + " placed=" + placed + " arrived=" + Int(arrived) + " buyer " +
         Int(buyerBefore) + " -> " + Int(c->getMoney()) + " trader " + Int(traderBefore) + " -> " +
-        Int(trader->getMoney()));
-    out = std::string(ok ? "bought " : "trade failed: ") + itemName + " from " + fromName +
+        Int(trader->getMoney()) + why);
+    out = std::string(ok ? "bought " : "trade failed: ") + itemName + " from " + source +
           " (value " + Int(price) + ") arrived=" + Int(arrived) + " placed=" + placed + ", buyer cats " +
           Int(buyerBefore) + " -> " + Int(c->getMoney()) + ", trader cats " + Int(traderBefore) + " -> " +
-          Int(trader->getMoney());
+          Int(trader->getMoney()) + why;
     return true;
   }
   if (cmd == "eat") { // eat <npc> <food item in inventory>
