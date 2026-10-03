@@ -64,7 +64,8 @@ Everything else needs a loaded game.
 | `transfer <from npc> <to npc> <item>` | move the same (unequipped) item instance between inventories |
 | `packput <npc> <pack> <item> [n]` | create items directly inside a backpack the npc owns |
 | `packweight <npc> <pack>` | a backpack's equipped state, raw content weight and total weight |
-| `craftfinish <npc> <item>` | finish a craft of the item at the nearest real crafting building (within 300), with the npc as crafter |
+| `craftfinish <npc> <item> [at <bench>]` | queue a craft of the item at the nearest crafting bench (within 300; `at` = part of the bench name) and run the bench's real finish step with the npc as crafter (mods hooking it see a real craft); reports what reached the bench output. A repeat needs room in the output |
+| `benches [radius]` | crafting benches nearby with their queue and inventory sections (sizes, limits, items with grid position) |
 
 Stats: labouring, science, engineering, robotics, weapon_smith, armour_smith,
 crossbow_smith, medic, turrets, farming, cooking, stealth, athletics,
@@ -73,7 +74,8 @@ maxrunspeed, currentrunspeed, encumbrance.
 
 ## Notes
 
-- `give` and `stash` can't create weapons; `find` shows exact names. Items can
-  be named by game-data string ID too (`find` prints `sid=`).
+- Weapons can't be created (`give`, `stash`, `buy`, `packput`, `craftfinish`): the game's item
+  factory refuses them, with or without a maker and quality grade. `find` shows exact names;
+  items can be named by game-data string ID too (`find` prints `sid=`).
 - Same-faction NPCs ignore `attack` orders against each other.
 - Characters teleported next to a hostile squad get attacked.

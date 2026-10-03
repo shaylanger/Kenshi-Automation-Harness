@@ -13,6 +13,7 @@ Built-in commands:
   load <save> | save <name>
   speed <0|0.5..50>                       0 pauses
   chars [radius] | traders [radius]       characters near the player | real traders
+  benches [radius]                        crafting benches, their queue and contents
   find <character|squad|item|weapon|armour|container> <text>
   spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] [size <mult>]
   where|inv|hp|sections|select|recruit|kill <npc>  (inv: inventory JSON incl. worn items;
@@ -24,7 +25,7 @@ Built-in commands:
   attack <attacker> <target> | give <npc> <item> [n] | relation <npc> <-100..100>
   money <npc> <delta> | buy <buyer> <seller> <item> <price>
   stash <item> <n> [near <npc>]
-  transfer <from npc> <to npc> <item> | craftfinish <npc> <item>
+  transfer <from npc> <to npc> <item> | craftfinish <npc> <item> [at <bench>]
   packput <npc> <pack> <item> [n] | packweight <npc> <pack>
 <npc> is a name (exact match nearest the player wins), #serial, @player or @selected.
 

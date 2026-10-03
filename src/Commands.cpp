@@ -356,6 +356,32 @@ int CountAllSections(Inventory *inv, GameData *data) {
   return total;
 }
 
+// Creates one item. The game's factory returns nothing for weapons (with or
+// without a maker and quality grade, tried 2026-10-02), so they are refused
+// with a clear message instead of a silent "0/1".
+Item *MakeItem(GameWorld *world, GameData *data, const std::vector<std::string> &, size_t,
+               GameData *defaultMaker, std::string &error) {
+  if (data->type == WEAPON) {
+    error = "weapons can't be created by the harness (the game's item factory refuses them): " +
+            data->name;
+    return nullptr;
+  }
+  Item *item = world->theFactory->createItem(data, hand(), defaultMaker, nullptr, -1, nullptr);
+  if (!Valid(item))
+    error = "the game could not create " + data->name;
+  return Valid(item) ? item : nullptr;
+}
+
+// A count argument at f[at], unless that field is already an option name.
+int CountArg(const std::vector<std::string> &f, size_t at) {
+  if (f.size() <= at)
+    return 1;
+  const std::string v = Lower(f[at]);
+  if (v == "at" || v == "near")
+    return 1;
+  return atoi(f[at].c_str());
+}
+
 void SetAllParts(Character *c, float fraction) {
   MedicalSystem &med = c->medical;
   int count = med.getPartCount();
@@ -398,11 +424,12 @@ const char *const kBuiltins[] = {
     "stash", "stat",   "setstat",  "weight",  "iteminfo", "equip", "unequip",
     "where", "hp",     "inv",      "teleport", "ko",    "health",  "kill",  "hunger",
     "attack", "money", "buy",      "select",  "recruit", "give",   "relation",
-    "traders", "transfer", "packput", "packweight", "craftfinish", "sections"};
+    "traders", "transfer", "packput", "packweight", "craftfinish", "sections",
+    "benches"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
-    "chars [radius] | traders [radius] | find <character|squad|item|weapon|armour|container> <text> | "
+    "chars [radius] | traders [radius] | benches [radius] | find <character|squad|item|weapon|armour|container> <text> | "
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
     "[size <mult>] | stash <item> <n> [near <npc>] | stat <npc> <stat> | "
     "setstat <npc> <stat> <value> | weight <npc> | iteminfo|equip|unequip <npc> <item> | "
@@ -411,7 +438,7 @@ const char *const kHelp =
     "attack <attacker> <target> | money <npc> <delta> | buy <buyer> <seller> <item> <price> | "
     "give <npc> <item> [n] | relation <npc> <-100..100> | "
     "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "
-    "packweight <npc> <pack> | craftfinish <npc> <item>. "
+    "packweight <npc> <pack> | craftfinish <npc> <item> [at <bench>]. "
     "<npc> = name (exact match nearest the player wins, else nearest substring), "
     "#serial, @player or @selected.";
 
@@ -698,6 +725,42 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     return "spawned " + Int(made) + "/" + Int(count) + " " + charData->name + ": " + names;
   }
 
+  if (cmd == "benches") { // benches [radius]: crafting benches, their queue and inventory
+    float radius = f.size() >= 3 ? (float)atof(f[2].c_str()) : 300.0f;
+    lektor<RootObject *> nearby;
+    world->getObjectsWithinSphere(nearby, origin, radius, BUILDING, 512, nullptr);
+    std::string out;
+    int n = 0;
+    for (uint32_t i = 0; i < nearby.size() && n < 30; ++i) {
+      CraftingBuilding *b = dynamic_cast<CraftingBuilding *>(nearby.stuff[i]);
+      if (!Valid(b))
+        continue;
+      ++n;
+      out += " || " + b->getName() + " dist=" + Num(b->getPosition().distance(origin)) +
+             " queue=" + Int((long long)b->crafting.size()) +
+             " out=" + (Valid(b->outItem) ? b->outItem->getName() : std::string("-"));
+      Inventory *inv = b->getInventory();
+      if (!Valid(inv))
+        continue;
+      lektor<InventorySection *> &sections = inv->getAllSections();
+      for (uint32_t si = 0; si < sections.size(); ++si) {
+        InventorySection *section = sections.stuff[si];
+        if (!Valid(section))
+          continue;
+        out += " | " + section->name + " " + Int(section->width) + "x" + Int(section->height) +
+               (section->itemsLimit > 0 ? " limit=" + Int(section->itemsLimit) : std::string()) + ":";
+        const Ogre::vector<InventorySection::SectionItem>::type &items = section->getItems();
+        for (size_t k = 0; k < items.size() && k < 12; ++k)
+          if (Valid(items[k].item))
+            out += " [" + items[k].item->getName() + " x" + Int(items[k].item->quantity) + " @" +
+                   Int(items[k].x) + "," + Int(items[k].y) + " " + Int(items[k].w) + "x" +
+                   Int(items[k].h) + "]";
+      }
+    }
+    ok = true;
+    return Int(n) + " crafting benches within " + Num(radius) + ":" + out;
+  }
+
   if (cmd == "stash") { // stash <item> <count> [near <npc>]: fill the nearest storage
     if (f.size() < 4)
       return "usage: stash <item> <count> [near <npc>]";
@@ -749,7 +812,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     Inventory *inv = best->getInventory();
     int added = 0;
     for (int i = 0; i < count; ++i) {
-      Item *item = world->theFactory->createItem(data, hand(), nullptr, nullptr, -1, nullptr);
+      Item *item = MakeItem(world, data, f, 4, nullptr, error);
       if (!Valid(item) || !inv->addItem(item, 1, false, true))
         break;
       ++added;
@@ -815,7 +878,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       data = FindData(world, types[t], f[4], error);
     if (!data)
       return error;
-    int count = f.size() >= 6 ? atoi(f[5].c_str()) : 1;
+    int count = CountArg(f, 5);
     if (count < 1 || count > 50)
       return "count must be 1..50";
     Inventory *pinv = pack->getInventory();
@@ -823,7 +886,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return "backpack inventory unavailable";
     int added = 0;
     for (int i = 0; i < count; ++i) {
-      Item *item = world->theFactory->createItem(data, hand(), nullptr, nullptr, -1, nullptr);
+      Item *item = MakeItem(world, data, f, 5, nullptr, error);
       if (!Valid(item) || !pinv->addItem(item, 1, false, true))
         break;
       ++added;
@@ -861,9 +924,10 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
            " raw=" + Num(raw) + " total=" + Num(total);
   }
 
-  if (cmd == "craftfinish") { // craftfinish <npc> <item name|stringID>
+  if (cmd == "craftfinish") { // craftfinish <npc> <item name|stringID> [at <bench name>]
     if (f.size() < 4)
-      return "usage: craftfinish <npc> <item name|stringID>";
+      return "usage: craftfinish <npc> <item name|stringID> [at <bench name>]";
+    const std::string benchWanted = Lower(Option(f, 4, "at", ""));
     std::string error;
     GameData *data = nullptr;
     const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER};
@@ -879,6 +943,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       CraftingBuilding *b = dynamic_cast<CraftingBuilding *>(nearby.stuff[i]);
       if (!Valid(b))
         continue;
+      if (!benchWanted.empty() && Lower(b->getName()).find(benchWanted) == std::string::npos)
+        continue;
       float dist = b->getPosition().distance(c->getPosition());
       if (!best || dist < bestDist) {
         best = b;
@@ -886,19 +952,53 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       }
     }
     if (!best)
-      return "no CraftingBuilding within 300";
-    Item *item = world->theFactory->createItem(
-        data, hand(), CraftingBuilding::playerManufacturerData(), nullptr, -1, nullptr);
-    if (!Valid(item))
-      return "could not create craft-finish item";
+      return benchWanted.empty() ? "no CraftingBuilding within 300"
+                                 : "no CraftingBuilding matching '" + benchWanted + "' within 300";
+    error.clear();
+    Item *item = MakeItem(world, data, f, 4, CraftingBuilding::playerManufacturerData(), error);
+    if (!item)
+      return error;
     const std::string itemName = data->name;
     const std::string buildingName = best->getName();
+    // Report what really reached the bench's output (like "give").
+    Inventory *out = best->getInventory();
+    const int before = CountAllSections(out, data);
+    // addFinishedCraftItem completes the craft at the head of the bench's
+    // queue; with an empty queue the item goes nowhere. Queue this craft
+    // first (as the player's "queue" button does), almost finished.
+    bool queued = false;
+    if (best->crafting.empty()) {
+      best->_addCraft(data, nullptr, 0.99f, YesNoMaybe(YesNoMaybe::MAYBE));
+      queued = !best->crafting.empty();
+    }
     best->whosCrafting = c->getHandle();
     best->addFinishedCraftItem(item);
-    ok = true;
+    // Take our helper craft off the queue again, or the bench would make it twice.
+    if (queued && !best->crafting.empty())
+      best->_removeCraft(0);
+    int after = CountAllSections(out, data);
+    // With something already in the output the game's finish step doesn't
+    // place the item (it ran, hooks included): put it in the output section.
+    std::string placedBy = "game";
+    if (after <= before && Valid(out)) {
+      InventorySection *outSection = out->getSection("out");
+      // (Never place by hand: getValidInventoryPosition answers 0,0 even when
+      // that spot is taken, which stacked items on top of each other.)
+      if (Valid(outSection) && outSection->addItem(item, item->quantity > 0 ? item->quantity : 1))
+        placedBy = "harness";
+      else
+        placedBy = "nobody: the bench output is full (as in the game, finished items must be "
+                   "taken out first; see benches)";
+      after = CountAllSections(out, data);
+    }
+    ok = after > before;
     Log("KAH: craftfinish crafter=" + c->getName() + " building=" + buildingName +
-        " item=" + itemName);
-    return "craftfinish " + itemName + " via " + buildingName + " crafter=" + c->getName();
+        " item=" + itemName + " output " + Int(before) + " -> " + Int(after) + " placed_by=" +
+        placedBy);
+    return std::string(ok ? "" : "item not in the bench output: ") + "craftfinish " + itemName +
+           " via " + buildingName + " (" + Num(bestDist) + " away) crafter=" + c->getName() +
+           " output " + Int(before) + " -> " + Int(after) + " placed_by=" + placedBy +
+           " queue_now=" + Int((long long)best->crafting.size());
   }
 
   if (cmd == "stat") { // stat <npc> <stat>
@@ -1146,7 +1246,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       data = FindData(world, types[t], f[4], error);
     if (!data)
       return error;
-    Item *item = world->theFactory->createItem(data, hand(), nullptr, nullptr, -1, nullptr);
+    Item *item = MakeItem(world, data, f, 6, nullptr, error);
     Inventory *inv = c->getInventory();
     if (!Valid(item) || !Valid(inv) || !inv->addItem(item, 1, false, true))
       return "could not add the item";
@@ -1174,7 +1274,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   if (cmd == "give") { // give <npc> <item> [count]
     if (f.size() < 4)
       return "usage: give <npc> <item> [count]";
-    int count = f.size() >= 5 ? atoi(f[4].c_str()) : 1;
+    int count = CountArg(f, 4);
     if (count < 1 || count > 50)
       return "count must be 1..50";
     std::string error;
@@ -1189,12 +1289,15 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return "no inventory";
     int added = 0;
     int countBefore = CountAllSections(inv, data);
+    error.clear();
     for (int i = 0; i < count; ++i) {
-      Item *item = world->theFactory->createItem(data, hand(), nullptr, nullptr, -1, nullptr);
+      Item *item = MakeItem(world, data, f, 4, nullptr, error);
       if (!Valid(item) || !inv->addItem(item, 1, false, true))
         break;
       ++added;
     }
+    if (added == 0 && !error.empty())
+      return error;
     // addItem can report success for items that don't stay: report what really arrived.
     int real = CountAllSections(inv, data) - countBefore;
     Log("KAH: give " + c->getName() + " item=" + data->name + " added=" + Int(added) +
