@@ -23,7 +23,7 @@ Built-in commands:
   spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] [size <mult>]
   where|inv|hp|sections|select|recruit|kill <npc>  (inv: inventory JSON incl. worn items;
                                           sections: inventory sections and their items)
-  stat <npc> <stat> | setstat <npc> <stat> <value> | weight <npc>
+  stat <npc> <stat|all> | setstat <npc> <stat> <value> | weight <npc>   (stat names: stat <npc> all)
   iteminfo|equip|unequip <npc> "<item name>"
   teleport <npc> <npc2 | x y z | building <name>> [dist m]
   ko <npc> [seconds] | health <npc> <percent> | hunger <npc> [0..300]

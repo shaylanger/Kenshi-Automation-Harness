@@ -53,7 +53,7 @@ Everything else needs a loaded game.
 | `sections <npc>` | inventory sections (size, equip/container slot) with their items, and the worn backpack |
 | `hp <npc>` | flesh/max per body part, worst part %, blood, KO |
 | `inv <npc>` | inventory incl. worn items and backpack as JSON (works on bodies) |
-| `stat <npc> <stat>` / `setstat <npc> <stat> <value>` | read/set a skill (base and effective) |
+| `stat <npc> <stat>` / `setstat <npc> <stat> <value>` / `stat <npc> all` | read/set a skill (base and effective); `all` lists every skill as `name=base(effective)`. Names (KAH 16): strength, toughness, dexterity, athletics, perception, attack (melee_attack), defence (defense, melee_defence), dodge, martial_arts, katanas, sabres, hackers, heavy_weapons, blunt, polearms, crossbows, turrets, weapons, mass_combat, friendly_fire (precision_shooting), stealth, assassination, lockpicking, thievery, swimming, survival, labouring (mining), science (research), engineering, robotics, weapon_smith, armour_smith, crossbow_smith, medic, hive_medic, vet, farming, cooking; derived values: maxcarry, maxrunspeed, currentrunspeed, encumbrance, combatspeed, damageresistance, knockouttime, primaryweapondamage, primaryweaponspeed |
 | `weight <npc>` | inventory weight |
 | `iteminfo\|equip\|unequip <npc> <item>` | an inventory item by name; `unequip` moves it to the main inventory (dropped next to the character if there's no room) |
 | `teleport <npc> <npc2 \| x y z> [dist m]` | move a character |

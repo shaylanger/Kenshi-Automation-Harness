@@ -194,32 +194,68 @@ Character *FindCharacter(GameWorld *world, const std::string &name) {
   return exact ? exact : partial;
 }
 
+// Stat names for stat/setstat (KAH 16: every skill the game has, melee
+// ones included; the first name of each entry is what "stat <npc> all" prints).
+struct StatName {
+  const char *name;
+  StatsEnumerated stat;
+};
+const StatName kStatNames[] = {
+    {"strength", STAT_STRENGTH}, {"toughness", STAT_TOUGHNESS},
+    {"dexterity", STAT_DEXTERITY}, {"athletics", STAT_ATHLETICS},
+    {"perception", STAT_PERCEPTION},
+    {"attack", STAT_MELEE_ATTACK}, {"melee_attack", STAT_MELEE_ATTACK}, {"melee", STAT_MELEE_ATTACK},
+    {"defence", STAT_MELEE_DEFENCE}, {"defense", STAT_MELEE_DEFENCE}, {"melee_defence", STAT_MELEE_DEFENCE},
+    {"melee_defense", STAT_MELEE_DEFENCE}, {"dodge", STAT_DODGE}, {"martial_arts", STAT_MARTIALARTS},
+    {"martialarts", STAT_MARTIALARTS}, {"katanas", STAT_KATANAS}, {"sabres", STAT_SABRES},
+    {"sabers", STAT_SABRES}, {"hackers", STAT_HACKERS}, {"heavy_weapons", STAT_HEAVYWEAPONS},
+    {"heavyweapons", STAT_HEAVYWEAPONS}, {"blunt", STAT_BLUNT}, {"polearms", STAT_POLEARMS},
+    {"crossbows", STAT_CROSSBOWS}, {"turrets", STAT_TURRETS}, {"turret", STAT_TURRETS},
+    {"weapons", STAT_WEAPONS}, {"mass_combat", STAT_MASSCOMBAT}, {"masscombat", STAT_MASSCOMBAT},
+    {"friendly_fire", STAT_FRIENDLY_FIRE}, {"precision_shooting", STAT_FRIENDLY_FIRE},
+    {"stealth", STAT_STEALTH}, {"assassination", STAT_ASSASSINATION},
+    {"lockpicking", STAT_LOCKPICKING}, {"thievery", STAT_THIEVING}, {"thieving", STAT_THIEVING},
+    {"swimming", STAT_SWIMMING}, {"survival", STAT_SURVIVAL},
+    {"labouring", STAT_LABOURING}, {"laboring", STAT_LABOURING}, {"mining", STAT_LABOURING},
+    {"science", STAT_SCIENCE}, {"research", STAT_SCIENCE}, {"engineering", STAT_ENGINEERING},
+    {"robotics", STAT_ROBOTICS}, {"weapon_smith", STAT_SMITHING_WEAPON},
+    {"weaponsmith", STAT_SMITHING_WEAPON}, {"armour_smith", STAT_SMITHING_ARMOUR},
+    {"armor_smith", STAT_SMITHING_ARMOUR}, {"armoursmith", STAT_SMITHING_ARMOUR},
+    {"crossbow_smith", STAT_SMITHING_BOW}, {"crossbowsmith", STAT_SMITHING_BOW},
+    {"medic", STAT_MEDIC}, {"medicine", STAT_MEDIC}, {"hive_medic", STAT_HIVEMEDIC},
+    {"vet", STAT_VET}, {"farming", STAT_FARMING}, {"cooking", STAT_COOKING},
+    {"maxcarry", _MaxCarryWeight}, {"maxcarryweight", _MaxCarryWeight},
+    {"maxrunspeed", _MaxRunSpeed}, {"currentrunspeed", _CurrentRunSpeed},
+    {"encumbrance", _encumbrance}, {"combatspeed", _combatSpeed},
+    {"damageresistance", _DamageResistance}, {"knockouttime", _KnockoutTime},
+    {"primaryweapondamage", _PrimaryWeaponDamage}, {"primaryweaponspeed", _PrimaryWeaponSpeed},
+};
+
 bool ParseStatName(const std::string &name, StatsEnumerated &out) {
   const std::string n = Lower(name);
-  if (n == "labouring" || n == "laboring" || n == "mining") out = STAT_LABOURING;
-  else if (n == "science" || n == "research") out = STAT_SCIENCE;
-  else if (n == "engineering") out = STAT_ENGINEERING;
-  else if (n == "robotics") out = STAT_ROBOTICS;
-  else if (n == "weapon_smith" || n == "weaponsmith") out = STAT_SMITHING_WEAPON;
-  else if (n == "armour_smith" || n == "armor_smith" || n == "armoursmith") out = STAT_SMITHING_ARMOUR;
-  else if (n == "crossbow_smith" || n == "crossbowsmith") out = STAT_SMITHING_BOW;
-  else if (n == "medic" || n == "medicine") out = STAT_MEDIC;
-  else if (n == "turrets" || n == "turret") out = STAT_TURRETS;
-  else if (n == "farming") out = STAT_FARMING;
-  else if (n == "cooking") out = STAT_COOKING;
-  else if (n == "stealth") out = STAT_STEALTH;
-  else if (n == "athletics") out = STAT_ATHLETICS;
-  else if (n == "assassination") out = STAT_ASSASSINATION;
-  else if (n == "swimming") out = STAT_SWIMMING;
-  else if (n == "perception") out = STAT_PERCEPTION;
-  else if (n == "lockpicking") out = STAT_LOCKPICKING;
-  else if (n == "thievery" || n == "thieving") out = STAT_THIEVING;
-  else if (n == "maxcarry" || n == "maxcarryweight") out = _MaxCarryWeight;
-  else if (n == "maxrunspeed") out = _MaxRunSpeed;
-  else if (n == "currentrunspeed") out = _CurrentRunSpeed;
-  else if (n == "encumbrance") out = _encumbrance;
-  else return false;
-  return true;
+  for (size_t i = 0; i < sizeof(kStatNames) / sizeof(kStatNames[0]); ++i)
+    if (n == kStatNames[i].name) {
+      out = kStatNames[i].stat;
+      return true;
+    }
+  return false;
+}
+
+// "stat <npc> all": every skill once (first name of each), base/effective.
+std::string AllStats(CharStats *stats) {
+  std::string out;
+  std::vector<int> seen;
+  for (size_t i = 0; i < sizeof(kStatNames) / sizeof(kStatNames[0]); ++i) {
+    const StatsEnumerated st = kStatNames[i].stat;
+    if ((int)st >= (int)STAT_END || std::find(seen.begin(), seen.end(), (int)st) != seen.end())
+      continue;
+    seen.push_back((int)st);
+    out += " " + std::string(kStatNames[i].name) + "=" + Num(stats->getStat(st, true));
+    const float eff = stats->getStat(st, false);
+    if (eff != stats->getStat(st, true))
+      out += "(" + Num(eff) + ")";
+  }
+  return out;
 }
 
 Item *FindInventoryItem(Character *c, const std::string &wanted, bool &ambiguous) {
@@ -562,7 +598,7 @@ const char *const kHelp =
     "blueprint <item> | craft <npc> <item> [at <bench>] [count n] | find <character|squad|item|weapon|armour|container> <text> | "
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
     "[size <mult>] | stash <item> <n> [near <npc>] | stat <npc> <stat> | "
-    "setstat <npc> <stat> <value> | weight <npc> | iteminfo|equip|unequip <npc> <item> | "
+    "setstat <npc> <stat> <value> | stat <npc> all | weight <npc> | iteminfo|equip|unequip <npc> <item> | "
     "where|hp|inv|sections|select|recruit|kill <npc> | teleport <npc> <npc2 | x y z | building <name>> [dist m] | "
     "ko <npc> [seconds] | health <npc> <percent> | hunger <npc> [0..300] | "
     "attack <attacker> <target> | money <npc> <delta> | buy <buyer> <seller> <item> <price> | "
@@ -1339,12 +1375,16 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   if (cmd == "stat") { // stat <npc> <stat>
     if (f.size() < 4)
       return "usage: stat <npc> <stat>";
-    StatsEnumerated st = STAT_NONE;
-    if (!ParseStatName(f[3], st))
-      return "unknown stat: " + f[3];
     CharStats *stats = c->getStats();
     if (!Valid(stats))
       return "no stats";
+    if (Lower(f[3]) == "all") {
+      ok = true;
+      return c->getName() + " base(effective):" + AllStats(stats);
+    }
+    StatsEnumerated st = STAT_NONE;
+    if (!ParseStatName(f[3], st))
+      return "unknown stat: " + f[3] + " (stat <npc> all lists them)";
     float base = stats->getStat(st, true);
     float effective = stats->getStat(st, false);
     ok = true;
