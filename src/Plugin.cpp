@@ -268,6 +268,7 @@ void FrameWork(bool fromOgre) {
   SampleProduction(ou);
   KeepSuppliedPowered();
   KeepProtected();
+  KeepWalkTimers();
   if (++g_framesSinceLaunch % 600 == 0)
     Log("KAH: fps frames=" + Int(g_framesSinceLaunch) + " source=" + (fromOgre ? "ogre" : "mygui") +
         " window: " + g_frameStats.Report());

@@ -12,6 +12,7 @@
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
+#include <kenshi/CharMovement.h>
 #include <kenshi/CharStats.h>
 #include <kenshi/Building/CraftingBuilding.h>
 #include <kenshi/Research.h>
@@ -590,7 +591,7 @@ const char *const kBuiltins[] = {
     "tasks", "ui", "click", "messages", "screenshot", "time", "building", "production",
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
-    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload"};
+    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
@@ -608,7 +609,7 @@ const char *const kHelp =
     "faction <npc> <faction> | sleep <npc> [bed <name>] | wake <npc> | "
     "damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | protect [<npc> on|off] | shackle <npc> [owner <npc>] | unshackle <npc> | "
     "cage|uncage <npc> [cage] | shopstock <trader> [radius <m>] | trade <buyer> <trader> <item> [radius <m>] | "
-    "eat <npc> <food> | unload <npc> | reload <name> | drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [radius <m>] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
+    "eat <npc> <food> | runspeed <npc> | walktime <npc> <dist> [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [radius <m>] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | "
@@ -622,6 +623,13 @@ const char *const kHelp =
 void SampleProduction(GameWorld *world) {
   try {
     SampleTracked(world);
+  } catch (...) {
+  }
+}
+
+void KeepWalkTimers() {
+  try {
+    WalkTick(ou);
   } catch (...) {
   }
 }
@@ -1141,6 +1149,61 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   Character *c = FindCharacter(world, f[2]);
   if (!c)
     return NotFound(f[2]);
+  if (cmd == "runspeed") { // runspeed <npc>: movement speeds the game uses now (KAH 19)
+    CharMovement *m = c->movement;
+    if (!Valid(m))
+      return c->getName() + " has no movement";
+    static const char *const speeds[] = {"walk", "jog", "run", "grouped", "no_change"};
+    const int so = (int)m->speedOrders;
+    ok = true;
+    return c->getName() + " movement_speed=" + Num(c->getMovementSpeed()) +
+           " max_speed=" + Num(m->getMaxSpeed()) + " current_speed=" + Num(m->currentSpeed) +
+           " desired_speed=" + Num(m->desiredSpeed) + " walk_speed=" + Num(m->walkSpeed) +
+           " speed_orders=" + (so >= 0 && so < 5 ? speeds[so] : "?") +
+           " (m/s at game speed 1; walktime measures a real walk)";
+  }
+
+  if (cmd == "walktime") { // walktime <npc> <dist> [walk|run]: timed walk, answered on arrival (KAH 19)
+    const float dist = f.size() >= 4 ? (float)atof(f[3].c_str()) : 0.0f;
+    if (!(dist >= 2.0f && dist <= 500.0f))
+      return "usage: walktime <npc> <dist 2..500> [walk|run] (he walks that far along +x)";
+    if (c->isUnconcious() || c->isDead())
+      return c->getName() + " can't walk (KO or dead)";
+    OrdersReceiver *orders = c->getOrdersReciever();
+    if (!Valid(orders))
+      return c->getName() + " takes no orders";
+    const std::string mode = f.size() >= 5 ? Lower(f[4]) : "";
+    CharMovement *m = c->movement;
+    if (Valid(m) && (mode == "walk" || mode == "run"))
+      m->setDesiredSpeedOrders(mode == "walk" ? WALK : RUN);
+    WalkTimer w;
+    w.id = f[0];
+    w.who = c->getHandle();
+    w.name = c->getName();
+    w.start = c->getPosition();
+    w.target = w.start + Ogre::Vector3(dist, 0, 0);
+    w.dist = dist;
+    w.simSeconds = 0;
+    w.startTick = w.lastTick = GetTickCount();
+    w.startGameHours = world->getTimeStamp_inGameHours().getTotalHours();
+    w.topSpeed = 0;
+    w.moving = false;
+    orders->clearOrders();
+    orders->addOrder(MOVE_CUS_ORDERED, hand(), w.target, true, false);
+    for (size_t i = 0; i < g_walks.size(); ++i)
+      if (SameHandle(g_walks[i].who, w.who)) {
+        WriteOutbox(g_walks[i].id, false, "replaced by a new walktime for " + w.name);
+        g_walks.erase(g_walks.begin() + i);
+        break;
+      }
+    g_walks.push_back(w);
+    Log("KAH: walktime " + w.name + " dist=" + Num(dist) + " mode=" + (mode.empty() ? "as is" : mode) +
+        " paused=" + (world->isPaused() ? "1" : "0"));
+    pending = true; // answered by WalkTick when he arrives
+    ok = true;
+    return "";
+  }
+
   {
     std::string reply;
     if (RunCharacterCommand(world, f, c, origin, ok, reply))

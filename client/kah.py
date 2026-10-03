@@ -44,6 +44,7 @@ Built-in commands:
   drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [radius <m>]   ground items (same instance)
   protect [<npc> on|off]                  test cheat: kept at full health, a KO cleared at once
   unload <npc> | reload <name>            stream his squad out / back in (game streaming)
+  runspeed <npc> | walktime <npc> <dist> [walk|run]   movement speeds | timed walk (seconds=, speed=)
   shackle|unshackle <npc> | cage|uncage <npc> [cage] | shopstock <trader> [radius <m>]
   trade <buyer> <trader> <item> [radius <m>]   (shop storage radius: default 60, max 300)
   ui [filter] [all] | click <widget> | messages [n] | screenshot [name]
@@ -139,7 +140,13 @@ def write_command(d, line, deadline):
             pass
 
 
-def send(d, cmd, args, timeout=20):
+# Commands the game answers later (seconds the client waits by default).
+LONG_COMMANDS = {'walktime': 200}
+
+
+def send(d, cmd, args, timeout=None):
+    if timeout is None:
+        timeout = LONG_COMMANDS.get(cmd.lower(), 20)
     flag, outbox = (os.path.join(d, n) for n in ('enabled.flag', 'outbox.txt'))
     if not os.path.exists(flag):
         sys.exit('harness is off: run "kah on" (before launching Kenshi)')

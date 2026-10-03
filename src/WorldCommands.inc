@@ -623,6 +623,80 @@ std::string PackLine(ContainerItem *pack) {
          " own_weight=" + Num(pack->getItemWeightSingle());
 }
 
+// --- walktime (KAH 19): a timed walk, answered when he arrives.
+struct WalkTimer {
+  std::string id;   // inbox id: the reply is written when the walk ends
+  hand who;
+  std::string name;
+  Ogre::Vector3 start, target;
+  float dist;
+  double simSeconds;  // real frame time x game speed while unpaused
+  DWORD startTick, lastTick;
+  double startGameHours;
+  float topSpeed;     // highest CharMovement current speed seen
+  bool moving;        // has started to move
+};
+std::vector<WalkTimer> g_walks;
+
+void WalkTick(GameWorld *world) {
+  if (g_walks.empty())
+    return;
+  const DWORD now = GetTickCount();
+  for (size_t i = 0; i < g_walks.size();) {
+    WalkTimer &w = g_walks[i];
+    const double dt = (now - w.lastTick) / 1000.0;
+    w.lastTick = now;
+    bool paused = true;
+    float mult = 0;
+    try {
+      paused = world->isPaused();
+      mult = world->getFrameSpeedMultiplier();
+    } catch (...) {
+    }
+    if (!paused)
+      w.simSeconds += dt * mult;
+    Character *c = nullptr;
+    try {
+      c = w.who.getCharacter();
+    } catch (...) {
+      c = nullptr;
+    }
+    std::string done;
+    bool okDone = false;
+    if (!Valid(c)) {
+      done = w.name + " is gone (unloaded or a load)";
+    } else {
+      const Ogre::Vector3 p = c->getPosition();
+      Ogre::Vector3 flat = p - w.start;
+      flat.y = 0;
+      const float covered = flat.length();
+      CharMovement *m = c->movement;
+      if (Valid(m) && m->currentSpeed > w.topSpeed)
+        w.topSpeed = m->currentSpeed;
+      Ogre::Vector3 left = w.target - p;
+      left.y = 0;
+      if (covered >= w.dist - 1.0f || left.length() < 1.5f) {
+        okDone = true;
+        const double gameMin = (world->getTimeStamp_inGameHours().getTotalHours() - w.startGameHours) * 60.0;
+        done = w.name + " walked " + Num(covered) + " m seconds=" + Num((float)w.simSeconds) +
+               " speed=" + Num(w.simSeconds > 0 ? (float)(covered / w.simSeconds) : 0.0f) +
+               " m/s real_seconds=" + Num((now - w.startTick) / 1000.0f) +
+               " game_minutes=" + Num((float)gameMin) + " top_speed=" + Num(w.topSpeed);
+      } else if (now - w.startTick > 180000) {
+        done = w.name + " did not arrive within 180 s (covered " + Num(covered) + " of " + Num(w.dist) +
+               " m, seconds=" + Num((float)w.simSeconds) + "): blocked path, paused game or KO?";
+      }
+    }
+    if (!done.empty()) {
+      Log("KAH: walktime " + done);
+      WriteOutbox(w.id, okDone, done);
+      g_walks.erase(g_walks.begin() + i);
+    } else {
+      ++i;
+    }
+  }
+}
+
 // Squads "unload" streamed out this session (for "reload").
 struct Unloaded {
   std::string name;

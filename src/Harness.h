@@ -45,6 +45,8 @@ void SampleProduction(GameWorld *world);
 void KeepSuppliedPowered();
 // Keeps "protect"ed characters healed and awake; every frame.
 void KeepProtected();
+// Ends "walktime" walks (reply on arrival); every frame.
+void KeepWalkTimers();
 
 bool IsBuiltinCommand(const std::string &name);
 
