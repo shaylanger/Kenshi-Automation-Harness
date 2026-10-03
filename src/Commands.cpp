@@ -519,7 +519,7 @@ const char *const kBuiltins[] = {
     "tasks", "ui", "click", "messages", "screenshot", "time", "building", "production",
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
-    "trade", "eat", "blood", "build", "unbuild", "fps", "produced"};
+    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
@@ -535,7 +535,7 @@ const char *const kHelp =
     "order <npc> <task> [target <npc>] [building <name>] [keep] | tasks [filter] | fight <a> <b> | "
     "job <npc> <building> [task <name>] [radius <m>] | jobs|clearjobs <npc> | setname <npc> <name> | "
     "faction <npc> <faction> | sleep <npc> [bed <name>] | wake <npc> | "
-    "damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | shackle <npc> [owner <npc>] | unshackle <npc> | "
+    "damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | protect [<npc> on|off] | shackle <npc> [owner <npc>] | unshackle <npc> | "
     "cage|uncage <npc> [cage] | shopstock <trader> [radius <m>] | trade <buyer> <trader> <item> [radius <m>] | "
     "eat <npc> <food> | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
@@ -551,6 +551,13 @@ const char *const kHelp =
 void SampleProduction(GameWorld *world) {
   try {
     SampleTracked(world);
+  } catch (...) {
+  }
+}
+
+void KeepProtected() {
+  try {
+    ProtectTick();
   } catch (...) {
   }
 }
@@ -572,6 +579,10 @@ void WatchLoads() {
         !sm->name.empty()) {
       g_loadedSave = sm->name;
       Log("KAH: game load signalled save=" + g_loadedSave);
+      if (!g_protected.empty()) {
+        Log("KAH: protect list cleared by the load (" + Int(g_protected.size()) + ")");
+        g_protected.clear();
+      }
     }
     g_lastSignal = signal;
   } catch (...) {

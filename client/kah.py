@@ -40,6 +40,7 @@ Built-in commands:
   (radius: building searches, default 300, max 5000)
   setname <npc> <name> | faction <npc> <faction> | sleep <npc> [bed <b>] | wake <npc>
   damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | eat <npc> <food>
+  protect [<npc> on|off]                  test cheat: kept at full health, a KO cleared at once
   shackle|unshackle <npc> | cage|uncage <npc> [cage] | shopstock <trader> [radius <m>]
   trade <buyer> <trader> <item> [radius <m>]   (shop storage radius: default 60, max 300)
   ui [filter] [all] | click <widget> | messages [n] | screenshot [name]

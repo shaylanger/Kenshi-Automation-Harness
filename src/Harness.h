@@ -43,6 +43,8 @@ void SampleProduction(GameWorld *world);
 // Keeps buildings "power <b> supply" picked at full power; every frame and
 // after each town power-grid update.
 void KeepSuppliedPowered();
+// Keeps "protect"ed characters healed and awake; every frame.
+void KeepProtected();
 
 bool IsBuiltinCommand(const std::string &name);
 

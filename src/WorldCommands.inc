@@ -78,6 +78,48 @@ Building *FindBuilding(GameWorld *world, const Ogre::Vector3 &at, const std::str
 // Plugin.cpp) and every frame, so the grid's own reset can't undo it.
 std::vector<hand> g_supplied;
 
+// "protect <npc> on": characters kept alive and standing (test cheat, KAH
+// 11). Every frame: all body parts and blood to max; a knockout is cleared
+// at once. Nothing about factions or aggro changes, so a fight stays a fight.
+struct Protected {
+  hand h;
+  std::string name;
+  bool wasDown;
+  int revives;
+};
+std::vector<Protected> g_protected;
+
+void ProtectTick() {
+  for (size_t i = 0; i < g_protected.size(); ++i) {
+    Protected &p = g_protected[i];
+    Character *c = nullptr;
+    try {
+      c = p.h.getCharacter();
+    } catch (...) {
+      c = nullptr;
+    }
+    if (!Valid(c) || c->isDead())
+      continue;
+    MedicalSystem &med = c->medical;
+    SetAllParts(c, 1.0f);
+    const float maxBlood = med.getMaxBlood();
+    if (med.blood < maxBlood)
+      med.blood = maxBlood;
+    if (c->isUnconcious()) {
+      med.knockoutTimer = 0.0f;
+      c->playerWantsMeToGetUp = true;
+      med.reassessCollapseMode(false, false);
+      if (!p.wasDown) {
+        ++p.revives;
+        Log("KAH: protect revived " + c->getName() + " (revive " + Int(p.revives) + ")");
+      }
+      p.wasDown = true;
+    } else {
+      p.wasDown = false;
+    }
+  }
+}
+
 // The power a consumer wants at most (0: it uses no power).
 float PowerWanted(UseableStuff *u) {
   float want = 0;
@@ -615,6 +657,55 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     Log("KAH: unbuild " + name + " ok=" + (ok ? "1" : "0"));
     out = std::string(ok ? "destroyed " : "destroy refused: ") + name + " (" + Num(bestDist) +
           " from the player)";
+    return true;
+  }
+  if (cmd == "protect") { // protect [<npc> on|off]: keep a character healed and awake (cheat)
+    if (f.size() == 2) {
+      std::string list;
+      for (size_t i = 0; i < g_protected.size(); ++i) {
+        Character *pc = nullptr;
+        try {
+          pc = g_protected[i].h.getCharacter();
+        } catch (...) {
+          pc = nullptr;
+        }
+        list += (i ? " | " : "") + g_protected[i].name + " #" + Int(g_protected[i].h.serial) + "/" +
+                Int(g_protected[i].h.index) + " revives=" + Int(g_protected[i].revives) +
+                (!Valid(pc) ? " (gone)" : pc->isDead() ? " DEAD" : pc->isUnconcious() ? " KO" : "");
+      }
+      ok = true;
+      out = g_protected.empty() ? "nobody is protected" : Int(g_protected.size()) + " protected: " + list;
+      return true;
+    }
+    const std::string mode = f.size() >= 4 ? Lower(f[3]) : "";
+    if (f.size() != 4 || (mode != "on" && mode != "off")) {
+      out = "usage: protect [<npc> on|off]";
+      return true;
+    }
+    Character *pc = FindCharacter(world, f[2]);
+    if (!pc) {
+      out = NotFound(f[2]);
+      return true;
+    }
+    const hand h = pc->getHandle();
+    for (size_t i = 0; i < g_protected.size(); ++i)
+      if (SameHandle(g_protected[i].h, h)) {
+        g_protected.erase(g_protected.begin() + i);
+        break;
+      }
+    if (mode == "on") {
+      if (pc->isDead()) {
+        out = pc->getName() + " is dead (protect can't revive the dead)";
+        return true;
+      }
+      Protected p = {h, pc->getName(), false, 0};
+      g_protected.push_back(p);
+      ProtectTick();
+    }
+    ok = true;
+    Log("KAH: protect " + pc->getName() + " " + mode);
+    out = pc->getName() + " protect=" + mode + (pc->isUnconcious() ? " (still KO this frame)" : "") +
+          " protected=" + Int(g_protected.size());
     return true;
   }
   if (cmd == "time") { // time: game time
