@@ -508,6 +508,15 @@ bool PlacedOrDropping(Item *item, bool pendingBefore) {
   return !pendingBefore && (item->creatingPhysical || item->physicalShouldExist);
 }
 
+// Squads "unload" streamed out this session (for "reload").
+struct Unloaded {
+  std::string name;
+  hand platoon;
+  hand character;
+  int members;
+};
+std::vector<Unloaded> g_unloaded;
+
 // Items "drop" put on the ground this session (searched first by "pickup").
 std::vector<hand> g_dropped;
 
@@ -775,6 +784,101 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     Log("KAH: unbuild " + name + " ok=" + (ok ? "1" : "0"));
     out = std::string(ok ? "destroyed " : "destroy refused: ") + name + " (" + Num(bestDist) +
           " from the player)";
+    return true;
+  }
+  if (cmd == "unload") { // unload <npc>: stream his squad out like the game does far away (KAH 17)
+    if (f.size() < 3) {
+      out = "usage: unload <npc>";
+      return true;
+    }
+    Character *uc = FindCharacter(world, f[2]);
+    if (!uc) {
+      out = NotFound(f[2]);
+      return true;
+    }
+    ActivePlatoon *ap = uc->getPlatoon();
+    if (!Valid(ap) || !Valid(ap->me)) {
+      out = uc->getName() + " has no squad to unload";
+      return true;
+    }
+    if (Valid(ap->isPlayer)) {
+      out = uc->getName() + " is in the player's squad (can't be unloaded)";
+      return true;
+    }
+    Platoon *p = ap->me;
+    Unloaded u = {uc->getName(), p->getHandle(), uc->getHandle(), 0};
+    try {
+      u.members = p->getCharacterCount();
+    } catch (...) {
+    }
+    const std::string name = u.name;
+    const hand ch = u.character;
+    // The character objects are destroyed now: don't touch uc after this.
+    p->deactivate(nullptr);
+    const bool unloaded = !Valid(p->getActivePlatoon());
+    for (size_t i = 0; i < g_unloaded.size(); ++i)
+      if (SameHandle(g_unloaded[i].platoon, u.platoon)) {
+        g_unloaded.erase(g_unloaded.begin() + i);
+        break;
+      }
+    g_unloaded.push_back(u);
+    ok = unloaded;
+    Log("KAH: unload " + name + " squad_members=" + Int(u.members) + " ok=" + (ok ? "1" : "0"));
+    out = std::string(ok ? "unloaded " : "unload failed: ") + name + " " +
+          FormatCharacterRef(ch.serial, ch.index) + " with his squad (" + Int(u.members) +
+          " characters); \"reload " + name + "\" brings them back (the game also reloads a squad "
+          "on its own when the player is near)";
+    return true;
+  }
+  if (cmd == "reload") { // reload <name>: load a squad "unload" streamed out (KAH 17)
+    if (f.size() < 3) {
+      std::string list;
+      for (size_t i = 0; i < g_unloaded.size(); ++i)
+        list += (i ? ", " : "") + g_unloaded[i].name;
+      out = "usage: reload <name> (unloaded: " + (list.empty() ? std::string("none") : list) + ")";
+      return true;
+    }
+    const std::string wanted = Lower(f[2]);
+    size_t at = g_unloaded.size();
+    for (size_t i = 0; i < g_unloaded.size() && at == g_unloaded.size(); ++i)
+      if (Lower(g_unloaded[i].name) == wanted)
+        at = i;
+    for (size_t i = 0; i < g_unloaded.size() && at == g_unloaded.size(); ++i)
+      if (Lower(g_unloaded[i].name).find(wanted) != std::string::npos)
+        at = i;
+    if (at == g_unloaded.size()) {
+      out = "nobody named '" + f[2] + "' was unloaded by unload";
+      return true;
+    }
+    const Unloaded u = g_unloaded[at];
+    Platoon *p = nullptr;
+    try {
+      p = u.platoon.getPlatoon();
+    } catch (...) {
+      p = nullptr;
+    }
+    if (!Valid(p)) {
+      g_unloaded.erase(g_unloaded.begin() + at);
+      out = "the squad of " + u.name + " is gone (destroyed or the game was loaded)";
+      return true;
+    }
+    const bool wasActive = Valid(p->getActivePlatoon());
+    if (!wasActive)
+      p->activate();
+    Character *back = nullptr;
+    try {
+      back = u.character.getCharacter();
+    } catch (...) {
+      back = nullptr;
+    }
+    ok = Valid(p->getActivePlatoon());
+    if (ok)
+      g_unloaded.erase(g_unloaded.begin() + at);
+    Log("KAH: reload " + u.name + " ok=" + (ok ? "1" : "0") + (wasActive ? " (was already loaded)" : ""));
+    out = std::string(ok ? "reloaded " : "reload failed: ") + u.name +
+          (wasActive ? " (the game had already reloaded him)" : "") + " | " +
+          (Valid(back) ? Describe(back, &origin)
+                       : std::string("character not resolvable by his old handle yet (chars lists who is near)"));
     return true;
   }
   if (cmd == "protect") { // protect [<npc> on|off]: keep a character healed and awake (cheat)

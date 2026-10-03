@@ -43,6 +43,7 @@ Built-in commands:
   damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | eat <npc> <food>
   drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [radius <m>]   ground items (same instance)
   protect [<npc> on|off]                  test cheat: kept at full health, a KO cleared at once
+  unload <npc> | reload <name>            stream his squad out / back in (game streaming)
   shackle|unshackle <npc> | cage|uncage <npc> [cage] | shopstock <trader> [radius <m>]
   trade <buyer> <trader> <item> [radius <m>]   (shop storage radius: default 60, max 300)
   ui [filter] [all] | click <widget> | messages [n] | screenshot [name]
