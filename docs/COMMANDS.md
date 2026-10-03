@@ -21,7 +21,7 @@ polled every 250 ms. Arguments can't contain tabs or newlines.
 `<npc>` is one of:
 - a name: an exact (case-insensitive) match nearest the player wins, else the
   nearest substring match; bodies near the player are found too
-- `#serial`: the character's handle serial (shown by `chars`, `where`)
+- `#serial/index`: the character's full handle as printed by `spawn`, `chars`, `where` (`#374267584/1234`); resolves exactly. `#serial` alone still works but serials are not unique (a spawned bandit once shared one with an NPC 4.5 km away): if several characters have it, the command is refused with a candidate list. The serial comes first, so a `#(\d+)` capture still gets the serial; capture `#(\d+/\d+)` for the exact form
 - `@player`: the first squad member
 - `@selected`: the selected character
 
@@ -103,7 +103,7 @@ Client side: `kah wait-game <minutes> [timeout_s]` waits for game time to pass.
 | Command | Does |
 |---|---|
 | `setname <npc> <name>` | rename |
-| `faction <npc> <faction>` | move into an own squad of that faction (prints the new `#serial`: the character gets a new handle) |
+| `faction <npc> <faction>` | move into an own squad of that faction (prints the new `#serial/index`: the character gets a new handle) |
 | `sleep <npc> [bed <name>]` / `wake <npc>` | sleep on the floor or in a bed (USE_BED_ORDER); `wake` gets up |
 | `damage <npc> <part> <cut> [blunt] [pierce] [bleed <x>]` | a real wound on a body part (0-6 or head, chest, stomach, left_arm, right_arm, left_leg, right_leg); can be bandaged with first aid. Wounds made this way don't bleed: use `blood` |
 | `blood <npc> <value\|pct%>` | set blood |

@@ -44,7 +44,8 @@ Built-in commands:
   trade <buyer> <trader> <item> [radius <m>]   (shop storage radius: default 60, max 300)
   ui [filter] [all] | click <widget> | messages [n] | screenshot [name]
   fps [reset]                             avg/min fps, worst frame ms since launch or last reset
-<npc> is a name (exact match nearest the player wins), #serial, @player or @selected.
+<npc> is a name (exact match nearest the player wins), #serial/index (as printed; #serial if unique),
+@player or @selected.
 
 The harness folder is the installed mod folder (Kenshi\\mods\\AutomationHarness):
 set KAH_DIR to it, or pass --dir <path> first. Works from Windows and WSL.

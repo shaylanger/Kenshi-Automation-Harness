@@ -421,7 +421,7 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     } else {
       Character *n = a.nearName.empty() ? FirstPlayerCharacter(world) : FindCharacter(world, a.nearName);
       if (!n) {
-        out = "no character named: " + a.nearName;
+        out = NotFound(a.nearName);
         return true;
       }
       pos = n->getPosition();
@@ -558,7 +558,7 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     if (!nearName.empty()) {
       Character *n = FindCharacter(world, nearName);
       if (!n) {
-        out = "no character named: " + nearName;
+        out = NotFound(nearName);
         return true;
       }
       at = n->getPosition();
@@ -772,7 +772,7 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
     if (!targetName.empty()) {
       targetChar = FindCharacter(world, targetName);
       if (!targetChar) {
-        out = "no character named: " + targetName;
+        out = NotFound(targetName);
         return true;
       }
       target = targetChar;
@@ -1018,7 +1018,7 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
       Character *owner = nullptr;
       const std::string ownerName = Option(f, 3, "owner", "");
       if (!ownerName.empty() && !(owner = FindCharacter(world, ownerName))) {
-        out = "no character named: " + ownerName;
+        out = NotFound(ownerName);
         return true;
       }
       c->setChainedMode(true, owner ? owner->getHandle() : hand());
@@ -1077,7 +1077,7 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
       return true;
     Character *trader = FindCharacter(world, f[3]);
     if (!trader) {
-      out = "no character named: " + f[3];
+      out = NotFound(f[3]);
       return true;
     }
     std::vector<ShopSource> sources;

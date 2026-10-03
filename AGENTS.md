@@ -92,8 +92,9 @@ happened, check it against the state: wrong claims are bugs.
 ## Names and characters
 
 - `<npc>`: an exact (case-insensitive) name nearest the player wins, else the
-  nearest substring. Many NPCs share a name: read the `#serial` from `chars`
-  or `spawn` and use it (`#12345`).
+  nearest substring. Many NPCs share a name: read the `#serial/index` from
+  `chars` or `spawn` and use it as printed (`#12345/678`). A bare `#serial` is
+  refused when several characters share it (serials are not unique).
 - `@player` is the **first squad member**, not necessarily the one you think;
   name characters explicitly. `@selected` is the selected one.
 - `recruit` changes the selection: `select <your character>` again after it.

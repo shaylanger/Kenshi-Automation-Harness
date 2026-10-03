@@ -7,6 +7,7 @@
 #include "Harness.h"
 #include "SearchRadius.h"
 #include "BuildArgs.h"
+#include "CharacterRef.h"
 #include "ProductionCounter.h"
 
 #include <kenshi/AI/AITaskSystem.h>
@@ -89,9 +90,19 @@ void CollectCharacters(GameWorld *world, const Ogre::Vector3 &origin, float radi
   }
 }
 
-// "@player" (first squad member), "@selected", or a name: exact
-// (case-insensitive) match nearest the player wins, else nearest substring.
+// Why the last FindCharacter found nothing (ambiguous or malformed #ref);
+// empty = plain "not found".
+std::string g_findError;
+
+std::string NotFound(const std::string &name) {
+  return g_findError.empty() ? "no character named: " + name : g_findError;
+}
+
+// "@player" (first squad member), "@selected", "#serial/index" (exact
+// handle), "#serial" (must be unique), or a name: exact (case-insensitive)
+// match nearest the player wins, else nearest substring.
 Character *FindCharacter(GameWorld *world, const std::string &name) {
+  g_findError.clear();
   if (!InWorld(world))
     return nullptr;
   Character *player = FirstPlayerCharacter(world);
@@ -114,18 +125,30 @@ Character *FindCharacter(GameWorld *world, const std::string &name) {
     }
   }
   const std::string wanted = Lower(name);
-  const bool bySerial = !name.empty() && name[0] == '#';
-  const unsigned long serial = bySerial ? strtoul(name.c_str() + 1, nullptr, 10) : 0;
+  const CharacterRef ref = ParseCharacterRef(name);
+  if (ref.isRef && !ref.valid) {
+    g_findError = "bad character reference '" + name + "' (use #serial/index as printed, or #serial)";
+    return nullptr;
+  }
   Character *exact = nullptr, *partial = nullptr;
   float exactDist = 0, partialDist = 0;
   std::vector<Character *> chars;
   CollectCharacters(world, origin, 500.0f, chars);
+  std::vector<Character *> bySerial;
   for (size_t i = 0; i < chars.size(); ++i) {
     Character *c = chars[i];
-    if (bySerial) {
+    if (ref.isRef) {
       try {
-        if ((unsigned long)c->getHandle().serial == serial)
-          return c;
+        const hand &h = c->getHandle();
+        if ((unsigned long)h.serial != ref.serial)
+          continue;
+        if (ref.hasIndex) {
+          if ((unsigned long)h.index == ref.index)
+            return c;
+          continue;
+        }
+        if (std::find(bySerial.begin(), bySerial.end(), c) == bySerial.end())
+          bySerial.push_back(c);
       } catch (...) {
       }
       continue;
@@ -149,6 +172,23 @@ Character *FindCharacter(GameWorld *world, const std::string &name) {
         partialDist = dist;
       }
     }
+  }
+  if (ref.isRef) {
+    if (bySerial.size() == 1)
+      return bySerial[0];
+    if (bySerial.size() > 1) {
+      g_findError = "ambiguous " + name + ": " + Int((long long)bySerial.size()) +
+                    " characters share that serial, use #serial/index:";
+      for (size_t k = 0; k < bySerial.size() && k < 8; ++k) {
+        try {
+          g_findError += " [" + bySerial[k]->getName() + " " +
+                         FormatCharacterRef(bySerial[k]->getHandle().serial, bySerial[k]->getHandle().index) +
+                         " dist=" + Num(bySerial[k]->getPosition().distance(origin)) + "]";
+        } catch (...) {
+        }
+      }
+    }
+    return nullptr;
   }
   return exact ? exact : partial;
 }
@@ -252,7 +292,7 @@ std::string Describe(Character *c, const Ogre::Vector3 *origin) {
   std::string out;
   try {
     out = c->getName();
-    out += " #" + Int(c->getHandle().serial);
+    out += " " + FormatCharacterRef(c->getHandle().serial, c->getHandle().index);
     Faction *f = c->getFaction();
     out += " [" + std::string(Valid(f) ? f->getName() : "?") + "]";
     Ogre::Vector3 p = c->getPosition();
@@ -332,7 +372,7 @@ bool ResolvePosition(GameWorld *world, const std::vector<std::string> &f, size_t
   }
   Character *c = FindCharacter(world, f[at]);
   if (!c) {
-    error = "no character named: " + f[at];
+    error = NotFound(f[at]);
     return false;
   }
   pos = c->getPosition();
@@ -503,7 +543,7 @@ const char *const kHelp =
     "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "
     "packweight <npc> <pack> | craftfinish <npc> <item> [at <bench>]. "
     "<npc> = name (exact match nearest the player wins, else nearest substring), "
-    "#serial, @player or @selected.";
+    "#serial/index (exact, as printed) or #serial (refused if not unique), @player or @selected.";
 
 } // namespace
 
@@ -770,7 +810,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       if (!targetName.empty()) {
         Character *t = FindCharacter(world, targetName);
         if (!t)
-          return "no character named: " + targetName;
+          return NotFound(targetName);
         aiTarget = t->getHandle();
       }
       // "size <mult>": the template decides the squad size; this scales it.
@@ -800,7 +840,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       if (!Valid(c))
         break;
       ++made;
-      names += (made > 1 ? ", " : "") + c->getName() + " #" + Int(c->getHandle().serial);
+      names += (made > 1 ? ", " : "") + c->getName() + " " + FormatCharacterRef(c->getHandle().serial, c->getHandle().index);
     }
     Log("KAH: spawn character=" + charData->name + " faction=" + faction->getName() +
         " made=" + Int(made) + " " + names);
@@ -972,7 +1012,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     return "usage: " + cmd + " <npc> ...";
   Character *c = FindCharacter(world, f[2]);
   if (!c)
-    return "no character named: " + f[2];
+    return NotFound(f[2]);
   {
     std::string reply;
     if (RunCharacterCommand(world, f, c, origin, ok, reply))
@@ -1431,7 +1471,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return "usage: attack <attacker> <target>";
     Character *target = FindCharacter(world, f[3]);
     if (!target)
-      return "no character named: " + f[3];
+      return NotFound(f[3]);
     // A real order, as the player gives it: mods lift their truces first
     // (KAH_RegisterBeforeAttack), then the attack is queued.
     RunBeforeAttack(c, target);
@@ -1461,7 +1501,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return "usage: buy <buyer> <seller> <item> <price>";
     Character *seller = FindCharacter(world, f[3]);
     if (!seller)
-      return "no character named: " + f[3];
+      return NotFound(f[3]);
     int price = atoi(f[5].c_str());
     std::string error;
     GameData *data = nullptr;
