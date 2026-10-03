@@ -54,7 +54,7 @@ Everything else needs a loaded game.
 | `ko <npc> [seconds]` | knock out (default 30 s) |
 | `health <npc> <percent>` | set every body part to a percentage of its max (negative values too) |
 | `kill <npc>` | every body part to -200% |
-| `hunger <npc> <0..300>` | hunger as the game UI shows it (300 = full) |
+| `hunger <npc> [0..300]` | set hunger as the game UI shows it (300 = full), reply `before -> after`; without a value only reads it (`Shay hunger 216.0`) |
 | `attack <attacker> <target>` | a real attack order, as a player click gives it |
 | `money <npc> <delta>` | add (or with a minus, take) cats |
 | `buy <buyer> <seller> <item> <price>` | one atomic purchase: item + cats in the same frame |

@@ -485,7 +485,7 @@ const char *const kHelp =
     "[size <mult>] | stash <item> <n> [near <npc>] | stat <npc> <stat> | "
     "setstat <npc> <stat> <value> | weight <npc> | iteminfo|equip|unequip <npc> <item> | "
     "where|hp|inv|sections|select|recruit|kill <npc> | teleport <npc> <npc2 | x y z | building <name>> [dist m] | "
-    "ko <npc> [seconds] | health <npc> <percent> | hunger <npc> <0..300> | "
+    "ko <npc> [seconds] | health <npc> <percent> | hunger <npc> [0..300] | "
     "attack <attacker> <target> | money <npc> <delta> | buy <buyer> <seller> <item> <price> | "
     "give <npc> <item> [n] | relation <npc> <-100..100> | "
     "order <npc> <task> [target <npc>] [building <name>] [keep] | tasks [filter] | fight <a> <b> | "
@@ -1403,10 +1403,12 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     return "killed " + c->getName() + " (body parts at -200%)";
   }
 
-  if (cmd == "hunger") { // hunger <npc> <game UI value, 0..300>
-    if (f.size() < 4)
-      return "usage: hunger <npc> <value as shown in game, 0..300>";
+  if (cmd == "hunger") { // hunger <npc> [game UI value, 0..300]; no value = read only
     float before = c->medical.hunger * 100.0f;
+    if (f.size() < 4) {
+      ok = true;
+      return c->getName() + " hunger " + Num(before);
+    }
     c->medical.hunger = (float)atof(f[3].c_str()) / 100.0f;
     ok = true;
     Log("KAH: hunger " + c->getName() + " " + Num(before) + " -> " + f[3]);
