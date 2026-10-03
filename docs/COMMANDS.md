@@ -50,6 +50,7 @@ Everything else needs a loaded game.
 | `weight <npc>` | inventory weight |
 | `iteminfo\|equip\|unequip <npc> <item>` | an inventory item by name; `unequip` moves it to the main inventory (dropped next to the character if there's no room) |
 | `teleport <npc> <npc2 \| x y z> [dist m]` | move a character |
+| `teleport <npc> building <name> [dist m] [radius <m>]` | move a character next to the nearest matching building within 5000 of the player (`radius` changes that), `dist` (default 15) along x from its centre |
 | `ko <npc> [seconds]` | knock out (default 30 s) |
 | `health <npc> <percent>` | set every body part to a percentage of its max (negative values too) |
 | `kill <npc>` | every body part to -200% |

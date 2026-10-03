@@ -484,7 +484,7 @@ const char *const kHelp =
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
     "[size <mult>] | stash <item> <n> [near <npc>] | stat <npc> <stat> | "
     "setstat <npc> <stat> <value> | weight <npc> | iteminfo|equip|unequip <npc> <item> | "
-    "where|hp|inv|sections|select|recruit|kill <npc> | teleport <npc> <npc2 | x y z> [dist m] | "
+    "where|hp|inv|sections|select|recruit|kill <npc> | teleport <npc> <npc2 | x y z | building <name>> [dist m] | "
     "ko <npc> [seconds] | health <npc> <percent> | hunger <npc> <0..300> | "
     "attack <attacker> <target> | money <npc> <delta> | buy <buyer> <seller> <item> <price> | "
     "give <npc> <item> [n] | relation <npc> <-100..100> | "
@@ -1347,9 +1347,26 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     return Describe(c, nullptr) + " items=" + Int(count) + " " + json;
   }
 
-  if (cmd == "teleport") { // teleport <npc> <npc2 | x y z> [dist m]
+  if (cmd == "teleport") { // teleport <npc> <npc2 | x y z | building <name>> [dist m]
     Ogre::Vector3 to;
     std::string error;
+    if (f.size() >= 5 && Lower(f[3]) == "building") {
+      // Next to the nearest matching building within 5000 of the player
+      // (radius <m> to change), `dist` (default 15) along x off its centre.
+      float radius = 0, dist = 0;
+      if (!ParseSearchRadius(f, 5, 0, kMaxSearchRadius, radius, error))
+        return error;
+      Building *b = FindBuilding(world, origin, f[4], radius, dist);
+      if (!b)
+        return "no building matching '" + f[4] + "' within " + Num(radius) + " of the player";
+      to = b->getPosition();
+      to.x += (float)atof(Option(f, 5, "dist", "15").c_str());
+      c->teleport(to, Ogre::Quaternion::IDENTITY);
+      ok = true;
+      Log("KAH: teleport " + Describe(c, nullptr) + " to " + b->getName());
+      return "teleported next to " + b->getName() + " (" + Num(dist) + " from the player): " +
+             Describe(c, &origin);
+    }
     if (!ResolvePosition(world, f, 3, to, error))
       return error;
     to.x += (float)atof(Option(f, 3, "dist", "0").c_str());

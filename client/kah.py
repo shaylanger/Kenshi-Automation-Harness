@@ -24,7 +24,7 @@ Built-in commands:
                                           sections: inventory sections and their items)
   stat <npc> <stat> | setstat <npc> <stat> <value> | weight <npc>
   iteminfo|equip|unequip <npc> "<item name>"
-  teleport <npc> <npc2 | x y z> [dist m]
+  teleport <npc> <npc2 | x y z | building <name>> [dist m]
   ko <npc> [seconds] | health <npc> <percent> | hunger <npc> <0..300>
   attack <attacker> <target> | give <npc> <item> [n] | relation <npc> <-100..100>
   money <npc> <delta> | buy <buyer> <seller> <item> <price>
