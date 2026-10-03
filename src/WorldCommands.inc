@@ -1125,12 +1125,25 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
         steps += std::string(" addItem=") + (given ? "1" : "0");
       }
       if (!given) {
+        // giveItem with dropOnFail drops the item at her feet but still returns false
+        // (run m12; Stobe's hand-over ignores its result for the same reason), so the
+        // item's own state decides. Last resort: RootObject::dropItem.
+        bool r = false;
         try {
-          given = c->giveItem(bought, true, false);
+          r = c->giveItem(bought, true, false);
         } catch (...) {
-          given = false;
+          r = false;
         }
-        steps += std::string(" giveItem(drop)=") + (given ? "1" : "0");
+        given = bought->isInInventory || bought->_isPhysical;
+        steps += std::string(" giveItem(drop)=") + (r ? "1" : "0") + (given ? " placed" : " not placed");
+        if (!given) {
+          try {
+            c->dropItem(bought);
+          } catch (...) {
+          }
+          given = bought->isInInventory || bought->_isPhysical;
+          steps += std::string(" dropItem=") + (given ? "placed" : "not placed");
+        }
       }
       placed = given ? (bought->isInInventory ? "inventory" : (bought->_isPhysical ? "ground" : "unknown"))
                      : "failed";
