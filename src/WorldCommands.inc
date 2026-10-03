@@ -302,7 +302,8 @@ Building *CreateBuilding(GameWorld *world, GameData *data, const Ogre::Vector3 &
 // Production buildings "produced" watches: output quantity sampled every
 // frame (SampleProduction), rises counted as produced, drops as removed.
 struct TrackedProduction {
-  hand building;
+  ProductionKey key; // handle index + serial: the lookup key
+  hand building;     // to resolve the building for sampling
   std::string name;
   ProductionCounter counter;
 };
@@ -365,23 +366,25 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     }
     const double now = GameHours(world);
     const int level = s->getCurrentProductionQuantity();
-    TrackedProduction *t = nullptr;
-    for (size_t i = 0; i < g_tracked.size() && !t; ++i)
-      if (g_tracked[i].building == b->getHandle())
-        t = &g_tracked[i];
+    const hand &bh = b->getHandle();
+    const ProductionKey key(bh.index, bh.serial);
+    const int found = FindProductionEntry(g_tracked, key);
+    TrackedProduction *t = found >= 0 ? &g_tracked[found] : nullptr;
     if (!t) {
       if (g_tracked.size() >= kMaxTracked) {
         out = "already tracking " + Int((long long)kMaxTracked) + " buildings";
         return true;
       }
       TrackedProduction fresh;
-      fresh.building = b->getHandle();
+      fresh.key = key;
+      fresh.building = bh;
       fresh.name = b->getName();
       fresh.counter.Reset(now);
       fresh.counter.Sample(level);
       g_tracked.push_back(fresh);
       ok = true;
-      Log("KAH: produced: tracking " + b->getName() + " output=" + Int(level));
+      Log("KAH: produced track key=" + Int(key.index) + "/" + Int(key.serial) + " " + b->getName() +
+          " output=" + Int(level) + " entries=" + Int((long long)g_tracked.size()));
       out = "tracking " + b->getName() + " product=" + product->name + " output_now=" + Int(level) +
             " from game hour " + Num(now) + " (ask again later; a load clears tracking)";
       return true;
@@ -394,7 +397,7 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     sprintf_s(hours, "%.3f", c.Hours(now));
     out = b->getName() + " product=" + product->name + " produced=" + Int(c.produced) +
           " removed=" + Int(c.removed) + " output_now=" + Int(level) + " game_hours=" + hours +
-          " per_game_hour=" + rate;
+          " per_game_hour=" + rate + " samples=" + Int(c.samples);
     if (reset) {
       t->counter.ResetKeepLevel(now);
       out += " (reset)";

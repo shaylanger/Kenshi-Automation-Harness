@@ -2,6 +2,8 @@
 // Build and run: tests\run_tests.bat
 #include "ProductionCounter.h"
 
+#include <string>
+
 #include <cmath>
 #include <cstdio>
 
@@ -41,6 +43,25 @@ int main() {
   fresh.ResetKeepLevel(1.0);
   fresh.Sample(9);
   Check(fresh.produced == 0, "reset before any sample: next sample is the baseline");
+
+  Check(c.samples == 1, "samples counted since the reset");
+
+  // Two consecutive "produced" calls for the same building must hit the
+  // same entry (run m13: every call made a new one).
+  struct Entry {
+    ProductionKey key;
+    std::string name;
+  };
+  std::vector<Entry> table;
+  Entry mine = {ProductionKey(1234, 374267584), "Stone Mine"};
+  Check(FindProductionEntry(table, mine.key) == -1, "unknown building: no entry");
+  table.push_back(mine);
+  Entry other = {ProductionKey(1235, 99), "Iron Refinery"};
+  table.push_back(other);
+  Check(FindProductionEntry(table, ProductionKey(1234, 374267584)) == 0, "first call's key found again");
+  Check(FindProductionEntry(table, ProductionKey(1234, 374267584)) == 0, "second call hits the same entry");
+  Check(FindProductionEntry(table, ProductionKey(1235, 99)) == 1, "other building, own entry");
+  Check(FindProductionEntry(table, ProductionKey(1234, 1)) == -1, "same index, new serial: a different building");
 
   printf(g_failed ? "%d FAILED\n" : "all production counter tests passed\n", g_failed);
   return g_failed ? 1 : 0;
