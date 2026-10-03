@@ -1133,11 +1133,41 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
       path = pack->getName();
     } else {
       Inventory *inv = OwnerInventory(world, f[2], origin, label, why);
-      if (!Valid(inv)) {
-        out = why;
+      if (!Valid(inv) && why.empty()) {
+        out = "usage: packweight <npc|building|ground> <pack>";
         return true;
       }
-      pack = FindPack(inv, needle, 0, path);
+      if (Valid(inv))
+        pack = FindPack(inv, needle, 0, path);
+      if (!pack && !FindCharacter(world, f[2])) {
+        // Several buildings share a name (3 General Camp Storage Chests on
+        // kah-fullbase): look in every match within range, nearest first.
+        lektor<RootObject *> nearby;
+        world->getObjectsWithinSphere(nearby, origin, kDefaultSearchRadius, BUILDING, 1024, nullptr);
+        const std::string bname = Lower(f[2]);
+        int looked = 0;
+        float best = 0;
+        for (uint32_t i = 0; i < nearby.size(); ++i) {
+          Building *b = dynamic_cast<Building *>(nearby.stuff[i]);
+          if (!Valid(b) || Lower(b->getName()).find(bname) == std::string::npos)
+            continue;
+          ++looked;
+          std::string p2;
+          ContainerItem *found = FindPack(b->getInventory(), needle, 0, p2);
+          const float d = b->getPosition().distance(origin);
+          if (found && (!pack || d < best)) {
+            pack = found;
+            path = p2;
+            best = d;
+            label = b->getName() + " (building, " + Num(d) + " away)";
+          }
+        }
+        if (!pack) {
+          out = "no pack matching '" + f[3] + "' in " + Int(looked) + " building(s) matching '" + f[2] +
+                "' within " + Num(kDefaultSearchRadius) + " (packs inside packs are searched too)";
+          return true;
+        }
+      }
       if (!pack) {
         out = "no pack matching '" + f[3] + "' in " + label + " (packs inside packs are searched too)";
         return true;
@@ -1674,14 +1704,31 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
     }
     // A stackable item can merge into a stack he has and be destroyed: only
     // touch the instance while his inventory still holds it.
-    const bool held = Valid(inv) && inv->hasItem(item);
-    if (given && !held) {
+    // Still the same object? Resolve the old handle again (no pointer use
+    // before that): a pack can go straight onto a free back slot, which the
+    // inventory's item list doesn't hold, and that is not a stack merge.
+    Item *again = nullptr;
+    try {
+      again = before.getItem();
+    } catch (...) {
+      again = nullptr;
+    }
+    const bool alive = again == item && Valid(again);
+    if (alive && item->isEquipped) {
+      ok = true;
+      Log("KAH: pickup " + c->getName() + " " + itemName + " equipped to " + item->inventorySection);
+      out = "picked up " + itemName + " x" + Int(qty) + " equipped to " + item->inventorySection + " " +
+            FormatCharacterRef(before.serial, before.index) + " (same instance)";
+      return true;
+    }
+    const bool held = alive && (item->isInInventory || (Valid(inv) && inv->hasItem(item)));
+    if (given && !alive) {
       ok = true;
       Log("KAH: pickup " + c->getName() + " " + itemName + " merged into a stack");
       out = "picked up " + itemName + " x" + Int(qty) + " (merged into a stack: not the same instance)";
       return true;
     }
-    ok = held && item->isInInventory;
+    ok = held;
     std::string how = "giveItem=" + std::string(given ? "1" : "0");
     if (!ok && !given) {
       // The game's own way: walk over and pick it up.
