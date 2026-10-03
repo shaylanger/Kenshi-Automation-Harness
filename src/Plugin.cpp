@@ -10,6 +10,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX // OgreRoot.h uses std::min/max
 #endif
+#include "FrameStats.h"
 #include "Harness.h"
 
 #include <core/Functions.h>
@@ -223,15 +224,46 @@ void Tick(const char *source) {
   }
 }
 
+// Frame times for "fps", measured here with QueryPerformanceCounter (game
+// thread, like the commands that read them).
+FrameStats g_frameStats;
+LARGE_INTEGER g_lastFrame = {0};
+double g_qpcFreq = 0.0;
+
+void MeasureFrame() {
+  LARGE_INTEGER now;
+  QueryPerformanceCounter(&now);
+  if (g_qpcFreq <= 0.0) {
+    LARGE_INTEGER freq;
+    QueryPerformanceFrequency(&freq);
+    g_qpcFreq = (double)freq.QuadPart;
+  }
+  if (g_lastFrame.QuadPart != 0 && g_qpcFreq > 0.0)
+    g_frameStats.Add((double)(now.QuadPart - g_lastFrame.QuadPart) / g_qpcFreq);
+  g_lastFrame = now;
+}
+
 class AutomationFrameListener : public Ogre::FrameListener {
 public:
   virtual bool frameStarted(const Ogre::FrameEvent &) {
+    MeasureFrame();
     Tick("ogre");
     return true;
   }
 };
 
 AutomationFrameListener g_frameListener;
+
+} // namespace
+
+std::string FpsReport(bool reset) {
+  const std::string out = g_frameStats.Report();
+  if (reset)
+    g_frameStats.Reset();
+  return out;
+}
+
+namespace {
 
 void OnGuiFrame(float) { Tick("mygui"); }
 

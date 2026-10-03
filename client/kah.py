@@ -42,6 +42,7 @@ Built-in commands:
   shackle|unshackle <npc> | cage|uncage <npc> [cage] | shopstock <trader> [radius <m>]
   trade <buyer> <trader> <item> [radius <m>]   (shop storage radius: default 60, max 300)
   ui [filter] [all] | click <widget> | messages [n] | screenshot [name]
+  fps [reset]                             avg/min fps, worst frame ms since launch or last reset
 <npc> is a name (exact match nearest the player wins), #serial, @player or @selected.
 
 The harness folder is the installed mod folder (Kenshi\\mods\\AutomationHarness):

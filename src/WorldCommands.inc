@@ -191,6 +191,16 @@ MyGUI::Widget *FindWidget(MyGUI::Widget *w, const std::string &wanted, int depth
 // Commands that work in every phase (menu too).
 bool RunAnyPhaseCommand(const std::vector<std::string> &f, bool &ok, std::string &out) {
   const std::string cmd = Lower(f[1]);
+  if (cmd == "fps") { // fps [reset]: frame times since launch or the last reset
+    const bool reset = f.size() >= 3 && Lower(f[2]) == "reset";
+    if (f.size() >= 3 && !reset) {
+      out = "usage: fps [reset]";
+      return true;
+    }
+    out = FpsReport(reset) + (reset ? " (reset)" : "");
+    ok = true;
+    return true;
+  }
   if (cmd == "tasks") { // tasks [filter]: AI task names for "order"
     const std::string filter = f.size() >= 3 ? Lower(f[2]) : "";
     int n = 0;

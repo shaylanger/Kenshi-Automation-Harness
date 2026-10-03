@@ -18,6 +18,8 @@ void Log(const std::string &msg);
 // Plugin.cpp: last on-screen player messages (hooked), and a frame grab.
 std::string RecentMessages(int n);
 std::string TakeScreenshot(const std::string &name, bool &ok);
+// Plugin.cpp: frame times since launch or the last reset ("fps"); reset restarts the window.
+std::string FpsReport(bool reset);
 
 // Appends "id<TAB>ok|error<TAB>detail" to outbox.txt (any thread).
 void WriteOutbox(const std::string &id, bool ok, const std::string &detail);

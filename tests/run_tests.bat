@@ -28,3 +28,8 @@ cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests
   "%ROOT%tests\build_args_test.cpp" > "%ROOT%obj\tests\build_build_args.log" 2>&1
 if errorlevel 1 (type "%ROOT%obj\tests\build_build_args.log" & echo TEST BUILD FAILED & exit /b 1)
 "%ROOT%obj\tests\build_args_test.exe"
+if errorlevel 1 exit /b 1
+cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\frame_stats_test.exe" ^
+  "%ROOT%tests\frame_stats_test.cpp" > "%ROOT%obj\tests\build_frame_stats.log" 2>&1
+if errorlevel 1 (type "%ROOT%obj\tests\build_frame_stats.log" & echo TEST BUILD FAILED & exit /b 1)
+"%ROOT%obj\tests\frame_stats_test.exe"

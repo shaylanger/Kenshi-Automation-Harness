@@ -477,7 +477,7 @@ const char *const kBuiltins[] = {
     "tasks", "ui", "click", "messages", "screenshot", "time", "building", "production",
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
-    "trade", "eat", "blood", "build", "unbuild"};
+    "trade", "eat", "blood", "build", "unbuild", "fps"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
@@ -498,7 +498,7 @@ const char *const kHelp =
     "eat <npc> <food> | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "power <building> on|off|charge [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
-    "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | "
+    "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | "
     "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "
     "packweight <npc> <pack> | craftfinish <npc> <item> [at <bench>]. "
     "<npc> = name (exact match nearest the player wins, else nearest substring), "
