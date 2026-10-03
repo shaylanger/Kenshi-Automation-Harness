@@ -340,7 +340,9 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
         binv = b->getInventory();
       } catch (...) {
       }
-      out += " | " + bn + " dist=" + Num(b->getPosition().distance(at)) + " [" +
+      const Ogre::Vector3 bp = b->getPosition();
+      out += " | " + bn + " dist=" + Num(bp.distance(at)) + " pos=" + Num(bp.x) + "," +
+             Num(bp.y) + "," + Num(bp.z) + " [" +
              (Valid(bf) ? bf->getName() : std::string("-")) + "]" + (Valid(binv) ? " inv" : "");
       ++n;
     }

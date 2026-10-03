@@ -84,7 +84,7 @@ Everything else needs a loaded game.
 
 | Command | Does |
 |---|---|
-| `buildings [radius] [filter] [near <npc>]` | buildings within `radius` (default 100, max 5000; at most 60 listed, use a filter for big radii) with owner faction and whether they have an inventory |
+| `buildings [radius] [filter] [near <npc>]` | buildings within `radius` (default 100, max 5000; at most 60 listed, use a filter for big radii) with distance, position (`pos=x,y,z`, for `teleport <npc> x y z`), owner faction and whether they have an inventory |
 | `building <name> [radius]` (alias `production`) | the nearest matching building within `radius` of the player (default 300, max 5000; also `radius <m>`): power (on, has power, battery, output), production (product, quantity, state, inputs), farm state, inventory sections |
 | `power <building> on\|off\|charge [radius <m>]` | switch power; `charge` fills a battery |
 | `fill <building> <item> [n] [section <name>] [radius <m>]` | put items into a building's inventory (inputs, storage); reports how many fitted |
