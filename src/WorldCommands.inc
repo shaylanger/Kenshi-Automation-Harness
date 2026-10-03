@@ -508,6 +508,88 @@ bool PlacedOrDropping(Item *item, bool pendingBefore) {
   return !pendingBefore && (item->creatingPhysical || item->physicalShouldExist);
 }
 
+// Items "drop" put on the ground this session (searched first by "pickup").
+std::vector<hand> g_dropped;
+
+// "Rattan Hat x1 #serial/index pos=x,y,z dist=d on_ground=1"
+std::string GroundItemLine(Item *item, const Ogre::Vector3 &from) {
+  if (!Valid(item))
+    return "invalid item";
+  const hand h = item->getHandle();
+  const Ogre::Vector3 p = item->getPosition();
+  return item->getName() + " x" + Int(item->quantity) + " " + FormatCharacterRef(h.serial, h.index) +
+         " pos=" + Num(p.x) + "," + Num(p.y) + "," + Num(p.z) + " dist=" + Num(p.distance(from)) +
+         " in_inventory=" + (item->isInInventory ? "1" : "0") +
+         " physical=" + (item->_isPhysical ? "1" : "0");
+}
+
+bool OnGround(Item *item) {
+  return Valid(item) && !item->isInInventory &&
+         (item->_isPhysical || item->creatingPhysical || item->physicalShouldExist);
+}
+
+// A ground item near `at`: "#serial/index", "nearest", or a name/sid (nearest
+// match). Items "drop" made are checked first, then the world's items.
+Item *FindGroundItem(GameWorld *world, const Ogre::Vector3 &at, const std::string &wanted,
+                     float radius, std::string &why) {
+  std::vector<Item *> found;
+  for (size_t i = 0; i < g_dropped.size(); ++i) {
+    Item *it = nullptr;
+    try {
+      it = dynamic_cast<Item *>(g_dropped[i].getRootObject());
+    } catch (...) {
+      it = nullptr;
+    }
+    if (OnGround(it))
+      found.push_back(it);
+  }
+  const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER, BLUEPRINT};
+  for (int t = 0; t < 5; ++t) {
+    lektor<RootObject *> nearby;
+    try {
+      world->getObjectsWithinSphere(nearby, at, radius, types[t], 256, nullptr);
+    } catch (...) {
+      continue;
+    }
+    for (uint32_t i = 0; i < nearby.size(); ++i) {
+      Item *it = dynamic_cast<Item *>(nearby.stuff[i]);
+      if (OnGround(it) && std::find(found.begin(), found.end(), it) == found.end())
+        found.push_back(it);
+    }
+  }
+  const std::string needle = Lower(wanted);
+  const CharacterRef ref = ParseCharacterRef(needle);
+  const bool byRef = ref.isRef;
+  if (byRef && !ref.valid) {
+    why = "malformed item reference: " + wanted + " (use #serial/index or #serial)";
+    return nullptr;
+  }
+  Item *best = nullptr;
+  float bestDist = 0;
+  for (size_t i = 0; i < found.size(); ++i) {
+    Item *it = found[i];
+    const hand h = it->getHandle();
+    if (byRef) {
+      if (h.serial != ref.serial || (ref.hasIndex && h.index != ref.index))
+        continue;
+    } else if (needle != "nearest") {
+      const std::string n = Lower(it->getName());
+      const std::string sid = Valid(it->data) ? Lower(it->data->stringID) : "";
+      if (n.find(needle) == std::string::npos && sid != needle)
+        continue;
+    }
+    const float d = it->getPosition().distance(at);
+    if (byRef || !best || d < bestDist) { // a #ref is exact: any distance
+      best = it;
+      bestDist = d;
+    }
+  }
+  if (!best)
+    why = "no item on the ground matching '" + wanted + "' within " + Num(radius) + " (" +
+          Int(found.size()) + " ground items seen)";
+  return best;
+}
+
 bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const Ogre::Vector3 &origin,
                      bool &ok, std::string &out) {
   const std::string cmd = Lower(f[1]);
@@ -1002,6 +1084,97 @@ void CollectShopSources(GameWorld *world, Character *trader, float radius,
 bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Character *c,
                          const Ogre::Vector3 &origin, bool &ok, std::string &out) {
   const std::string cmd = Lower(f[1]);
+  if (cmd == "drop") { // drop <npc> <item> [count]: put an inventory item on the ground (KAH 15)
+    if (f.size() < 4) {
+      out = "usage: drop <npc> <item> [count]";
+      return true;
+    }
+    bool ambiguous = false;
+    Item *item = FindInventoryItem(c, f[3], ambiguous);
+    if (!item) {
+      out = ambiguous ? "several items match '" + f[3] + "': use the full name or sid"
+                      : c->getName() + " carries no " + f[3];
+      return true;
+    }
+    if (f.size() >= 5 && atoi(f[4].c_str()) != item->quantity) {
+      out = "drop takes the whole stack: " + item->getName() + " x" + Int(item->quantity) +
+            " (give count " + Int(item->quantity) + " or none)";
+      return true;
+    }
+    if (item->isEquipped) {
+      out = item->getName() + " is worn: unequip it first";
+      return true;
+    }
+    Inventory *inv = c->getInventory();
+    const bool pendingBefore = item->creatingPhysical || item->physicalShouldExist;
+    try {
+      inv->dropItem(item);
+    } catch (...) {
+    }
+    ok = Valid(item) && !item->isInInventory && PlacedOrDropping(item, pendingBefore);
+    if (ok) {
+      g_dropped.push_back(item->getHandle());
+      if (g_dropped.size() > 64)
+        g_dropped.erase(g_dropped.begin());
+    }
+    Log("KAH: drop " + c->getName() + " " + item->getName() + " ok=" + (ok ? "1" : "0"));
+    out = std::string(ok ? "dropped " : "drop failed: ") + GroundItemLine(item, c->getPosition()) +
+          (ok && !item->_isPhysical ? " (ground object still being built)" : "");
+    return true;
+  }
+  if (cmd == "pickup") { // pickup <npc> <item|#serial/index|nearest> [radius <m>]: ground item into inventory (KAH 15)
+    if (f.size() < 4) {
+      out = "usage: pickup <npc> <item name|sid|#serial/index|nearest> [radius <m>]";
+      return true;
+    }
+    float radius = (float)atof(Option(f, 4, "radius", "20").c_str());
+    if (!(radius > 0) || radius > 300)
+      radius = 20;
+    std::string why;
+    Item *item = FindGroundItem(world, c->getPosition(), f[3], radius, why);
+    if (!item) {
+      out = why;
+      return true;
+    }
+    const hand before = item->getHandle();
+    const std::string itemName = item->getName();
+    const int qty = item->quantity;
+    const Ogre::Vector3 itemPos = item->getPosition();
+    Inventory *inv = c->getInventory();
+    bool given = false;
+    try {
+      given = c->giveItem(item, false, false);
+    } catch (...) {
+      given = false;
+    }
+    // A stackable item can merge into a stack he has and be destroyed: only
+    // touch the instance while his inventory still holds it.
+    const bool held = Valid(inv) && inv->hasItem(item);
+    if (given && !held) {
+      ok = true;
+      Log("KAH: pickup " + c->getName() + " " + itemName + " merged into a stack");
+      out = "picked up " + itemName + " x" + Int(qty) + " (merged into a stack: not the same instance)";
+      return true;
+    }
+    ok = held && item->isInInventory;
+    std::string how = "giveItem=" + std::string(given ? "1" : "0");
+    if (!ok && !given) {
+      // The game's own way: walk over and pick it up.
+      OrdersReceiver *orders = c->getOrdersReciever();
+      if (Valid(orders)) {
+        orders->addOrder(PICKUP, before, itemPos, true, false);
+        how += " -> ordered PICKUP (check inv after the walk)";
+      }
+    }
+    const hand after = item->getHandle();
+    Log("KAH: pickup " + c->getName() + " " + itemName + " ok=" + (ok ? "1" : "0") + " " + how);
+    out = std::string(ok ? "picked up " : "not picked up yet: ") + itemName + " x" + Int(qty) +
+          " handle " + FormatCharacterRef(before.serial, before.index) + " -> " +
+          FormatCharacterRef(after.serial, after.index) +
+          (before.serial == after.serial ? " (same instance)" : " (handle changed)") +
+          " in_inventory=" + (item->isInInventory ? "1" : "0") + " " + how;
+    return true;
+  }
   if (cmd == "order") { // order <npc> <task> [target <npc>] [building <name>] [keep]
     if (f.size() < 4) {
       out = "usage: order <npc> <task name|number> [target <npc>] [building <name>] [keep]";
