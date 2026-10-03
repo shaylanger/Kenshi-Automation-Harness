@@ -108,7 +108,7 @@ function Start-Kenshi {
     if (-not (Test-Path "$HarnessDir\enabled.flag")) { throw 'harness is off (kah on) so autoload would be ignored' }
     Set-Content -Path "$HarnessDir\autoload.txt" -Value $Save -Encoding Ascii -NoNewline
   }
-  Remove-Item "$HarnessDir\inbox.txt" -ErrorAction SilentlyContinue
+  Remove-Item "$HarnessDir\inbox.txt", "$HarnessDir\inbox.txt.lock", "$HarnessDir\inbox.txt.reading" -ErrorAction SilentlyContinue
   $t0 = Get-Date
   Start-Process -FilePath "$Kenshi\kenshi_x64.exe" -WorkingDirectory $Kenshi | Out-Null
   $launcher = Wait-Until { Get-Launcher } 120 'the launcher dialog'

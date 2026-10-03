@@ -166,9 +166,17 @@ void ProcessInbox(GameWorld *world) {
   }
 
   const std::string inboxPath = dir + "\\inbox.txt";
+  // Take the inbox first (rename), then read and delete our copy (KAH 9): a
+  // client may write the next inbox.txt the moment the name is free, and
+  // read-then-delete could delete that new command unread.
+  const std::string takenPath = dir + "\\inbox.txt.reading";
+  if (!FileExists(inboxPath))
+    return;
+  if (!MoveFileExA(inboxPath.c_str(), takenPath.c_str(), MOVEFILE_REPLACE_EXISTING))
+    return; // a writer still has it open: next poll
   std::vector<std::string> lines;
   {
-    std::ifstream in(inboxPath.c_str());
+    std::ifstream in(takenPath.c_str());
     if (!in)
       return;
     std::string line;
@@ -179,7 +187,7 @@ void ProcessInbox(GameWorld *world) {
         lines.push_back(line);
     }
   }
-  DeleteFileA(inboxPath.c_str());
+  DeleteFileA(takenPath.c_str());
   for (size_t i = 0; i < lines.size(); ++i) {
     std::vector<std::string> fields = SplitTabs(lines[i]);
     bool ok = false, pending = false;

@@ -85,22 +85,66 @@ def harness_dir(argv):
     sys.exit('harness folder not found: set KAH_DIR or pass --dir <Kenshi\\mods\\AutomationHarness>')
 
 
+_sent = [0]
+LOCK_STALE_S = 30
+
+
+def _take_lock(lock, deadline):
+    """inbox.txt.lock, created exclusively: one writer at a time across
+    processes (kah.py, stobe-say, background loops). A lock older than
+    LOCK_STALE_S was left by a killed writer and is taken over."""
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, ('%d %f\n' % (os.getpid(), time.time())).encode())
+            os.close(fd)
+            return
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(lock) > LOCK_STALE_S:
+                    os.remove(lock)
+                    continue
+            except OSError:
+                continue  # released meanwhile
+        if time.time() > deadline:
+            sys.exit('inbox locked by another client for too long (%s)' % lock)
+        time.sleep(0.05)
+
+
+def write_command(d, line, deadline):
+    """Puts one command line into inbox.txt without losing it to another
+    writer (KAH 9): take the lock, wait until the harness has taken the
+    previous inbox, write a temp file unique to this call, rename it in."""
+    inbox = os.path.join(d, 'inbox.txt')
+    lock = inbox + '.lock'
+    _take_lock(lock, deadline)
+    try:
+        while os.path.exists(inbox):
+            if time.time() > deadline:
+                sys.exit('previous command still unread: is Kenshi running?')
+            time.sleep(0.1)
+        _sent[0] += 1
+        tmp = '%s.%d.%d.tmp' % (inbox, os.getpid(), _sent[0])
+        with open(tmp, 'w', newline='\n') as f:
+            f.write(line + '\n')
+        os.replace(tmp, inbox)
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
+
+
 def send(d, cmd, args, timeout=20):
-    flag, inbox, outbox = (os.path.join(d, n) for n in ('enabled.flag', 'inbox.txt', 'outbox.txt'))
+    flag, outbox = (os.path.join(d, n) for n in ('enabled.flag', 'outbox.txt'))
     if not os.path.exists(flag):
         sys.exit('harness is off: run "kah on" (before launching Kenshi)')
     if any('\t' in a or '\n' in a for a in args):
         sys.exit('arguments may not contain tabs or newlines')
     deadline = time.time() + timeout
-    while os.path.exists(inbox):
-        if time.time() > deadline:
-            sys.exit('previous command still unread: is Kenshi running?')
-        time.sleep(0.2)
-    cid = 'k%d' % int(time.time() * 1000)
-    tmp = inbox + '.tmp'
-    with open(tmp, 'w', newline='\n') as f:
-        f.write('\t'.join([cid, cmd] + args) + '\n')
-    os.replace(tmp, inbox)
+    # Unique across concurrent clients (a millisecond alone was not).
+    cid = 'k%d_%d_%d' % (int(time.time() * 1000), os.getpid(), _sent[0] + 1)
+    write_command(d, '\t'.join([cid, cmd] + args), deadline)
     while time.time() < deadline:
         if os.path.exists(outbox):
             with open(outbox, encoding='utf-8', errors='replace') as f:

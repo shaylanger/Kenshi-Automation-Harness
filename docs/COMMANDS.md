@@ -12,9 +12,16 @@ All in the mod folder (`Kenshi\mods\AutomationHarness\`):
 | `autoload.txt` | tools | one save name, loaded once the main menu is up (deleted after use; reply id `autoload`) |
 | `harness.log` | harness | log, recreated each game start |
 
-Write `inbox.txt` atomically (write `inbox.txt.tmp`, then rename) and wait
-until the harness has deleted it before writing the next one. The inbox is
-polled every 250 ms. Arguments can't contain tabs or newlines.
+Several clients may run at once (e.g. a background loop plus a scenario), so
+writers follow this protocol (`client/kah.py` `write_command` does it):
+create `inbox.txt.lock` exclusively (`O_CREAT|O_EXCL`; a lock older than
+30 s is stale and may be removed), wait until `inbox.txt` is gone, write a
+temp file unique to the call (`inbox.txt.<pid>.<n>.tmp`), rename it to
+`inbox.txt`, delete the lock. Use ids unique across clients (kah.py:
+`k<ms>_<pid>_<n>`). The harness polls every 250 ms, renames `inbox.txt` to
+`inbox.txt.reading` before reading it, then deletes that copy, so a new
+inbox written meanwhile is never lost. Arguments can't contain tabs or
+newlines.
 
 ## Characters
 
