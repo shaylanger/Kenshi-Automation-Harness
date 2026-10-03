@@ -860,14 +860,33 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
     const int buyerBefore = c->getMoney(), traderBefore = trader->getMoney();
     const std::string itemName = item->getName();
     const int price = item->getValueSingle(true);
+    GameData *itemData = item->data;
+    Inventory *buyerInv = c->getInventory();
+    const int countBefore = (Valid(buyerInv) && itemData) ? CountAllSections(buyerInv, itemData) : 0;
     Item *bought = from->buyItem(item, c);
     ok = Valid(bought);
+    // buyItem takes the money and hands the item back detached (no inventory, not on the
+    // ground): place it like the trade window does, into the buyer's inventory or at her feet.
+    std::string placed = "already";
+    if (ok && !bought->isInInventory && !bought->_isPhysical) {
+      bool given = false;
+      try {
+        given = c->giveItem(bought, true, false);
+      } catch (...) {
+        given = false;
+      }
+      placed = given ? (bought->isInInventory ? "inventory" : (bought->_isPhysical ? "ground" : "unknown"))
+                     : "failed";
+    }
+    const int arrived = (Valid(buyerInv) && itemData) ? CountAllSections(buyerInv, itemData) - countBefore : 0;
     Log("KAH: trade " + c->getName() + " <- " + trader->getName() + " (" + fromName + ") " + itemName +
-        " ok=" + (ok ? "1" : "0") + " buyer " + Int(buyerBefore) + " -> " + Int(c->getMoney()) +
-        " trader " + Int(traderBefore) + " -> " + Int(trader->getMoney()));
+        " ok=" + (ok ? "1" : "0") + " placed=" + placed + " arrived=" + Int(arrived) + " buyer " +
+        Int(buyerBefore) + " -> " + Int(c->getMoney()) + " trader " + Int(traderBefore) + " -> " +
+        Int(trader->getMoney()));
     out = std::string(ok ? "bought " : "trade failed: ") + itemName + " from " + fromName +
-          " (value " + Int(price) + ") buyer cats " + Int(buyerBefore) + " -> " + Int(c->getMoney()) +
-          ", trader cats " + Int(traderBefore) + " -> " + Int(trader->getMoney());
+          " (value " + Int(price) + ") arrived=" + Int(arrived) + " placed=" + placed + ", buyer cats " +
+          Int(buyerBefore) + " -> " + Int(c->getMoney()) + ", trader cats " + Int(traderBefore) + " -> " +
+          Int(trader->getMoney());
     return true;
   }
   if (cmd == "eat") { // eat <npc> <food item in inventory>
