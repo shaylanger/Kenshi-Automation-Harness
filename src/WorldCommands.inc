@@ -338,6 +338,21 @@ void SampleTracked(GameWorld *world) {
   }
 }
 
+// A detached item handed to a character: in an inventory now, or on the ground.
+// The ground object is built over the next frames (creatingPhysical /
+// physicalShouldExist come first, _isPhysical later), so a drop that is still
+// being built counts too; treating it as failed made "trade" refund and put
+// the item back while the game was still dropping it.
+// pendingBefore: those flags were already set before the attempt (then they
+// prove nothing).
+bool PlacedOrDropping(Item *item, bool pendingBefore) {
+  if (!Valid(item))
+    return false;
+  if (item->isInInventory || item->_isPhysical)
+    return true;
+  return !pendingBefore && (item->creatingPhysical || item->physicalShouldExist);
+}
+
 bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const Ogre::Vector3 &origin,
                      bool &ok, std::string &out) {
   const std::string cmd = Lower(f[1]);
@@ -1111,6 +1126,24 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
     GameData *itemData = item->data;
     Inventory *buyerInv = c->getInventory();
     Inventory *traderInv = trader->getInventory();
+    // Run m16: a full buyer (the Trader fixture's Shay, room=0 for every item)
+    // made buyItem refuse or hand back an item nothing could place, and the
+    // reply only said "placed=failed". Say why up front; nothing moves.
+    bool buyerRoom = true;
+    if (Valid(buyerInv) && itemData) {
+      try {
+        buyerRoom = buyerInv->hasRoomForItem(itemData);
+      } catch (...) {
+        buyerRoom = true;
+      }
+    }
+    if (!buyerRoom) {
+      Log("KAH: trade " + c->getName() + " <- " + trader->getName() + " (" + fromName + ") " +
+          itemName + " refused: buyer has no room");
+      out = "trade failed: " + c->getName() + " has no room for " + itemName +
+            " (inventory full; nothing bought, no cats moved: free space or use another buyer)";
+      return true;
+    }
     std::vector<std::string> problems;
     std::string steps; // what happened, in order (reply + harness.log)
     // Shop storage (counters, barrels) is not something the game sells from:
@@ -1228,6 +1261,7 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
       steps += " placing (qty=" + Int(qty) + " room=" +
                (Valid(buyerInv) && itemData ? (buyerInv->hasRoomForItem(itemData) ? "1" : "0") : "?") +
                " equipped=" + (bought->isEquipped ? "1" : "0") + ")";
+      const bool pendingBefore = bought->creatingPhysical || bought->physicalShouldExist;
       bool given = false;
       if (Valid(buyerInv)) {
         try {
@@ -1247,19 +1281,20 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
         } catch (...) {
           r = false;
         }
-        given = bought->isInInventory || bought->_isPhysical;
+        given = PlacedOrDropping(bought, pendingBefore);
         steps += std::string(" giveItem(drop)=") + (r ? "1" : "0") + (given ? " placed" : " not placed");
         if (!given) {
           try {
             c->dropItem(bought);
           } catch (...) {
           }
-          given = bought->isInInventory || bought->_isPhysical;
+          given = PlacedOrDropping(bought, pendingBefore);
           steps += std::string(" dropItem=") + (given ? "placed" : "not placed");
         }
       }
-      placed = given ? (bought->isInInventory ? "inventory" : (bought->_isPhysical ? "ground" : "unknown"))
-                     : "failed";
+      placed = given ? (bought->isInInventory ? "inventory" : "ground") : "failed";
+      if (given && !bought->isInInventory && !bought->_isPhysical)
+        steps += " (ground object still being built)";
       if (!given) {
         // No money lost: refund what moved and put the item back.
         const int paidNow = buyerBefore - c->getMoney(), receivedNow = trader->getMoney() - traderBefore;
