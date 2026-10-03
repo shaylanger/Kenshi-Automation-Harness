@@ -65,6 +65,18 @@ int main() {
             err.find("rotate") != std::string::npos,
         "unknown option refused");
 
+  // KAH 12: buildings that crash the game are refused.
+  Check(BuildDeniedSid("43875-Newwworld.mod"), "Biofuel Distillery sid denied");
+  Check(!BuildDeniedSid("1855-gamedata.base"), "Battery Bank sid allowed");
+  Check(StorageWithoutInventory(true, 2, true, false), "storage without inventory refused");
+  Check(!StorageWithoutInventory(true, 2, true, true), "storage with inventory allowed");
+  Check(!StorageWithoutInventory(true, 4, true, false),
+        "production building without inventory allowed (Grain Silo)");
+  Check(!StorageWithoutInventory(true, 23, true, false),
+        "battery without inventory allowed (Battery Bank)");
+  Check(!StorageWithoutInventory(false, 0, true, false), "no functionality allowed");
+  Check(!StorageWithoutInventory(true, 2, false, false), "unknown has-inventory allowed");
+
   printf(g_failed ? "%d FAILED\n" : "all build argument tests passed\n", g_failed);
   return g_failed ? 1 : 0;
 }

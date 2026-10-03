@@ -72,3 +72,26 @@ inline bool ParseBuildArgs(const std::vector<std::string> &f, BuildArgs &a, std:
   }
   return true;
 }
+
+// KAH 12: buildings "build" refuses because the game crashes on them.
+// A storage building (functionality "function" 2, Resource storage) whose
+// template says "has inventory" false gets no inventory, and the game's
+// update reads it (Biofuel Distillery 43875-Newwworld.mod: crash at
+// kenshi_x64.exe+0x2988b5, UseableStuff::inventory null, ~10 s after the
+// next load). Known bad sids are refused too, whatever their data says.
+const int kFunctionResourceStorage = 2;
+
+inline bool BuildDeniedSid(const std::string &sid) {
+  static const char *const denied[] = {"43875-Newwworld.mod"};
+  for (size_t i = 0; i < sizeof(denied) / sizeof(denied[0]); ++i)
+    if (sid == denied[i])
+      return true;
+  return false;
+}
+
+// hasFunction: the template names a functionality; functionCode its "function".
+inline bool StorageWithoutInventory(bool hasFunction, int functionCode, bool hasInventoryKnown,
+                                    bool hasInventory) {
+  return hasFunction && functionCode == kFunctionResourceStorage && hasInventoryKnown &&
+         !hasInventory;
+}

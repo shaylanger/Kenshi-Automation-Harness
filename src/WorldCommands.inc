@@ -420,6 +420,34 @@ float HorizontalDistance(const Ogre::Vector3 &a, const Ogre::Vector3 &b) {
   return sqrt(dx * dx + dz * dz);
 }
 
+// Why "build" must not make this building (KAH 12), or "" if it may.
+std::string BuildRefusal(GameData *data) {
+  if (BuildDeniedSid(data->stringID))
+    return "is on the deny list: it crashes the game (KAH 12)";
+  bool hasFunction = false, hasInvKnown = false, hasInv = true;
+  int function = -1;
+  try {
+    const Ogre::vector<GameDataReference>::type *funcs =
+        data->getReferenceListIfExists("functionality");
+    if (funcs && !funcs->empty()) {
+      GameData *fd = (*funcs)[0].ptr;
+      if (Valid(fd) && fd->idata.find("function") != fd->idata.end()) {
+        hasFunction = true;
+        function = fd->idata.find("function")->second;
+      }
+    }
+    if (data->bdata.find("has inventory") != data->bdata.end()) {
+      hasInvKnown = true;
+      hasInv = data->bdata.find("has inventory")->second;
+    }
+  } catch (...) {
+    return "";
+  }
+  if (StorageWithoutInventory(hasFunction, function, hasInvKnown, hasInv))
+    return "is a storage building whose template has no inventory: the game crashes on it (KAH 12)";
+  return "";
+}
+
 Building *CreateBuilding(GameWorld *world, GameData *data, const Ogre::Vector3 &pos, Faction *owner) {
   return world->theFactory->createBuilding(data, pos, nullptr, owner, Ogre::Quaternion::IDENTITY,
                                            nullptr, nullptr, nullptr, nullptr, nullptr, false, true,
@@ -556,6 +584,14 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     if (!data) {
       out = error;
       return true;
+    }
+    {
+      std::string why = BuildRefusal(data);
+      if (!why.empty()) {
+        Log("KAH: build refused " + data->name + " (" + data->stringID + "): " + why);
+        out = "refused: " + data->name + " (" + data->stringID + ") " + why;
+        return true;
+      }
     }
     Ogre::Vector3 pos;
     if (a.at) {
