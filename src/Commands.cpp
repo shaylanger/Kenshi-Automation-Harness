@@ -591,7 +591,7 @@ const char *const kBuiltins[] = {
     "tasks", "ui", "click", "messages", "screenshot", "time", "building", "production",
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
-    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime"};
+    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | speed <0|0.5..50> | "
@@ -609,7 +609,7 @@ const char *const kHelp =
     "faction <npc> <faction> | sleep <npc> [bed <name>] | wake <npc> | "
     "damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | protect [<npc> on|off] | shackle <npc> [owner <npc>] | unshackle <npc> | "
     "cage|uncage <npc> [cage] | shopstock <trader> [radius <m>] | trade <buyer> <trader> <item> [radius <m>] | "
-    "eat <npc> <food> | runspeed <npc> | walktime <npc> <dist> [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [radius <m>] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
+    "eat <npc> <food> | sever <npc> <limb> [noitem] [ko] | runspeed <npc> | walktime <npc> <dist> [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [radius <m>] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | "

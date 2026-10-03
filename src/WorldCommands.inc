@@ -1467,6 +1467,55 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
           (ok && !item->_isPhysical ? " (ground object still being built)" : "");
     return true;
   }
+  if (cmd == "sever") { // sever <npc> <limb> [noitem] [ko]: the game's own amputation (KAH 20)
+    static const char *const limbNames[] = {"left_arm", "right_arm", "left_leg", "right_leg"};
+    static const char *const states[] = {"original", "stump", "replaced", "crushed"};
+    int limb = -1;
+    const std::string want = f.size() >= 4 ? Lower(f[3]) : "";
+    for (int i = 0; i < 4; ++i)
+      if (want == limbNames[i])
+        limb = i;
+    if (limb < 0) {
+      out = "usage: sever <npc> left_arm|right_arm|left_leg|right_leg [noitem] [ko]";
+      return true;
+    }
+    bool makeItem = true, knockout = false;
+    for (size_t i = 4; i < f.size(); ++i) {
+      if (Lower(f[i]) == "noitem")
+        makeItem = false;
+      if (Lower(f[i]) == "ko")
+        knockout = true;
+    }
+    MedicalSystem &med = c->medical;
+    const RobotLimbs::Limb l = (RobotLimbs::Limb)limb;
+    const int before = (int)med.getLimbState(l);
+    if (before == LIMB_STUMP || before == LIMB_CRUSHED) {
+      out = c->getName() + " " + limbNames[limb] + " is already lost (" + states[before] + ")";
+      return true;
+    }
+    med.amputate(l, makeItem, Ogre::Vector3::ZERO);
+    // As after a real cut-off (and Stobe's own amputation): the limb part
+    // reads as destroyed.
+    MedicalSystem::HealthPartStatus *part =
+        limb == 0 ? med.leftArm : limb == 1 ? med.rightArm : limb == 2 ? med.leftLeg : med.rightLeg;
+    if (Valid(part)) {
+      part->flesh = -100.0f;
+      if (part->fleshStun > -100.0f)
+        part->fleshStun = -100.0f;
+      part->updateDerivedHealths();
+    }
+    if (knockout)
+      med.knockoutForceTimer(8.0f);
+    const int after = (int)med.getLimbState(l);
+    ok = after == LIMB_STUMP || after == LIMB_CRUSHED;
+    Log("KAH: sever " + c->getName() + " " + limbNames[limb] + " state " + Int(before) + " -> " + Int(after));
+    out = c->getName() + " " + limbNames[limb] + " limb_state " +
+          (before >= 0 && before < 4 ? states[before] : "?") + " -> " +
+          (after >= 0 && after < 4 ? states[after] : "?") +
+          (makeItem ? " (severed limb item dropped)" : "") + (knockout ? " KO 8 s" : "") +
+          (ok ? "" : " (the game did not mark it lost)");
+    return true;
+  }
   if (cmd == "pickup") { // pickup <npc> <item|#serial/index|nearest> [radius <m>]: ground item into inventory (KAH 15)
     if (f.size() < 4) {
       out = "usage: pickup <npc> <item name|sid|#serial/index|nearest> [radius <m>]";

@@ -43,6 +43,7 @@ Built-in commands:
   damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | eat <npc> <food>
   drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [radius <m>]   ground items (same instance)
   protect [<npc> on|off]                  test cheat: kept at full health, a KO cleared at once
+  sever <npc> left_arm|right_arm|left_leg|right_leg [noitem] [ko]   real amputation (limb state stump)
   unload <npc> | reload <name>            stream his squad out / back in (game streaming)
   runspeed <npc> | walktime <npc> <dist> [walk|run]   movement speeds | timed walk (seconds=, speed=)
   shackle|unshackle <npc> | cage|uncage <npc> [cage] | shopstock <trader> [radius <m>]
