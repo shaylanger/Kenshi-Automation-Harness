@@ -1364,7 +1364,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     return c->getName() + " movement_speed=" + Num(c->getMovementSpeed()) +
            " max_speed=" + Num(m->getMaxSpeed()) + " current_speed=" + Num(m->currentSpeed) +
            " desired_speed=" + Num(m->desiredSpeed) + " walk_speed=" + Num(m->walkSpeed) +
-           " speed_orders=" + (so >= 0 && so < 5 ? speeds[so] : "?") +
+           " speed_orders=" + (so >= 0 && so < 5 ? speeds[so] : "?") + RunSpeedStats(c) +
            " (m/s at game speed 1; walktime measures a real walk)";
   }
 

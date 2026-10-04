@@ -16,6 +16,27 @@ std::string Fine(double v) {
   return s.str();
 }
 
+// The game's own derived movement/stealth numbers for runspeed (balance rows
+// 193 athletics, 194 swimming, 195 stealth): read straight from CharStats.
+std::string RunSpeedStats(Character *c) {
+  CharStats *s = c->getStats();
+  if (!Valid(s))
+    return " stats=none";
+  std::string out;
+  try {
+    out += " stats_run_speed=" + Fine(s->getMaxRunSpeed()) +
+           " ideal_run_speed=" + Fine(s->calculateTheoreticalIdealMaxRunSpeed()) +
+           " swim_speed=" + Fine(s->calculateSwimSpeed()) + " max_swim_speed=" + Fine(s->_calculateMaxSwimSpeed()) +
+           " stealth_speed=" + Fine(s->calculateMaxStealthSpeed()) +
+           " stealth_skill01=" + Fine(s->getStealthSkill01(true)) +
+           " stealth_skill01_raw=" + Fine(s->getStealthSkill01(false)) +
+           " encumbrance=" + Fine(s->getEncumbranceMult());
+  } catch (...) {
+    out += " stats=error";
+  }
+  return out;
+}
+
 // Simulated seconds: real frame time x game speed while unpaused.
 struct SimClock {
   DWORD startTick, lastTick;
