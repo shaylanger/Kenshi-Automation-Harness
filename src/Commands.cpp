@@ -1331,13 +1331,19 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     return "spawned " + Int(made) + "/" + Int(count) + " " + charData->name + ": " + names;
   }
 
-  if (cmd == "benches") { // benches [radius] [crafts]: crafting benches, their queue and inventory
+  if (cmd == "benches") { // benches [radius] [crafts] [near <npc|x y z>]: crafting benches, their queue and inventory
     float radius = 0;
     std::string radiusError;
     if (!ParseSearchRadius(f, 2, 2, kDefaultSearchRadius, radius, radiusError))
       return radiusError;
+    // near <npc>: search around that character, not the first squad member (m24-4080 pg-56: at speed 50 the
+    // squad leader walked off and "benches 60" found no bench while the smith was still crafting)
+    Ogre::Vector3 center = origin;
+    for (size_t i = 2; i < f.size(); ++i)
+      if (Lower(f[i]) == "near" && !ResolvePosition(world, f, i + 1, center, radiusError))
+        return radiusError;
     lektor<RootObject *> nearby;
-    world->getObjectsWithinSphere(nearby, origin, radius, BUILDING, 512, nullptr);
+    world->getObjectsWithinSphere(nearby, center, radius, BUILDING, 512, nullptr);
     std::string out;
     int n = 0;
     for (uint32_t i = 0; i < nearby.size() && n < 30; ++i) {
@@ -1345,7 +1351,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       if (!Valid(b))
         continue;
       ++n;
-      out += " || " + b->getName() + " dist=" + Num(b->getPosition().distance(origin)) +
+      out += " || " + b->getName() + " dist=" + Num(b->getPosition().distance(center)) +
              " queue=" + Int((long long)b->crafting.size());
       if (!b->crafting.empty())
         out += " (first: " + b->crafting.front().name + " " +
