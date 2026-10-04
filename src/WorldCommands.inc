@@ -1536,9 +1536,9 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     out = Int(n) + " buildings within " + Num(radius) + ":" + out;
     return true;
   }
-  if (cmd == "power") { // power <building> on|off|charge|supply|unsupply [radius <m>]
+  if (cmd == "power") { // power <building> on|off|charge|drain|supply|unsupply [radius <m>]
     if (f.size() < 4) {
-      out = "usage: power <building> on|off|charge|supply|unsupply [radius <m>]";
+      out = "usage: power <building> on|off|charge|drain|supply|unsupply [radius <m>]";
       return true;
     }
     float radius = 0, dist = 0;
@@ -1559,6 +1559,13 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
         return true;
       }
       u->powerTimeStored = u->_powerTimeStoreMax;
+    } else if (what == "drain") { // empties a battery (tests can then see `charge` or the grid refill it)
+      UseableStuff *u = dynamic_cast<UseableStuff *>(b);
+      if (!Valid(u) || !u->isBattery()) {
+        out = b->getName() + " is not a battery";
+        return true;
+      }
+      u->powerTimeStored = 0;
     } else if (what == "supply" || what == "unsupply") {
       UseableStuff *u = dynamic_cast<UseableStuff *>(b);
       if (!Valid(u)) {
@@ -1582,7 +1589,7 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
         TopUpSupplied();
       }
     } else {
-      out = "usage: power <building> on|off|charge|supply|unsupply";
+      out = "usage: power <building> on|off|charge|drain|supply|unsupply";
       return true;
     }
     ok = true;
