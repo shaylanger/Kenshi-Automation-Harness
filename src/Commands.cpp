@@ -2086,7 +2086,26 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     float base = stats->getStat(st, true);
     float effective = stats->getStat(st, false);
     ok = true;
-    return c->getName() + " " + f[3] + " base=" + Num(base) + " effective=" + Num(effective);
+    // The game's own condition multiplier on this stat (MedicalSystem::getHealthStatModifier) and each
+    // factor alone: balance windows must run under the same conditions (pg m28: a base-50 worker read 27.5
+    // early and 12.5 later in the same file, so night/hunger/wounds/weather drift looked like skill noise).
+    std::string mods;
+    try {
+      MedicalSystem *med = c->getMedical();
+      if (Valid(med)) {
+        mods = " mod=" + Fine(med->getHealthStatModifier(st, true, true, true, true, true, true)) +
+               " hunger=" + Fine(med->getHealthStatModifier(st, true, false, false, false, false, false)) +
+               " wounds=" + Fine(med->getHealthStatModifier(st, false, true, false, false, false, false)) +
+               " dark=" + Fine(med->getHealthStatModifier(st, false, false, true, false, false, false)) +
+               " robot=" + Fine(med->getHealthStatModifier(st, false, false, false, true, false, false)) +
+               " weather=" + Fine(med->getHealthStatModifier(st, false, false, false, false, true, false)) +
+               " gear=" + Fine(med->getHealthStatModifier(st, false, false, false, false, false, true)) +
+               " light=" + Fine(c->getLightLevel());
+      }
+    } catch (...) {
+      mods = " mod=error";
+    }
+    return c->getName() + " " + f[3] + " base=" + Num(base) + " effective=" + Num(effective) + mods;
   }
 
   if (cmd == "setstat") { // setstat <npc> <stat> <value>
