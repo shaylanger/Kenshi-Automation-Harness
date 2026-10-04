@@ -1628,13 +1628,39 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
       out = b->getName() + " has no section " + sectionName;
       return true;
     }
+    // m23-4080: without a section, inv->addItem put bench materials into the crafting bench's "out" section
+    // (Iron Plates / Steel Bars sat in out, in1/in2 stayed empty, crafting stalled at 2.1%). When the building has
+    // an "out" section, place only into the other sections (in1, in2, ...: each takes one material type).
+    std::vector<InventorySection *> inputs;
+    if (!section) {
+      bool hasOut = false;
+      lektor<InventorySection *> &all = inv->getAllSections();
+      for (uint32_t si = 0; si < all.size(); ++si) {
+        InventorySection *sec = all.stuff[si];
+        if (!Valid(sec))
+          continue;
+        if (Lower(sec->name) == "out")
+          hasOut = true;
+        else
+          inputs.push_back(sec);
+      }
+      if (!hasOut)
+        inputs.clear();
+    }
     const int before = CountAllSections(inv, data);
     error.clear();
     for (int i = 0; i < count; ++i) {
       Item *item = MakeItem(world, data, f, 4, nullptr, error);
       if (!item)
         break;
-      bool placed = section ? section->addItem(item, 1) : inv->addItem(item, 1, false, true);
+      bool placed = false;
+      if (section)
+        placed = section->addItem(item, 1);
+      else if (!inputs.empty())
+        for (size_t si = 0; si < inputs.size() && !placed; ++si)
+          placed = inputs[si]->addItem(item, 1);
+      else
+        placed = inv->addItem(item, 1, false, true);
       if (!placed)
         break;
     }
