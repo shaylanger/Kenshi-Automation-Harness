@@ -13,6 +13,7 @@
 #include "WalkArrival.h"
 #include "GroundOwner.h"
 #include "HitCredit.h"
+#include "ProtectRules.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>

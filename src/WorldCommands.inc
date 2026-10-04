@@ -79,15 +79,30 @@ Building *FindBuilding(GameWorld *world, const Ogre::Vector3 &at, const std::str
 std::vector<hand> g_supplied;
 
 // "protect <npc> on": characters kept alive and standing (test cheat, KAH
-// 11). Every frame: all body parts and blood to max; a knockout is cleared
-// at once. Nothing about factions or aggro changes, so a fight stays a fight.
+// 11). Every frame: all body parts and blood to max, hunger back to 300 when
+// it falls below 200 (item 122: the squad starved at 50x); a knockout is
+// cleared at once and logged with its likely cause; a knockout that won't
+// clear and a death are logged too. Nothing about factions or aggro changes,
+// so a fight stays a fight. No revive limit.
 struct Protected {
   hand h;
   std::string name;
   bool wasDown;
   int revives;
+  DWORD downSince;   // GetTickCount() when the current knockout began
+  bool stuckLogged;  // "could not wake" logged for this knockout
+  bool deathLogged;
+  int feeds;
 };
 std::vector<Protected> g_protected;
+
+std::string ProtectVitals(Character *c) {
+  MedicalSystem &med = c->medical;
+  const float maxBlood = med.getMaxBlood();
+  return std::string("cause=") + ProtectKoCause(med.hunger, med.blood, maxBlood, med.bloodlossTrauma) +
+         " hunger=" + Num(med.hunger * 100.0f) + " blood=" + Num(med.blood) + "/" + Num(maxBlood) +
+         " ko_timer=" + Num(med.knockoutTimer);
+}
 
 void ProtectTick() {
   for (size_t i = 0; i < g_protected.size(); ++i) {
@@ -98,21 +113,42 @@ void ProtectTick() {
     } catch (...) {
       c = nullptr;
     }
-    if (!Valid(c) || c->isDead())
+    if (!Valid(c))
       continue;
     MedicalSystem &med = c->medical;
+    if (c->isDead()) {
+      if (!p.deathLogged) {
+        p.deathLogged = true;
+        Log("KAH: protect FAILED: " + c->getName() + " died (revives=" + Int(p.revives) +
+            " feeds=" + Int(p.feeds) + " " + ProtectVitals(c) + ")");
+      }
+      continue;
+    }
+    if (ProtectNeedsFood(med.hunger)) {
+      ++p.feeds;
+      Log("KAH: protect fed " + c->getName() + " (hunger " + Num(med.hunger * 100.0f) + " -> 300, feed " +
+          Int(p.feeds) + ")");
+      med.hunger = kProtectHungerFull;
+    }
     SetAllParts(c, 1.0f);
     const float maxBlood = med.getMaxBlood();
     if (med.blood < maxBlood)
       med.blood = maxBlood;
     if (c->isUnconcious()) {
+      const DWORD now = GetTickCount();
+      if (!p.wasDown) {
+        ++p.revives;
+        p.downSince = now;
+        p.stuckLogged = false;
+        Log("KAH: protect revived " + c->getName() + " (revive " + Int(p.revives) + " " + ProtectVitals(c) + ")");
+      } else if (ProtectStuck(true, p.downSince, now, p.stuckLogged)) {
+        p.stuckLogged = true;
+        Log("KAH: protect could not wake " + c->getName() + " after " + Int((int)(now - p.downSince)) + " ms (" +
+            ProtectVitals(c) + ")");
+      }
       med.knockoutTimer = 0.0f;
       c->playerWantsMeToGetUp = true;
       med.reassessCollapseMode(false, false);
-      if (!p.wasDown) {
-        ++p.revives;
-        Log("KAH: protect revived " + c->getName() + " (revive " + Int(p.revives) + ")");
-      }
       p.wasDown = true;
     } else {
       p.wasDown = false;
@@ -1380,6 +1416,7 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
         }
         list += (i ? " | " : "") + g_protected[i].name + " #" + Int(g_protected[i].h.serial) + "/" +
                 Int(g_protected[i].h.index) + " revives=" + Int(g_protected[i].revives) +
+                " feeds=" + Int(g_protected[i].feeds) +
                 (!Valid(pc) ? " (gone)" : pc->isDead() ? " DEAD" : pc->isUnconcious() ? " KO" : "");
       }
       ok = true;
@@ -1407,7 +1444,7 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
         out = pc->getName() + " is dead (protect can't revive the dead)";
         return true;
       }
-      Protected p = {h, pc->getName(), false, 0};
+      Protected p = {h, pc->getName(), false, 0, 0, false, false, 0};
       g_protected.push_back(p);
       ProtectTick();
     }
