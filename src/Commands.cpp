@@ -891,6 +891,14 @@ std::string Phase(GameWorld *world) {
 }
 
 
+// teleport: did he land? (m19-4080: some teleports right after a pause left him where he was; scenarios can
+// repeat the teleport with @until ... ~ moved=1). Flat distance to the target, 10 m tolerance (buildings push him out).
+std::string TeleportMoved(Character *c, const Ogre::Vector3 &to) {
+  Ogre::Vector3 d = c->getPosition() - to;
+  d.y = 0;
+  return std::string(" moved=") + (d.length() < 10.0f ? "1" : "0") + " off_target=" + Num(d.length());
+}
+
 std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool &ok,
                        bool &pending) {
   ok = false;
@@ -2007,7 +2015,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       ok = true;
       Log("KAH: teleport " + Describe(c, nullptr) + " to " + b->getName());
       return "teleported next to " + b->getName() + " (" + Num(dist) + " from the player): " +
-             Describe(c, &origin);
+             Describe(c, &origin) + TeleportMoved(c, to);
     }
     if (!ResolvePosition(world, f, 3, to, error))
       return error;
@@ -2015,7 +2023,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     c->teleport(to, Ogre::Quaternion::IDENTITY);
     ok = true;
     Log("KAH: teleport " + Describe(c, nullptr));
-    return "teleported: " + Describe(c, &origin);
+    return "teleported: " + Describe(c, &origin) + TeleportMoved(c, to);
   }
 
   if (cmd == "ko") { // ko <npc> [seconds]
