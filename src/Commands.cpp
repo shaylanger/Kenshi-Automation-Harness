@@ -564,9 +564,9 @@ void SetAllParts(Character *c, float fraction) {
     MedicalSystem::HealthPartStatus *part = med.getPart((unsigned __int64)i);
     if (!Valid(part))
       continue;
-    float maxHp = part->maxHealth();
-    part->flesh = maxHp * fraction;
-    part->fleshStun = maxHp * fraction;
+    // fleshStun is stun damage (ProtectRules.h PartHealthTarget): writing it
+    // to max left every part at 0% health and the wounds factor at 0.25.
+    PartHealthTarget(part->maxHealth(), fraction, part->flesh, part->fleshStun);
   }
 }
 
@@ -2209,6 +2209,60 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
            out;
   }
 
+  if (cmd == "hp" && f.size() >= 4 && Lower(f[3]) == "detail") {
+    // hp <npc> detail: every HealthPartStatus field per part plus the
+    // medical summary fields, to see what a wounds factor reads.
+    MedicalSystem &med = c->medical;
+    std::string out;
+    int count = med.getPartCount();
+    for (int i = 0; i < count; ++i) {
+      MedicalSystem::HealthPartStatus *part = med.getPart((unsigned __int64)i);
+      if (!Valid(part))
+        continue;
+      out += " | " + Int(i) + " type=" + Int((long long)part->whatAmI) + " flesh=" + Num(part->flesh) +
+             " stun=" + Num(part->fleshStun) + " band=" + Num(part->bandaging) +
+             " jury=" + Num(part->juryRigging) + " wear=" + Num(part->wearDamage) +
+             " maxH()=" + Num(part->maxHealth()) + " _max=" + Num(part->_maxHealth) +
+             " hpmult=" + Num(part->HPMult) + " age=" + Num(part->age) +
+             " derived%=" + Num(part->derivedFleshHealthPercent) + (part->isRobotic() ? " robot" : "");
+    }
+    ok = true;
+    return c->getName() + " worstDamage=" + Num(med.worstDamage) + " bestArm=" + Num(med.partBestArm) +
+           " head=" + Num(med.partHead) + " worstTorso=" + Num(med.partWorstTorso) +
+           " firstAid=" + Num(med.needsFirstAidScoreTotal_fleshy) + " wounds=" + Int((long long)med.wounds.size()) +
+           " wfactor=" + Num(med.getHealthStatModifier(STAT_SMITHING_WEAPON, false, true, false, false, false, false)) +
+           " parts" + out;
+  }
+
+  if (cmd == "hp" && f.size() >= 6 && Lower(f[3]) == "set") {
+    // hp <npc> set <flesh|stun|band|derived> <value|max>: write one field on
+    // every part (diagnostics for the protect/health wounds factor).
+    const std::string field = Lower(f[4]);
+    const bool toMax = Lower(f[5]) == "max";
+    const float v = (float)atof(f[5].c_str());
+    MedicalSystem &med = c->medical;
+    int count = med.getPartCount(), n = 0;
+    for (int i = 0; i < count; ++i) {
+      MedicalSystem::HealthPartStatus *part = med.getPart((unsigned __int64)i);
+      if (!Valid(part))
+        continue;
+      const float val = toMax ? part->maxHealth() : v;
+      if (field == "flesh")
+        part->flesh = val;
+      else if (field == "stun")
+        part->fleshStun = val;
+      else if (field == "band")
+        part->bandaging = val;
+      else if (field == "derived")
+        part->derivedFleshHealthPercent = val;
+      else
+        return "usage: hp <npc> set <flesh|stun|band|derived> <value|max>";
+      ++n;
+    }
+    ok = true;
+    return "set " + field + " on " + Int(n) + " parts of " + c->getName();
+  }
+
   if (cmd == "hp") { // per body part flesh/max, and the worst part in %
     MedicalSystem &med = c->medical;
     std::string out;
@@ -2219,9 +2273,12 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       if (!Valid(part))
         continue;
       float maxHp = part->maxHealth();
-      if (maxHp > 0.0f && part->flesh / maxHp < worst)
-        worst = part->flesh / maxHp;
+      const float health = PartHealthFraction(part->flesh, part->fleshStun, maxHp);
+      if (maxHp > 0.0f && health < worst)
+        worst = health;
       out += " " + Int(i) + ":" + Num(part->flesh) + "/" + Num(maxHp);
+      if (part->fleshStun > 0.0f)
+        out += "(stun " + Num(part->fleshStun) + ")";
       if (part->bandaging > 0.0f)
         out += "(bandaged " + Num(part->bandaging) + ")";
     }

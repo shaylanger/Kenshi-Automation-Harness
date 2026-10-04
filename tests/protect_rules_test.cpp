@@ -29,6 +29,17 @@ int main() {
   Check(!ProtectStuck(true, 1000, 9000, true), "stuck logged once");
   Check(!ProtectStuck(false, 1000, 9000, false), "up: not stuck");
   Check(ProtectStuck(true, 0xFFFFF000UL, 0x00000BB8UL + 0x1000UL, false), "tick wrap handled");
+  // Part health (wounds bug): full health = flesh at max and NO stun damage.
+  float flesh = -1, stun = -1;
+  PartHealthTarget(100.0f, 1.0f, flesh, stun);
+  Check(flesh == 100.0f && stun == 0.0f, "health 100: flesh=max, stun damage 0");
+  Check(PartHealthFraction(flesh, stun, 100.0f) == 1.0f, "health 100: derived health 1.0");
+  PartHealthTarget(80.0f, 0.3f, flesh, stun);
+  Check(std::fabs(PartHealthFraction(flesh, stun, 80.0f) - 0.3f) < 1e-5f, "health 30: derived 0.3");
+  PartHealthTarget(100.0f, -2.0f, flesh, stun);
+  Check(PartHealthFraction(flesh, stun, 100.0f) == -2.0f, "kill: derived -2.0");
+  Check(PartHealthFraction(100.0f, 100.0f, 100.0f) == 0.0f, "old bug: stun=max -> derived 0");
+  Check(PartHealthFraction(100.0f, 50.0f, 100.0f) == 0.5f, "stun 50 -> derived 0.5 (live)");
   printf(g_failed ? "protect_rules_test: %d FAILED\n" : "protect_rules_test: all passed\n", g_failed);
   return g_failed ? 1 : 0;
 }

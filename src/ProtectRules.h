@@ -34,3 +34,19 @@ inline const char *ProtectKoCause(float hunger, float blood, float maxBlood, boo
 inline bool ProtectStuck(bool down, unsigned long downSinceMs, unsigned long nowMs, bool reported) {
   return down && !reported && nowMs - downSinceMs >= kProtectStuckMs;
 }
+
+// Body part health (KAH wounds bug, PG m29). HealthPartStatus::fleshStun is
+// stun DAMAGE, not stun health: the game derives a part's health as
+// (flesh - fleshStun) / max (live: flesh 100 stun 100 -> derived 0, stun 50
+// -> 0.5; the stun decays over time). SetAllParts used to write fleshStun =
+// max, so protect/health left every part at 0% derived health: the wounds
+// stat factor dropped to its 0.25 floor on craft skills at "full" hp.
+inline void PartHealthTarget(float maxHp, float fraction, float &flesh, float &fleshStun) {
+  flesh = maxHp * fraction;
+  fleshStun = 0.0f; // no stun damage: the part's health is exactly `fraction`
+}
+
+// The game's derived health of a part (0..1 at full), from flesh and stun damage.
+inline float PartHealthFraction(float flesh, float fleshStun, float maxHp) {
+  return maxHp > 0.0f ? (flesh - fleshStun) / maxHp : 0.0f;
+}
