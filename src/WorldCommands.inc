@@ -1625,10 +1625,20 @@ struct GameShop {
 bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Character *c,
                          const Ogre::Vector3 &origin, bool &ok, std::string &out) {
   const std::string cmd = Lower(f[1]);
-  if (cmd == "drop") { // drop <npc> <item> [count]: put an inventory item on the ground (KAH 15)
+  if (cmd == "drop") { // drop <npc> <item> [count] [owned]: put an inventory item on the ground (KAH 15, 22b)
     if (f.size() < 4) {
-      out = "usage: drop <npc> <item> [count]";
+      out = "usage: drop <npc> <item> [count] [owned]";
       return true;
+    }
+    // owned (KAH 22b, REL theft tests): the item stays his on the ground (his faction + proper owner), so
+    // another character's `pickup` of it is the game's own theft path (a test setup for an owned item).
+    bool owned = false;
+    std::string countArg;
+    for (size_t i = 4; i < f.size(); ++i) {
+      if (Lower(f[i]) == "owned")
+        owned = true;
+      else if (countArg.empty())
+        countArg = f[i];
     }
     bool ambiguous = false;
     Item *item = FindInventoryItem(c, f[3], ambiguous);
@@ -1637,7 +1647,7 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
                       : c->getName() + " carries no " + f[3];
       return true;
     }
-    if (f.size() >= 5 && atoi(f[4].c_str()) != item->quantity) {
+    if (!countArg.empty() && atoi(countArg.c_str()) != item->quantity) {
       out = "drop takes the whole stack: " + item->getName() + " x" + Int(item->quantity) +
             " (give count " + Int(item->quantity) + " or none)";
       return true;
@@ -1653,14 +1663,25 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
     } catch (...) {
     }
     ok = Valid(item) && !item->isInInventory && PlacedOrDropping(item, pendingBefore);
+    std::string ownerNote;
     if (ok) {
       g_dropped.push_back(item->getHandle());
       if (g_dropped.size() > 64)
         g_dropped.erase(g_dropped.begin());
+      if (owned) {
+        try {
+          item->setFaction(c->getFaction(), nullptr);
+          item->setProperOwner(c->getHandle());
+        } catch (...) {
+        }
+        Faction *nowF = item->getFaction();
+        ownerNote = std::string(" owner_faction=") + (Valid(nowF) ? nowF->getName() : std::string("none")) +
+                    " proper_owner=" + (SameHandle(item->getProperOwner(), c->getHandle()) ? c->getName() : std::string("?"));
+      }
     }
-    Log("KAH: drop " + c->getName() + " " + item->getName() + " ok=" + (ok ? "1" : "0"));
+    Log("KAH: drop " + c->getName() + " " + item->getName() + " ok=" + (ok ? "1" : "0") + ownerNote);
     out = std::string(ok ? "dropped " : "drop failed: ") + GroundItemLine(item, c->getPosition()) +
-          (ok && !item->_isPhysical ? " (ground object still being built)" : "");
+          (ok && !item->_isPhysical ? " (ground object still being built)" : "") + ownerNote;
     return true;
   }
   if (cmd == "sever") { // sever <npc> <limb> [noitem] [ko]: the game's own amputation (KAH 20)
