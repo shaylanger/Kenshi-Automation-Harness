@@ -66,6 +66,32 @@ try:
     check('2 failed' not in text and '3 passed, 1 failed' in text, 'run summary')
     if failed:
         print(text)
+
+    # @log-wait: polls until a line written ~1.5 s later matches; times out on a line that never comes
+    check(kah.log_step_path(r'@log-wait 5 C:\Kenshi Mods\x.log ~ hi') == r'C:\Kenshi Mods\x.log', 'log-wait path')
+    scen2 = os.path.join(root, 'scen2.txt')
+    with open(scen2, 'w', encoding='utf-8') as f:
+        f.write('@log-wait 6 %s ~ late line\n' % log)
+        f.write('@log-wait 1 "%s" ~ never written\n' % log)
+
+    def append_late():
+        time.sleep(1.5)
+        with open(log, 'a') as f:
+            f.write('late line\n')
+
+    t = threading.Thread(target=append_late)
+    t.start()
+    out = io.StringIO()
+    sys.stdout = out
+    try:
+        rc = kah.run_scenario(root, scen2)
+    finally:
+        sys.stdout = old
+    t.join()
+    text = out.getvalue()
+    check('1 passed, 1 failed' in text, 'log-wait: late line matched, missing line timed out')
+    if '1 passed, 1 failed' not in text:
+        print(text)
 finally:
     shutil.rmtree(root, ignore_errors=True)
 

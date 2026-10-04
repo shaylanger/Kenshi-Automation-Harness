@@ -226,6 +226,8 @@ SCENARIO_HELP = """Scenario file (kah run <file> [--csv out.csv] [--stop]): one 
   @set NAME <command ...> ~ <regex with one (group)>   capture; later steps use ${NAME}
   @log <file> ~ <regex>               a line added to <file> since the run started matches
                                       (<file> may contain spaces; quotes optional)
+  @log-wait <timeout_s> <file> ~ <regex>   same, but re-reads <file> every 1 s until
+                                      a new line matches (instead of a fixed @sleep)
   @echo <text>
   # comment (blank lines ignored). Arguments are shell-quoted ("Dried Meat").
   Once the game was in the world, a step that finds it back at the main menu
@@ -237,7 +239,7 @@ def log_step_path(line):
     """The file of an `@log <file> ~ <regex>` step: everything up to ' ~ ',
     so a path may contain spaces; quotes around it are dropped. Taken raw
     (shlex would eat Windows backslashes)."""
-    rest = re.sub(r'^\s*@log\s+', '', line, count=1)
+    rest = re.sub(r'^\s*@log(-wait\s+[0-9.]+)?\s+', '', line, count=1)
     if ' ~ ' in rest:
         rest = rest.split(' ~ ', 1)[0]
     rest = rest.strip()
@@ -304,7 +306,7 @@ def run_scenario(d, path, csv_path=None, stop=False):
         lines = f.read().splitlines()
     # Note the size of every log a step will look at, before anything runs.
     for line in lines:
-        if re.match(r'\s*@log\s', line):
+        if re.match(r'\s*@log(-wait\s+[0-9.]+)?\s', line):
             file = to_local(log_step_path(line))
             log_offsets[file] = os.path.getsize(file) if os.path.exists(file) else 0
     for number, raw in enumerate(lines, 1):
@@ -322,11 +324,21 @@ def run_scenario(d, path, csv_path=None, stop=False):
             line = line.strip()
         ok_step, detail = True, ''
         try:
-            if re.match(r'@log\s', line):
+            if re.match(r'@log(-wait\s+[0-9.]+)?\s', line):
                 file = log_step_path(line)
-                text = log_since(file)
-                ok_step = bool(regex and re.search(regex, text))
-                detail = 'matched' if ok_step else 'no new line matching in ' + file
+                m = re.match(r'@log-wait\s+([0-9.]+)\s', line)
+                start = time.time()
+                end = start + (float(m.group(1)) if m else 0)
+                while True:
+                    text = log_since(file)
+                    ok_step = bool(regex and re.search(regex, text))
+                    if ok_step or time.time() >= end:
+                        break
+                    time.sleep(1)
+                if ok_step:
+                    detail = 'matched' + (' after %.0f s' % (time.time() - start) if m else '')
+                else:
+                    detail = 'no new line matching in ' + file + (' within %s s' % m.group(1) if m else '')
             elif line.startswith('@'):
                 words = shlex.split(line[1:])
                 kind = words[0]
