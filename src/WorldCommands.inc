@@ -1573,7 +1573,9 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
         }
       if (what == "supply") {
         if (PowerWanted(u) <= 0) {
-          out = b->getName() + " uses no power (wants=0)" + GridInfo(b);
+          // nothing to supply: not an error (balance setups supply every bench, powered or not)
+          ok = true;
+          out = b->getName() + " uses no power (wants=0), nothing to supply" + GridInfo(b);
           return true;
         }
         g_supplied.push_back(h);
