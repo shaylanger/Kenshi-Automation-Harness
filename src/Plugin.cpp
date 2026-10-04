@@ -301,11 +301,22 @@ void OnGuiFrame(float) {
   Tick("mygui");
 }
 
-// On-screen player messages ("X is attacking!", "No room in ... pack"), kept
-// so tests can check them: both GameWorld::showPlayerAMessage variants.
+// On-screen player messages ("X is attacking!", "Saving...", "Research
+// complete: X"), kept so tests can check them (KAH 2).
+// GameWorld::showPlayerAMessage is a 12-byte stub (mov rcx,[this+0x4E0];
+// jmp MessageRoller::add) and showPlayerAMessage_withLog calls the same
+// MessageRoller function; the game's ~130 own call sites go through those two,
+// mods through KenshiLib's exports. Hooking the MessageRoller function catches
+// all of them in one place. If its address can't be read from the stub (the
+// bytes differ: other build, or someone hooked the stub first) the two GameWorld
+// functions are hooked instead.
 typedef void(__fastcall *ShowMessageFn)(GameWorld *, const std::string &, bool);
+typedef void(__fastcall *RollerAddFn)(void *, const std::string &, bool);
 ShowMessageFn g_showMessageOrig = nullptr;
 ShowMessageFn g_showMessageLogOrig = nullptr;
+RollerAddFn g_rollerAddOrig = nullptr;
+bool g_messageDedupe = true; // only the GameWorld fallback sees one message twice
+std::string g_messageHookPoint = "none";
 CRITICAL_SECTION g_messagesLock;
 struct MessagesLockInit {
   MessagesLockInit() { InitializeCriticalSection(&g_messagesLock); }
@@ -317,7 +328,7 @@ void RecordMessage(const std::string &message) {
   static DWORD lastTick = 0;
   DWORD now = GetTickCount();
   EnterCriticalSection(&g_messagesLock);
-  if (!(message == last && now - lastTick < 200)) { // _withLog may call the plain one
+  if (!(g_messageDedupe && message == last && now - lastTick < 200)) { // _withLog may call the plain one
     SYSTEMTIME t;
     GetLocalTime(&t);
     char stamp[16];
@@ -339,6 +350,26 @@ void __fastcall Hook_ShowMessage(GameWorld *w, const std::string &message, bool 
 void __fastcall Hook_ShowMessageLog(GameWorld *w, const std::string &message, bool queued) {
   RecordMessage(message);
   g_showMessageLogOrig(w, message, queued);
+}
+
+void __fastcall Hook_RollerAdd(void *roller, const std::string &message, bool queued) {
+  RecordMessage(message);
+  g_rollerAddOrig(roller, message, queued);
+}
+
+// The MessageRoller function behind GameWorld::showPlayerAMessage: the stub is
+// 48 8B 89 <disp32 0x4E0> (mov rcx,[rcx+0x4E0]) then E9 <rel32> (jmp), which
+// may land on an incremental-link thunk (E9 <rel32>) first. 0 if the bytes differ.
+unsigned char *MessageRollerAdd(__int64 showAddr) {
+  const unsigned char *p = (const unsigned char *)showAddr;
+  if (!p || IsBadReadPtr(p, 12))
+    return nullptr;
+  if (!(p[0] == 0x48 && p[1] == 0x8B && p[2] == 0x89 && *(const int *)(p + 3) == 0x4E0 && p[7] == 0xE9))
+    return nullptr;
+  unsigned char *q = (unsigned char *)(p + 12) + *(const int *)(p + 8);
+  for (int hops = 0; hops < 4 && !IsBadReadPtr(q, 5) && q[0] == 0xE9; ++hops)
+    q = q + 5 + *(const int *)(q + 1);
+  return IsBadReadPtr(q, 16) ? nullptr : q;
 }
 
 // Test sessions must not overwrite the player's autosave slots: skip the
@@ -391,7 +422,22 @@ void InstallHooks() {
 
   __int64 msgAddr = KenshiLib::GetRealAddress(&GameWorld::showPlayerAMessage);
   __int64 msgLogAddr = KenshiLib::GetRealAddress(&GameWorld::showPlayerAMessage_withLog);
-  if (msgAddr && msgLogAddr) {
+  unsigned char *rollerAdd = MessageRollerAdd(msgAddr);
+  int rollerStatus = -1;
+  if (rollerAdd)
+    rollerStatus = (int)KenshiLib::AddHook((void *)rollerAdd, (void *)Hook_RollerAdd, (void **)&g_rollerAddOrig);
+  if (rollerAdd && rollerStatus == 0 && g_rollerAddOrig) {
+    g_messageDedupe = false;
+    char at[32];
+    sprintf_s(at, "+0x%llX", (unsigned long long)(rollerAdd - (unsigned char *)GetModuleHandleA(nullptr)));
+    g_messageHookPoint = std::string("MessageRoller") + at;
+    Log("KAH: player message hook on MessageRoller (" + g_messageHookPoint + ") status=0");
+  } else if (msgAddr && msgLogAddr) {
+    if (rollerAdd)
+      Log("KAH: MessageRoller hook status=" + Int(rollerStatus) + "; hooking the GameWorld functions instead");
+    else
+      Log("KAH: MessageRoller not found behind showPlayerAMessage; hooking the GameWorld functions instead");
+    g_messageHookPoint = "GameWorld";
     int a = (int)KenshiLib::AddHook((void *)msgAddr, (void *)Hook_ShowMessage,
                                     (void **)&g_showMessageOrig);
     int b = (int)KenshiLib::AddHook((void *)msgLogAddr, (void *)Hook_ShowMessageLog,
@@ -444,8 +490,10 @@ std::string RecentMessages(int n) {
   for (size_t i = from; i < g_messages.size(); ++i)
     out += " | " + g_messages[i];
   LeaveCriticalSection(&g_messagesLock);
-  if (!g_showMessageOrig)
+  if (!g_rollerAddOrig && !g_showMessageOrig)
     out += " (message hook not installed)";
+  else
+    out += " (hook: " + g_messageHookPoint + ")";
   return out;
 }
 
