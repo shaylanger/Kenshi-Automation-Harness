@@ -891,12 +891,62 @@ std::string Phase(GameWorld *world) {
 }
 
 
-// teleport: did he land? (m19-4080: some teleports right after a pause left him where he was; scenarios can
-// repeat the teleport with @until ... ~ moved=1). Flat distance to the target, 10 m tolerance (buildings push him out).
-std::string TeleportMoved(Character *c, const Ogre::Vector3 &to) {
+// teleport: did he land? Flat distance to the target, 10 m tolerance (buildings push him out).
+float TeleportOff(Character *c, const Ogre::Vector3 &to) {
   Ogre::Vector3 d = c->getPosition() - to;
   d.y = 0;
-  return std::string(" moved=") + (d.length() < 10.0f ? "1" : "0") + " off_target=" + Num(d.length());
+  return d.length();
+}
+
+// Character::teleport sometimes leaves him where he was (m19-4080: Avarek in the Full-Base save, after some game
+// time at the base, never moved again by teleport, paused or not). Then the movement controller's own
+// set-position-and-teleport is tried. Returns the method that landed (or "none").
+std::string TeleportRobust(GameWorld *world, Character *c, const Ogre::Vector3 &to) {
+  c->teleport(to, Ogre::Quaternion::IDENTITY);
+  if (TeleportOff(c, to) < 10.0f)
+    return "teleport";
+  // Lying in a bed (or using any furniture) pins him there even when inSomething says IN_NOTHING
+  // (m19-4080: Avarek in the Full-Base Bed): leave it the game's way, then teleport again.
+  std::string left;
+  try {
+    lektor<RootObject *> nearby;
+    world->getObjectsWithinSphere(nearby, c->getPosition(), 3.0f, BUILDING, 16, nullptr);
+    for (uint32_t i = 0; i < nearby.size(); ++i) {
+      UseableStuff *u = dynamic_cast<UseableStuff *>(nearby.stuff[i]);
+      if (!Valid(u) || !(u->getOccupant() == c->getHandle() || u->getPosition().distance(c->getPosition()) < 1.5f))
+        continue;
+      u->stopOperating(c->getHandle());
+      c->setBedMode(false, u);
+      left = u->getName();
+    }
+  } catch (...) {
+  }
+  if (!left.empty()) {
+    c->teleport(to, Ogre::Quaternion::IDENTITY);
+    if (TeleportOff(c, to) < 10.0f)
+      return "left " + left + " + teleport";
+  }
+  CharMovement *m = c->movement;
+  if (Valid(m)) {
+    try {
+      m->_setPositionDirectionAndTeleport(to, Ogre::Quaternion::IDENTITY);
+    } catch (...) {
+    }
+    if (TeleportOff(c, to) < 10.0f)
+      return "movement";
+    try {
+      m->_setPositionSimple(to);
+    } catch (...) {
+    }
+    if (TeleportOff(c, to) < 10.0f)
+      return "position";
+  }
+  return "none";
+}
+
+std::string TeleportMoved(Character *c, const Ogre::Vector3 &to, const std::string &method) {
+  const float off = TeleportOff(c, to);
+  return std::string(" moved=") + (off < 10.0f ? "1" : "0") + " off_target=" + Num(off) + " method=" + method;
 }
 
 std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool &ok,
@@ -2011,19 +2061,19 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
         return "no building matching '" + f[4] + "' within " + Num(radius) + " of the player";
       to = b->getPosition();
       to.x += (float)atof(Option(f, 5, "dist", "15").c_str());
-      c->teleport(to, Ogre::Quaternion::IDENTITY);
+      const std::string method = TeleportRobust(world, c, to);
       ok = true;
-      Log("KAH: teleport " + Describe(c, nullptr) + " to " + b->getName());
+      Log("KAH: teleport " + Describe(c, nullptr) + " to " + b->getName() + " method=" + method);
       return "teleported next to " + b->getName() + " (" + Num(dist) + " from the player): " +
-             Describe(c, &origin) + TeleportMoved(c, to);
+             Describe(c, &origin) + TeleportMoved(c, to, method);
     }
     if (!ResolvePosition(world, f, 3, to, error))
       return error;
     to.x += (float)atof(Option(f, 3, "dist", "0").c_str());
-    c->teleport(to, Ogre::Quaternion::IDENTITY);
+    const std::string method = TeleportRobust(world, c, to);
     ok = true;
-    Log("KAH: teleport " + Describe(c, nullptr));
-    return "teleported: " + Describe(c, &origin) + TeleportMoved(c, to);
+    Log("KAH: teleport " + Describe(c, nullptr) + " method=" + method);
+    return "teleported: " + Describe(c, &origin) + TeleportMoved(c, to, method);
   }
 
   if (cmd == "ko") { // ko <npc> [seconds]
