@@ -49,6 +49,11 @@ Built-in commands:
   sever <npc> left_arm|right_arm|left_leg|right_leg [noitem] [ko]   real amputation (limb state stump)
   unload <npc> | reload <name>            stream his squad out / back in (game streaming)
   runspeed <npc> | walktime <npc> <dist> [walk|run]   movement speeds | timed walk (seconds=, speed=)
+  balance (KAH 24): chance <npc> ko|kidnap|lockpick|steal <target> [item <name>]   the game's own chance
+  detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>]   who notices him sneaking | time until seen
+  healtime <medic> <patient> [wound <cut>] [timeout <s>]   timed first aid (bandage_rate=)
+  water <npc> | findwater <npc> [radius <m>] [depth <m>] | swimtime <npc> <dist> [+x|-x|+z|-z]   swimming
+  construct <npc> <building> [dist <m>] | construction <building> [reset] [fill]   build-speed site + progress
   shackle|unshackle <npc> | cage|uncage <npc> [cage] | shopstock <trader> [radius <m>]
   trade <buyer> <trader> <item> [radius <m>]   (shop storage radius: default 60, max 300)
   ui [filter] [all] | click <widget> | messages [n] | screenshot [name]
@@ -145,7 +150,7 @@ def write_command(d, line, deadline):
 
 
 # Commands the game answers later (seconds the client waits by default).
-LONG_COMMANDS = {'walktime': 200, 'pickup': 200}
+LONG_COMMANDS = {'walktime': 200, 'pickup': 200, 'swimtime': 200, 'detecttime': 200, 'healtime': 200}
 
 
 def send(d, cmd, args, timeout=None):

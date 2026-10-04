@@ -28,6 +28,7 @@
 #include <mygui/MyGUI_Widget.h>
 #include <kenshi/Damages.h>
 #include <kenshi/Faction.h>
+#include <kenshi/Gear.h> // LockedArmour (chance lockpick)
 #include <kenshi/FactionRelations.h>
 #include <kenshi/GameData.h>
 #include <kenshi/GameWorld.h>
@@ -585,6 +586,7 @@ std::string CurrentSave() {
 }
 
 #include "WorldCommands.inc"
+#include "BalanceCommands.inc"
 
 const char *const kBuiltins[] = {
     "help",  "status", "load",     "save",    "speed",  "chars",   "find",  "spawn",
@@ -596,7 +598,8 @@ const char *const kBuiltins[] = {
     "tasks", "ui", "click", "messages", "screenshot", "time", "building", "production",
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
-    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "newgame", "import", "stealth", "crime"};
+    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "newgame", "import", "stealth", "crime",
+    "chance", "detect", "detecttime", "healtime", "water", "findwater", "swimtime", "construct", "construction"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | newgame <start> | import <save> [flags] | speed <0|0.5..50> | "
@@ -614,7 +617,11 @@ const char *const kHelp =
     "faction <npc> <faction> | sleep <npc> [bed <name>] | wake <npc> | "
     "damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | protect [<npc> on|off] | shackle <npc> [owner <npc>] | unshackle <npc> | "
     "cage|uncage <npc> [cage] | shopstock <trader> [radius <m>] | trade <buyer> <trader> <item> [radius <m>] | "
-    "eat <npc> <food> | stealth <npc> on|off | crime <npc> [radius <m>] | sever <npc> <limb> [noitem] [ko] | runspeed <npc> | walktime <npc> <dist> [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
+    "eat <npc> <food> | stealth <npc> on|off | crime <npc> [radius <m>] | "
+    "chance <npc> ko|kidnap|lockpick|steal <target> [item <name>] | detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>] | "
+    "healtime <medic> <patient> [wound <cut>] [timeout <s>] | water <npc> | findwater <npc> [radius <m>] [depth <m>] | "
+    "swimtime <npc> <dist> [+x|-x|+z|-z] [walk|run] | construct <npc> <building> [dist <m>] | construction <building> [reset] [fill] | "
+    "sever <npc> <limb> [noitem] [ko] | runspeed <npc> | walktime <npc> <dist> [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | "
@@ -635,6 +642,10 @@ void SampleProduction(GameWorld *world) {
 void KeepWalkTimers() {
   try {
     WalkTick(ou);
+  } catch (...) {
+  }
+  try {
+    BalanceTick(ou);
   } catch (...) {
   }
   try {
@@ -910,6 +921,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   {
     std::string reply;
     if (RunWorldCommand(world, f, origin, ok, reply))
+      return reply;
+    if (RunBalanceWorldCommand(world, f, origin, ok, reply))
       return reply;
   }
 
@@ -1385,6 +1398,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
 
   {
     std::string reply;
+    if (RunBalanceCommand(world, f, c, origin, ok, pending, reply))
+      return reply;
     if (RunCharacterCommand(world, f, c, origin, ok, reply))
       return reply;
   }
