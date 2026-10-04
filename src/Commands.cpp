@@ -28,6 +28,8 @@
 #include <mygui/MyGUI_Gui.h>
 #include <mygui/MyGUI_TextBox.h>
 #include <mygui/MyGUI_Widget.h>
+#include <kenshi/gui/ForgottenGUI.h>      // character editor (newgame)
+#include <kenshi/gui/MessageBoxManager.h> // its "are you sure" box
 #include <kenshi/Damages.h>
 #include <kenshi/Faction.h>
 #include <kenshi/Gear.h> // LockedArmour (chance lockpick)
@@ -580,6 +582,33 @@ int g_lastSignal = 0;
 // since): the only state the game offers Import in (KAH 23).
 bool g_freshNewGame = false;
 
+// newgame (to-do 19): New Game opens the game's character editor once the
+// world is built, and the world waits there until the player presses
+// CONFIRM (m18-4080: phase=loading for 5 min, nothing to say why). The
+// harness reports that as phase=chargen and, unless "newgame ... edit",
+// presses CONFIRM and accepts the box like a player.
+bool g_newGamePending = false; // a harness newgame not yet in the world
+bool g_newGameAuto = false;    // confirm the character editor ourselves
+int g_chargenStep = 0;         // 0 wait, 1 CONFIRM clicked, 2 box accepted
+int g_chargenTries = 0;
+DWORD g_chargenAt = 0;         // first seen / last step
+DWORD g_newGameLastReport = 0;
+
+bool CharEditorOpen(GameWorld *world) {
+  bool open = false;
+  try {
+    if (gui)
+      open = gui->isCharacterEditorMode();
+  } catch (...) {
+  }
+  try {
+    if (!open && Valid(world) && Valid(world->player))
+      open = world->player->characterEditorMode;
+  } catch (...) {
+  }
+  return open;
+}
+
 std::string CurrentSave() {
   try {
     SaveManager *sm = SaveManager::getSingleton();
@@ -607,7 +636,7 @@ const char *const kBuiltins[] = {
     "chance", "detect", "detecttime", "healtime", "water", "findwater", "swimtime", "construct", "construction", "towns"};
 
 const char *const kHelp =
-    "built-in: help | status | load <save> | save <name> | newgame <start> | import <save> [flags] | speed <0|0.5..50> | "
+    "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> | "
     "chars [radius] | traders [radius] | benches [radius] [crafts] | research <name> | research start|stop <name> | research status | "
     "blueprint <item> | craft <npc> <item> [at <bench>] [count n] | find <character|squad|item|weapon|armour|container> <text> | "
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
@@ -673,6 +702,116 @@ void KeepSuppliedPowered() {
   }
 }
 
+// The character editor's CONFIRM button: name ends in "ConfirmButton"
+// (Kenshi_CharacterEditor.layout; MyGUI may prefix it) or caption CONFIRM.
+MyGUI::Widget *FindConfirmButton(MyGUI::Widget *w, int depth) {
+  if (!w || depth > 40 || !w->getInheritedVisible())
+    return nullptr;
+  const std::string name = Lower(w->getName());
+  const std::string key = "confirmbutton";
+  if ((name.size() >= key.size() && name.compare(name.size() - key.size(), key.size(), key) == 0) ||
+      Lower(Caption(w)) == "confirm")
+    return w;
+  for (size_t i = 0; i < w->getChildCount(); ++i) {
+    MyGUI::Widget *found = FindConfirmButton(w->getChildAt(i), depth + 1);
+    if (found)
+      return found;
+  }
+  return nullptr;
+}
+
+// Every frame (via WatchLoads) while a harness newgame is pending: report
+// what the game is doing every 10 s, and confirm the character editor.
+void WatchNewGame() {
+  if (!g_newGamePending)
+    return;
+  GameWorld *world = ou;
+  const DWORD now = GetTickCount();
+  bool open = CharEditorOpen(world);
+  if (now - g_newGameLastReport >= 10000) {
+    g_newGameLastReport = now;
+    int signal = -1;
+    bool loading = false, modal = false;
+    try {
+      SaveManager *sm = SaveManager::getSingleton();
+      if (Valid(sm))
+        signal = sm->signal;
+      if (Valid(world))
+        loading = world->isLoadingFromASaveGame();
+      modal = MessageBoxManager::hasModalMessage();
+    } catch (...) {
+    }
+    Log("KAH: newgame waiting: phase=" + Phase(world) + " signal=" + Int(signal) + " loading=" +
+        (loading ? "1" : "0") + " squad=" + Int(InWorld(world) ? world->player->playerCharacters.size() : 0) +
+        " chargen=" + (open ? "1" : "0") + " modal_box=" + (modal ? "1" : "0") + " step=" + Int(g_chargenStep));
+  }
+  if (!open) {
+    if (g_chargenStep > 0) {
+      Log("KAH: newgame character editor closed (step " + Int(g_chargenStep) + ")");
+      g_chargenStep = 0;
+      g_chargenAt = 0;
+    }
+    // In the world with the editor gone: the new game is running.
+    if (Phase(world) == "world") {
+      Log("KAH: newgame in the world");
+      g_newGamePending = false;
+    }
+    return;
+  }
+  if (!g_newGameAuto)
+    return;
+  if (g_chargenAt == 0) {
+    g_chargenAt = now;
+    Log("KAH: newgame character editor open");
+    return;
+  }
+  if (g_chargenStep == 0 && now - g_chargenAt >= 2000) { // let the editor finish building
+    if (g_chargenTries >= 3) {
+      if (g_chargenTries == 3) {
+        Log("KAH: newgame could not confirm the character editor after 3 tries; ui/click it");
+        ++g_chargenTries;
+      }
+      return;
+    }
+    ++g_chargenTries;
+    MyGUI::Gui *mg = MyGUI::Gui::getInstancePtr();
+    MyGUI::Widget *b = nullptr;
+    if (mg) {
+      MyGUI::EnumeratorWidgetPtr roots = mg->getEnumerator();
+      while (!b && roots.next())
+        b = FindConfirmButton(roots.current(), 0);
+    }
+    if (!b) {
+      Log("KAH: newgame no CONFIRM button visible (try " + Int(g_chargenTries) + ")");
+      g_chargenAt = now;
+      return;
+    }
+    Log("KAH: newgame click " + b->getName() + " '" + Caption(b) + "' (try " + Int(g_chargenTries) + ")");
+    b->eventMouseButtonClick(b);
+    g_chargenStep = 1;
+    g_chargenAt = now;
+    return;
+  }
+  if (g_chargenStep == 1 && now - g_chargenAt >= 1000) {
+    // The "are you sure" box: hideMessageBox(true) = Enter, its accept
+    // button; false when no box is open (CONFIRM may not ask).
+    bool modal = false, hid = false;
+    try {
+      modal = MessageBoxManager::hasModalMessage();
+      hid = MessageBoxManager::hideMessageBox(true);
+    } catch (...) {
+    }
+    Log(std::string("KAH: newgame confirm box modal=") + (modal ? "1" : "0") + " accepted=" + (hid ? "1" : "0"));
+    g_chargenStep = 2;
+    g_chargenAt = now;
+    return;
+  }
+  if (g_chargenStep == 2 && now - g_chargenAt >= 5000) { // still open: start over
+    g_chargenStep = 0;
+    g_chargenAt = now;
+  }
+}
+
 void WatchLoads() {
   try {
     SaveManager *sm = SaveManager::getSingleton();
@@ -697,10 +836,13 @@ void WatchLoads() {
         g_freshNewGame = false;
       if (signal == SaveManager::NEWGAME || signal == SaveManager::IMPORTGAME)
         Log(std::string("KAH: game signalled ") + (signal == SaveManager::NEWGAME ? "new game" : "import"));
+      if (signal == SaveManager::LOADGAME || signal == SaveManager::IMPORTGAME)
+        g_newGamePending = false; // a load replaces the new game
     }
     g_lastSignal = signal;
   } catch (...) {
   }
+  WatchNewGame();
 }
 
 bool IsBuiltinCommand(const std::string &name) {
@@ -721,6 +863,8 @@ bool LoadPending() {
 std::string Phase(GameWorld *world) {
   if (!Valid(world))
     return "starting";
+  if (g_newGamePending && CharEditorOpen(world))
+    return "chargen";
   bool loading = false;
   try {
     loading = world->isLoadingFromASaveGame();
@@ -792,6 +936,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     Log("KAH: load save=" + f[2] + " phase=" + Phase(world));
     sm->load(f[2]);
     g_freshNewGame = false;
+    g_newGamePending = false;
     g_loadedSave = f[2];
     g_loadPending = true;
     g_loadSawEmpty = false;
@@ -803,7 +948,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
 
   if (cmd == "newgame") { // newgame <start name|sid>: the game's New Game with that start (KAH 21)
     if (f.size() < 3 || f[2].empty())
-      return "usage: newgame <start name|sid> (find start <text> lists starts)";
+      return "usage: newgame <start name|sid> [edit] (find start <text> lists starts)";
     if (!Valid(world))
       return "the game is not ready yet (phase=starting)";
     SaveManager *sm = SaveManager::getSingleton();
@@ -821,8 +966,22 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       if (!start)
         return error + " (also tried '" + alt + "'; find start <text> lists the starts)";
     }
-    Log("KAH: newgame start=" + start->name + " (" + start->stringID + ") phase=" + Phase(world));
+    const bool edit = f.size() >= 4 && Lower(f[3]) == "edit";
+    const int signalBefore = sm->signal;
+    Log("KAH: newgame start=" + start->name + " (" + start->stringID + ") phase=" + Phase(world) +
+        " signal=" + Int(signalBefore) + (edit ? " edit" : " auto-confirm"));
     sm->newGame(start->stringID);
+    // SaveManager::newGame only sets signal=NEWGAME (the game acts on it a
+    // frame later) and does nothing while another save/load is queued.
+    if (sm->signal != SaveManager::NEWGAME && sm->signal == signalBefore)
+      return "the game didn't take the new game (SaveManager busy, signal=" + Int(sm->signal) +
+             "); try again in a few seconds";
+    g_newGamePending = true;
+    g_newGameAuto = !edit;
+    g_chargenStep = 0;
+    g_chargenTries = 0;
+    g_chargenAt = 0;
+    g_newGameLastReport = GetTickCount();
     g_freshNewGame = true;
     g_loadedSave = "newgame:" + start->name;
     g_loadPending = true;
@@ -830,7 +989,10 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     g_loadStarted = GetTickCount();
     g_loadOldLeader = FirstPlayerCharacter(world);
     ok = true;
-    return "starting a new game: " + start->name + " (" + start->stringID + "); wait-world, then status";
+    return "starting a new game: " + start->name + " (" + start->stringID + "); " +
+           (edit ? "the character editor stays open (phase=chargen) for ui/click; "
+                 : "the harness confirms the character editor; ") +
+           "wait-world, then status";
   }
 
   if (cmd == "import") { // import <save> [squad,buildings,research,npcs,relations,reset]: the game's Import (KAH 21)

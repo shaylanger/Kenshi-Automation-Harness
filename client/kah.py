@@ -11,9 +11,9 @@
   kah <command> [args...]            send one command, print the reply
 
 Built-in commands:
-  status                                  phase (menu|loading|world), save, speed, squad
+  status                                  phase (menu|loading|chargen|world), save, speed, squad
   load <save> | save <name>
-  newgame <start name|sid> | import <save> [squad,buildings,research,npcs,relations,reset|all]
+  newgame <start name|sid> [edit] | import <save> [squad,buildings,research,npcs,relations,reset|all]
   speed <0|0.5..50>                       0 pauses
   chars [radius] | traders [radius]       characters near the player | real traders
   benches [radius] [crafts]               crafting benches: queue, needs, craft menu, contents
