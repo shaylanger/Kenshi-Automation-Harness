@@ -10,6 +10,7 @@
 #include "CharacterRef.h"
 #include "ProductionCounter.h"
 #include "ImportFlags.h"
+#include "WalkArrival.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -1383,6 +1384,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     w.startGameHours = world->getTimeStamp_inGameHours().getTotalHours();
     w.topSpeed = 0;
     w.moving = false;
+    w.lastPos = w.start;
     orders->clearOrders();
     orders->addOrder(MOVE_CUS_ORDERED, hand(), w.target, true, false);
     for (size_t i = 0; i < g_walks.size(); ++i)

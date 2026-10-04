@@ -635,6 +635,8 @@ struct WalkTimer {
   double startGameHours;
   float topSpeed;     // highest CharMovement current speed seen
   bool moving;        // has started to move
+  Ogre::Vector3 lastPos;
+  WalkProgress progress; // arrival / stop detection (WalkArrival.h)
 };
 std::vector<WalkTimer> g_walks;
 
@@ -675,13 +677,27 @@ void WalkTick(GameWorld *world) {
         w.topSpeed = m->currentSpeed;
       Ogre::Vector3 left = w.target - p;
       left.y = 0;
-      if (covered >= w.dist - 1.0f || left.length() < 1.5f) {
+      Ogre::Vector3 stepV = p - w.lastPos;
+      stepV.y = 0;
+      w.lastPos = p;
+      const WalkVerdict v = WalkUpdate(w.progress, w.dist, covered, left.length(), stepV.length(), dt,
+                                       w.simSeconds, paused);
+      if (v == WALK_ARRIVED || v == WALK_STOPPED_NEAR) {
+        // A stop near the point counts (MOVE_CUS_ORDERED often ends a few m
+        // short): time and distance up to his last move.
         okDone = true;
+        const float walked = w.progress.coveredAtLastMove;
+        const double secs = w.progress.simAtLastMove;
         const double gameMin = (world->getTimeStamp_inGameHours().getTotalHours() - w.startGameHours) * 60.0;
-        done = w.name + " walked " + Num(covered) + " m seconds=" + Num((float)w.simSeconds) +
-               " speed=" + Num(w.simSeconds > 0 ? (float)(covered / w.simSeconds) : 0.0f) +
+        done = w.name + " walked " + Num(walked) + " m seconds=" + Num((float)secs) +
+               " speed=" + Num(secs > 0 ? (float)(walked / secs) : 0.0f) +
                " m/s real_seconds=" + Num((now - w.startTick) / 1000.0f) +
-               " game_minutes=" + Num((float)gameMin) + " top_speed=" + Num(w.topSpeed);
+               " game_minutes=" + Num((float)gameMin) + " top_speed=" + Num(w.topSpeed) +
+               (v == WALK_STOPPED_NEAR ? " stopped_short=" + Num(left.length()) + " m" : std::string());
+      } else if (v == WALK_STOPPED_FAR) {
+        done = w.name + " stopped " + Num(left.length()) + " m short (covered " + Num(covered) + " of " +
+               Num(w.dist) + " m, more than " + Num(WalkArrivalRadius(w.dist)) +
+               " m away for 10 s): blocked path?";
       } else if (now - w.startTick > 180000) {
         done = w.name + " did not arrive within 180 s (covered " + Num(covered) + " of " + Num(w.dist) +
                " m, seconds=" + Num((float)w.simSeconds) + "): blocked path, paused game or KO?";
