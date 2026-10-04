@@ -12,6 +12,7 @@
 #include "ImportFlags.h"
 #include "WalkArrival.h"
 #include "GroundOwner.h"
+#include "HitCredit.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -632,7 +633,7 @@ const char *const kBuiltins[] = {
     "tasks", "ui", "click", "messages", "screenshot", "time", "building", "production",
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
-    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "newgame", "import", "stealth", "crime",
+    "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "hit", "newgame", "import", "stealth", "crime",
     "chance", "detect", "detecttime", "healtime", "water", "findwater", "swimtime", "construct", "construction", "towns"};
 
 const char *const kHelp =
@@ -655,7 +656,7 @@ const char *const kHelp =
     "chance <npc> ko|kidnap|lockpick|steal <target> [item <name>] | detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>] | "
     "healtime <medic> <patient> [wound <cut>] [timeout <s>] | water <npc> | findwater <npc> [radius <m>] [depth <m>] | "
     "swimtime <npc> <dist> [+x|-x|+z|-z] [walk|run] | construct <npc> <building> [dist <m>] | construction <building> [reset] [fill] | towns [filter,...] [max <n>] | "
-    "sever <npc> <limb> [noitem] [ko] | runspeed <npc> | walktime <npc> <dist> [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
+    "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | "
@@ -684,6 +685,10 @@ void KeepWalkTimers() {
   }
   try {
     StealTick(ou);
+  } catch (...) {
+  }
+  try {
+    HitTick(ou);
   } catch (...) {
   }
 }
@@ -1568,6 +1573,57 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     Log("KAH: walktime " + w.name + " dist=" + Num(dist) + " mode=" + (mode.empty() ? "as is" : mode) +
         " paused=" + (world->isPaused() ? "1" : "0"));
     pending = true; // answered by WalkTick when he arrives
+    ok = true;
+    return "";
+  }
+
+  if (cmd == "hit") { // hit <attacker> <victim> <part> <damage>: a credited wound, no fight (REL B 55)
+    if (f.size() < 6)
+      return "usage: hit <attacker> <victim> <part 0-6|head|chest|stomach|left_arm|right_arm|left_leg|right_leg> "
+             "<cut damage 0..500>";
+    Character *v = FindCharacter(world, f[3]);
+    if (!v)
+      return "no victim named: " + f[3];
+    if (v == c)
+      return "attacker and victim are the same character";
+    if (v->isDead())
+      return v->getName() + " is dead";
+    const int part = ParsePart(f[4]);
+    if (part < 0)
+      return "unknown body part: " + f[4];
+    const float dmg = (float)atof(f[5].c_str());
+    if (!HitDamageValid(dmg))
+      return "damage must be > 0 and <= 500";
+    MedicalSystem::HealthPartStatus *p = v->medical.getPart((unsigned __int64)part);
+    if (!Valid(p))
+      return "no body part " + f[4];
+    HitTimer h;
+    h.id = f[0];
+    h.victim = v->getHandle();
+    h.attacker = c->getHandle();
+    h.victimName = v->getName();
+    h.attackerName = c->getName();
+    h.partName = f[4];
+    h.part = part;
+    h.before = p->flesh;
+    // Credit first (Stobe reads lastGuyWhoDefeatedMe), then the wound; no
+    // attackingYou / attack order, so no combat or hostility starts.
+    v->lastGuyWhoDefeatedMe = c->getHandle();
+    p->applyDamage(Damages(dmg, 0.0f, 0.0f, dmg, 0.0f));
+    h.afterHit = p->flesh;
+    h.simSeconds = 0;
+    h.koReal = -1;
+    h.startTick = h.lastTick = GetTickCount();
+    for (size_t i = 0; i < g_hits.size(); ++i)
+      if (SameHandle(g_hits[i].victim, h.victim)) {
+        WriteOutbox(g_hits[i].id, false, "replaced by a new hit on " + h.victimName);
+        g_hits.erase(g_hits.begin() + i);
+        break;
+      }
+    g_hits.push_back(h);
+    Log("KAH: hit " + c->getName() + " -> " + v->getName() + " part=" + f[4] + " cut=" + Num(dmg) + " flesh " +
+        Num(h.before) + " -> " + Num(h.afterHit));
+    pending = true; // HitTick answers after the knockout window
     ok = true;
     return "";
   }

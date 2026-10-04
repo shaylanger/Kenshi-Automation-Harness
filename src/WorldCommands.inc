@@ -713,6 +713,86 @@ void WalkTick(GameWorld *world) {
   }
 }
 
+// --- hit (REL B 55): a wound credited to an attacker without a fight.
+struct HitTimer {
+  std::string id;
+  hand victim, attacker;
+  std::string victimName, attackerName, partName;
+  int part;
+  float before, afterHit;
+  double simSeconds, koReal;
+  DWORD startTick, lastTick;
+};
+std::vector<HitTimer> g_hits;
+
+std::string HandName(const hand &h) {
+  try {
+    Character *c = h.getCharacter();
+    return Valid(c) ? c->getName() : std::string("none");
+  } catch (...) {
+    return "none";
+  }
+}
+
+void HitTick(GameWorld *world) {
+  if (g_hits.empty())
+    return;
+  const DWORD now = GetTickCount();
+  for (size_t i = 0; i < g_hits.size();) {
+    HitTimer &h = g_hits[i];
+    const double dt = (now - h.lastTick) / 1000.0;
+    h.lastTick = now;
+    bool paused = true;
+    float mult = 0;
+    try {
+      paused = world->isPaused();
+      mult = world->getFrameSpeedMultiplier();
+    } catch (...) {
+    }
+    if (!paused)
+      h.simSeconds += dt * mult;
+    const double real = (now - h.startTick) / 1000.0;
+    Character *v = nullptr;
+    try {
+      v = h.victim.getCharacter();
+    } catch (...) {
+    }
+    std::string done;
+    bool okDone = false;
+    if (!Valid(v)) {
+      done = h.victimName + " is gone (unloaded or a load)";
+    } else {
+      // Hold the credit on the attacker (the game's knockout code runs a frame or more later).
+      if (!SameHandle(v->lastGuyWhoDefeatedMe, h.attacker))
+        v->lastGuyWhoDefeatedMe = h.attacker;
+      const bool ko = v->isUnconcious() || v->isDead();
+      if (ko && h.koReal < 0)
+        h.koReal = real;
+      if (HitWindowDone(h.simSeconds, real, h.koReal)) {
+        okDone = true;
+        MedicalSystem::HealthPartStatus *p = v->medical.getPart((unsigned __int64)h.part);
+        std::string target = "none";
+        try {
+          target = HandName(v->getAttackTarget());
+        } catch (...) {
+        }
+        done = h.victimName + " " + h.partName + " flesh " + Num(h.before) + " -> " +
+               Num(Valid(p) ? p->flesh : h.afterHit) + " credited=" + HandName(v->lastGuyWhoDefeatedMe) +
+               " (lastGuyWhoDefeatedMe) ko=" + (v->isDead() ? "dead" : (ko ? "yes" : "no")) +
+               " victim_attack_target=" + target +
+               (h.simSeconds <= 0 ? " (game paused: knockout not evaluated yet)" : "");
+      }
+    }
+    if (!done.empty()) {
+      Log("KAH: hit " + done);
+      WriteOutbox(h.id, okDone, done);
+      g_hits.erase(g_hits.begin() + i);
+    } else {
+      ++i;
+    }
+  }
+}
+
 // --- theft (KAH 22): crime readout and the player-style pickup order.
 std::string FactionName(Faction *f) { return Valid(f) ? f->getName() : std::string("none"); }
 

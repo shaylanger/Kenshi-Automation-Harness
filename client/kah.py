@@ -49,6 +49,7 @@ Built-in commands:
   sever <npc> left_arm|right_arm|left_leg|right_leg [noitem] [ko]   real amputation (limb state stump)
   unload <npc> | reload <name>            stream his squad out / back in (game streaming)
   runspeed <npc> | walktime <npc> <dist> [walk|run]   movement speeds | timed walk (seconds=, speed=)
+  hit <attacker> <victim> <part> <damage>  cut wound credited to <attacker>, no fight (ko=yes|no)
   balance (KAH 24): chance <npc> ko|kidnap|lockpick|steal <target> [item <name>]   the game's own chance
   detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>]   who notices him sneaking | time until seen
   healtime <medic> <patient> [wound <cut>] [timeout <s>]   timed first aid (bandage_rate=)
@@ -151,7 +152,7 @@ def write_command(d, line, deadline):
 
 
 # Commands the game answers later (seconds the client waits by default).
-LONG_COMMANDS = {'walktime': 200, 'pickup': 200, 'swimtime': 200, 'detecttime': 200, 'healtime': 200}
+LONG_COMMANDS = {'walktime': 200, 'pickup': 200, 'swimtime': 200, 'detecttime': 200, 'healtime': 200, 'hit': 60}
 
 
 def send(d, cmd, args, timeout=None):
