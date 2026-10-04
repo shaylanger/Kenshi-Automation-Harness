@@ -1597,7 +1597,7 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     out = BuildingInfo(b, origin);
     return true;
   }
-  if (cmd == "fill") { // fill <building> <item> [n] [section <name>] [radius <m>]: put items in a building
+  if (cmd == "fill") { // fill <building> <item> [n] [section <name>] [radius <m>] [topup]: put items in a building
     if (f.size() < 4) {
       out = "usage: fill <building> <item> [n] [section <name>] [radius <m>]";
       return true;
@@ -1673,8 +1673,17 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     }
     const int after = CountAllSections(inv, data);
     ok = after > before;
+    // topup (m24-4080): a balance window's refill is fine when the inputs already hold the item and nothing more
+    // fits (bench input full); then ok, reply says full. A real failure (0 held, error) stays a failure.
+    bool topup = false;
+    for (size_t ai = 4; ai < f.size(); ++ai)
+      if (Lower(f[ai]) == "topup")
+        topup = true;
+    const bool full = !ok && topup && error.empty() && before > 0;
+    if (full)
+      ok = true;
     Log("KAH: fill " + b->getName() + " " + data->name + " " + Int(before) + " -> " + Int(after));
-    out = (ok ? "" : (error.empty() ? "nothing fitted: " : error + ": ")) + b->getName() + " " +
+    out = (full ? "full (topup): " : ok ? "" : (error.empty() ? "nothing fitted: " : error + ": ")) + b->getName() + " " +
           data->name + " " + Int(before) + " -> " + Int(after) + " (" + Int(after - before) + " of " +
           Int(count) + " fitted)";
     return true;
