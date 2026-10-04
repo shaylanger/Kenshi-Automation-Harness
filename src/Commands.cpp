@@ -22,6 +22,7 @@
 #include <kenshi/CharStats.h>
 #include <kenshi/Building/CraftingBuilding.h>
 #include <kenshi/Research.h>
+#include <set>
 #include <kenshi/Building/Building.h>
 #include <kenshi/Building/FarmBuilding.h>
 #include <kenshi/Building/ProductionBuilding.h>
@@ -1397,6 +1398,61 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       ok = true;
       return ResearchStatus(world, tech, origin);
     }
+    if (sub == "start" && f.size() >= 4 && Lower(f[3]) == "any") {
+      // research start any [n]: queue up to n (default 1) startable techs, longest research time first,
+      // so a balance window measures one tech instead of hand-picked names that are done/unpayable per save.
+      const int want = f.size() >= 5 ? (std::max)(1, atoi(f[4].c_str())) : 1;
+      std::vector<std::pair<float, GameData *> > cands;
+      std::set<GameData *> seen;
+      const int desk = tech->getResearchDeskLevel();
+      const lektor<std::string> &cats = tech->getCategories();
+      for (uint32_t ci = 0; ci < cats.size(); ++ci) {
+        lektor<GameData *> avail;
+        try {
+          tech->getAvailableResearch(avail, cats.stuff[ci]);
+        } catch (...) {
+          continue;
+        }
+        for (uint32_t i = 0; i < avail.size(); ++i) {
+          GameData *d = avail.stuff[i];
+          if (!Valid(d) || seen.count(d))
+            continue;
+          seen.insert(d);
+          try {
+            if (tech->isFinished(d) || tech->isInQueue(d) || !tech->checkRequirements(d, false, false) ||
+                tech->needsATechBench(d) > desk || !tech->canPayCosts(d))
+              continue;
+          } catch (...) {
+            continue;
+          }
+          float t = 0.0f;
+          if (d->fdata.find("time") != d->fdata.end())
+            t = d->fdata["time"];
+          else if (d->idata.find("time") != d->idata.end())
+            t = (float)d->idata["time"];
+          cands.push_back(std::make_pair(t, d));
+        }
+      }
+      std::sort(cands.begin(), cands.end(),
+                [](const std::pair<float, GameData *> &a, const std::pair<float, GameData *> &b) {
+                  return a.first > b.first;
+                });
+      std::string out = "candidates=" + Int((long long)cands.size());
+      int started = 0;
+      for (size_t i = 0; i < cands.size() && started < want; ++i) {
+        bool okOne = false;
+        try {
+          okOne = tech->startResearch(cands[i].second) && tech->isInQueue(cands[i].second);
+        } catch (...) {
+        }
+        out += " [" + cands[i].second->name + " time=" + Num(cands[i].first) + (okOne ? " queued" : " refused") + "]";
+        if (okOne)
+          ++started;
+      }
+      ok = started > 0;
+      Log("KAH: research start any started=" + Int(started) + " " + out);
+      return "started=" + Int(started) + " " + out + " | " + ResearchStatus(world, tech, origin);
+    }
     if ((sub == "start" || sub == "stop") && f.size() >= 4) { // real research at a bench (KAH 14)
       std::string error;
       GameData *d = FindData(world, RESEARCH, f[3], error);
@@ -1413,7 +1469,9 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       if (tech->isFinished(d))
         return d->name + " is already finished";
       bool started = tech->isInQueue(d);
-      if (!started)
+      // startResearch throws on some techs whose requirements are missing or that can't be paid
+      // (m21-4080: "exception" for Crossbow Bolts / Hydroponics / Advanced Cooking): only call it when both hold.
+      if (!started && tech->checkRequirements(d, false, false) && tech->canPayCosts(d))
         started = tech->startResearch(d);
       ok = started && tech->isInQueue(d);
       std::string why;
@@ -1448,8 +1506,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return "no player research";
     std::string error;
     GameData *data = nullptr;
-    const itemType types[] = {WEAPON, ARMOUR, ITEM, CONTAINER};
-    for (int t = 0; t < 4 && !data; ++t)
+    const itemType types[] = {WEAPON, ARMOUR, ITEM, CONTAINER, ARTIFACTS};
+    for (int t = 0; t < 5 && !data; ++t)
       data = FindData(world, types[t], f[2], error);
     if (!data)
       return error;
@@ -1476,8 +1534,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     if (f.size() >= 6 && Lower(f[4]) == "near" && !ResolvePosition(world, f, 5, at, error))
       return error;
     GameData *data = nullptr;
-    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER};
-    for (int t = 0; t < 4 && !data; ++t)
+    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER, ARTIFACTS};
+    for (int t = 0; t < 5 && !data; ++t)
       data = FindData(world, types[t], f[2], error);
     if (!data)
       return error;
@@ -1810,8 +1868,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       packPath = pack->getName();
     std::string error;
     GameData *data = nullptr;
-    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER};
-    for (int t = 0; t < 4 && !data; ++t)
+    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER, ARTIFACTS};
+    for (int t = 0; t < 5 && !data; ++t)
       data = FindData(world, types[t], f[4], error);
     if (!data)
       return error;
@@ -1895,8 +1953,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     const std::string benchWanted = Lower(Option(f, 4, "at", ""));
     std::string error;
     GameData *data = nullptr;
-    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER};
-    for (int t = 0; t < 4 && !data; ++t)
+    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER, ARTIFACTS};
+    for (int t = 0; t < 5 && !data; ++t)
       data = FindData(world, types[t], f[3], error);
     if (!data)
       return error;
@@ -2222,8 +2280,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     int price = atoi(f[5].c_str());
     std::string error;
     GameData *data = nullptr;
-    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER};
-    for (int t = 0; t < 4 && !data; ++t)
+    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER, ARTIFACTS};
+    for (int t = 0; t < 5 && !data; ++t)
       data = FindData(world, types[t], f[4], error);
     if (!data)
       return error;
@@ -2260,8 +2318,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return "count must be 1..50";
     std::string error;
     GameData *data = nullptr;
-    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER};
-    for (int t = 0; t < 4 && !data; ++t)
+    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER, ARTIFACTS};
+    for (int t = 0; t < 5 && !data; ++t)
       data = FindData(world, types[t], f[3], error);
     if (!data)
       return error;
