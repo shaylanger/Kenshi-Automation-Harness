@@ -1457,8 +1457,13 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     if (ambiguous)
       return "ambiguous backpack: " + f[3];
     ContainerItem *pack = dynamic_cast<ContainerItem *>(packItem);
+    std::string packPath;
+    if (!Valid(pack)) // a pack inside another pack (PG 120 nested case, to-do 19)
+      pack = FindPack(c->getInventory(), Lower(f[3]), 0, packPath);
     if (!Valid(pack))
-      return "no container item matching: " + f[3];
+      return "no container item matching: " + f[3] + " (also searched packs inside packs)";
+    if (packPath.empty())
+      packPath = pack->getName();
     std::string error;
     GameData *data = nullptr;
     const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER};
@@ -1480,10 +1485,10 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       ++added;
     }
     ok = added > 0;
-    Log("KAH: packput " + c->getName() + " pack=" + pack->getName() +
+    Log("KAH: packput " + c->getName() + " pack=" + packPath +
         " item=" + data->name + " added=" + Int(added));
     return "packput " + Int(added) + "/" + Int(count) + " " + data->name +
-           " into " + pack->getName();
+           " into " + packPath;
   }
 
   if (cmd == "craft") { // craft <npc> <item> [at <bench>] [count n]: a real craft, worked by <npc>
