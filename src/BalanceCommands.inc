@@ -374,6 +374,51 @@ bool RunBalanceWorldCommand(GameWorld *world, const std::vector<std::string> &f,
   return false;
 }
 
+// --- pin: hold a character on one spot, every frame (m27-4080 pg-87/89: a spawned Hungry Bandit observer ran
+// 200-3000 m away within seconds of the detection timer; HOLD_POSITION did not stop him). Whenever he is more than
+// 1.5 m off the spot he is put back (Character::teleport, then the movement controller), and with `face <who>`
+// turned toward that character again. `pin <npc> off` reports how often he had to be put back.
+struct PinEntry {
+  hand who, faceTo;
+  std::string name;
+  Ogre::Vector3 at;
+  int putBack;
+};
+std::vector<PinEntry> g_pins;
+
+void PinTick(GameWorld *world) {
+  for (size_t i = 0; i < g_pins.size();) {
+    PinEntry &p = g_pins[i];
+    Character *c = nullptr, *t = nullptr;
+    try {
+      c = p.who.getCharacter();
+      if (p.faceTo.isValid())
+        t = p.faceTo.getCharacter();
+    } catch (...) {
+    }
+    if (!Valid(c)) {
+      Log("KAH: pin " + p.name + " is gone (unloaded or a load), pin dropped after " + Int(p.putBack) + " put-backs");
+      g_pins.erase(g_pins.begin() + i);
+      continue;
+    }
+    if (FlatDistance(c->getPosition(), p.at) > 1.5f) {
+      try {
+        c->teleport(p.at, Ogre::Quaternion::IDENTITY);
+        if (FlatDistance(c->getPosition(), p.at) > 1.5f && Valid(c->movement))
+          c->movement->_setPositionSimple(p.at);
+      } catch (...) {
+      }
+      ++p.putBack;
+      if (Valid(t))
+        try {
+          c->lookatPosition(t->getPosition(), true);
+        } catch (...) {
+        }
+    }
+    ++i;
+  }
+}
+
 bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Character *c,
                        const Ogre::Vector3 &origin, bool &ok, bool &pending, std::string &out) {
   const std::string cmd = Lower(f[1]);
@@ -497,6 +542,53 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
           " entry=" + Int(entry) + " last_seen_s=" + Num(lastSeen) + " fov=" + Fine(fov) +
           " dist=" + Num(FlatDistance(w->getPosition(), c->getPosition())) +
           " observer_ko=" + (c->isUnconcious() ? "1" : "0");
+    return true;
+  }
+
+  if (cmd == "pin") { // pin <npc> [at <npc|x y z>] [dist m] [face <who>] | pin <npc> off
+    const hand h = c->getHandle();
+    int n = -1;
+    for (size_t i = 0; i < g_pins.size(); ++i)
+      if (SameHandle(g_pins[i].who, h)) {
+        n = g_pins[i].putBack;
+        g_pins.erase(g_pins.begin() + i);
+        break;
+      }
+    if (f.size() >= 4 && Lower(f[3]) == "off") {
+      ok = true;
+      out = n < 0 ? c->getName() + " was not pinned" : "unpinned " + c->getName() + " put_back=" + Int(n);
+      return true;
+    }
+    PinEntry p;
+    p.who = h;
+    p.name = c->getName();
+    p.putBack = 0;
+    p.at = c->getPosition();
+    for (size_t i = 3; i < f.size(); ++i)
+      if (Lower(f[i]) == "at" && !ResolvePosition(world, f, i + 1, p.at, out))
+        return true;
+    p.at.x += (float)atof(Option(f, 3, "dist", "0").c_str());
+    const std::string faceName = Option(f, 3, "face", "");
+    Character *t = nullptr;
+    if (!faceName.empty()) {
+      t = FindCharacter(world, faceName);
+      if (!t) {
+        out = NotFound(faceName);
+        return true;
+      }
+      p.faceTo = t->getHandle();
+    }
+    g_pins.push_back(p);
+    PinTick(world);
+    if (Valid(t))
+      try {
+        c->lookatPosition(t->getPosition(), true);
+      } catch (...) {
+      }
+    ok = FlatDistance(c->getPosition(), p.at) <= 1.5f;
+    out = "pinned " + c->getName() + " at " + Num(p.at.x) + "," + Num(p.at.y) + "," + Num(p.at.z) +
+          " off=" + Num(FlatDistance(c->getPosition(), p.at)) + (Valid(t) ? " facing " + t->getName() : std::string()) +
+          " pins=" + Int((long long)g_pins.size());
     return true;
   }
 
@@ -870,7 +962,6 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
 
   return false;
 }
-
 void BalanceTick(GameWorld *world) {
   for (size_t i = 0; i < g_detects.size();) {
     DetectTimer &d = g_detects[i];
