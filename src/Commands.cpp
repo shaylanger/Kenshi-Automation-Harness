@@ -642,7 +642,7 @@ const char *const kBuiltins[] = {
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | "
-    "chars [radius] | traders [radius] | benches [radius] [crafts] | research <name> | research start|stop <name> | research status | "
+    "chars [radius] [filter] | traders [radius] | benches [radius] [crafts] | research <name> | research start|stop <name> | research status | "
     "blueprint <item> | craft <npc> <item> [at <bench>] [count n] | find <character|squad|item|weapon|armour|container> <text> | "
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
     "[size <mult>] | stash <item> <n> [near <npc>] | stat <npc> <stat> | "
@@ -1197,8 +1197,25 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return reply;
   }
 
-  if (cmd == "chars") {
+  if (cmd == "chars") { // chars [radius] [filter]: filter = '|'-separated case-insensitive substrings of the line
     float radius = f.size() >= 3 ? (float)atof(f[2].c_str()) : 100.0f;
+    // stobe raid guard (m26): Full-Base has more than 40 characters within 1500 m, so the cap hid the raiders;
+    // a filter applies before the 40 cap
+    std::vector<std::string> alts;
+    if (f.size() >= 4) {
+      std::string flt;
+      for (size_t k = 3; k < f.size(); ++k)
+        flt += (k > 3 ? " " : "") + f[k];
+      std::string cur;
+      for (size_t k = 0; k <= flt.size(); ++k) {
+        if (k == flt.size() || flt[k] == '|') {
+          if (!cur.empty())
+            alts.push_back(cur);
+          cur.clear();
+        } else
+          cur += (char)tolower((unsigned char)flt[k]);
+      }
+    }
     std::string out;
     int n = 0;
     std::vector<Character *> chars;
@@ -1211,7 +1228,18 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       } catch (...) {
         continue;
       }
-      out += (n ? " | " : "") + Describe(c, &origin);
+      std::string d = Describe(c, &origin);
+      if (!alts.empty()) {
+        std::string ld = d;
+        for (size_t k = 0; k < ld.size(); ++k)
+          ld[k] = (char)tolower((unsigned char)ld[k]);
+        bool hit = false;
+        for (size_t k = 0; k < alts.size() && !hit; ++k)
+          hit = ld.find(alts[k]) != std::string::npos;
+        if (!hit)
+          continue;
+      }
+      out += (n ? " | " : "") + d;
       ++n;
     }
     ok = true;
