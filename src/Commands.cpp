@@ -1084,7 +1084,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
              " queue=" + Int((long long)b->crafting.size());
       if (!b->crafting.empty())
         out += " (first: " + b->crafting.front().name + " " +
-               Int((long long)(b->crafting.front().progress01 * 100.0f)) + "%)";
+               Fine(b->crafting.front().progress01 * 100.0f) + "%)";
       lektor<GameData *> needs;
       b->getResourcesNeededBecauseEmpty(needs);
       if (needs.size() > 0) {

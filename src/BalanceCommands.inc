@@ -7,6 +7,15 @@
 // World commands:     RunBalanceWorldCommand.
 // Timers (answered later, like walktime): BalanceTick, every frame.
 
+// Fine: 4 decimals for chances, progress fractions and bandaging (Num keeps 1).
+std::string Fine(double v) {
+  std::ostringstream s;
+  s.setf(std::ios::fixed);
+  s.precision(4);
+  s << v;
+  return s.str();
+}
+
 // Simulated seconds: real frame time x game speed while unpaused.
 struct SimClock {
   DWORD startTick, lastTick;
@@ -161,7 +170,7 @@ std::string ConstructionLine(Building *b) {
     hours = Building::ConstructionState::getBuildingTimeInHours(b->data);
   } catch (...) {
   }
-  return out + " progress=" + Num(st->constructionProgress) + " complete=" + (st->isComplete ? "1" : "0") +
+  return out + " progress=" + Fine(st->constructionProgress) + " complete=" + (st->isComplete ? "1" : "0") +
          " paused=" + (st->isPaused ? "1" : "0") + " mats=" + Num(st->getTotalMatsPresent()) + "/" +
          Num(st->getTotalMats()) + " needs_mats=" + (st->needMats() ? "1" : "0") +
          " builders_this_frame=" + Int(st->buildersThisFrame) + " build_time_mult=" + Num(st->buildTimeMult) +
@@ -360,10 +369,10 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
         return true;
       }
       if (kind == "ko")
-        out = c->getName() + " stealth_ko_chance=" + Num(c->getStealthKOChance(t, true)) +
-              " no_factors=" + Num(c->getStealthKOChance(t, false));
+        out = c->getName() + " stealth_ko_chance=" + Fine(c->getStealthKOChance(t, true)) +
+              " no_factors=" + Fine(c->getStealthKOChance(t, false));
       else
-        out = c->getName() + " kidnap_chance=" + Num(c->getKidnappingChance(t));
+        out = c->getName() + " kidnap_chance=" + Fine(c->getKidnappingChance(t));
       out += " target=" + t->getName() + " dist=" + Num(FlatDistance(c->getPosition(), t->getPosition())) +
              " sneaking=" + (c->isStealthMode() ? "1" : "0");
       ok = true;
@@ -376,7 +385,7 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
         out = why;
         return true;
       }
-      out = c->getName() + " lockpick_chance=" + Num(c->getLockpickChance(lock)) + " lock=" + label;
+      out = c->getName() + " lockpick_chance=" + Fine(c->getLockpickChance(lock)) + " lock=" + label;
       ok = true;
       return true;
     }
@@ -414,7 +423,7 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
       }
       Character *victim = nullptr;
       const float chance = c->getStealingSuccessChance(from, item, &victim);
-      out = c->getName() + " steal_chance=" + Num(chance) + " item=" + item->getName() + " from=" + label +
+      out = c->getName() + " steal_chance=" + Fine(chance) + " item=" + item->getName() + " from=" + label +
             " victim=" + (Valid(victim) ? victim->getName() : std::string("none"));
       ok = true;
       return true;
@@ -437,7 +446,7 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
       ++n;
       list += " {" + (Valid(o) ? o->getName() + " dist=" + Num(FlatDistance(o->getPosition(), c->getPosition()))
                                : std::string("?")) +
-              " state=" + SeeState((int)it->second.seeState.key) + " progress=" + Num(it->second.progressOfMaybe) +
+              " state=" + SeeState((int)it->second.seeState.key) + " progress=" + Fine(it->second.progressOfMaybe) +
               " updated=" + Num(it->second.lastUpdated) + "}";
     }
     ok = true;
@@ -792,7 +801,7 @@ void BalanceTick(GameWorld *world) {
         done = d.sName + " seen_by=" + d.oName + " seen=" + (d.firstSeen >= 0 ? "1" : "0") +
                " seconds_to_seen=" + (d.firstSeen >= 0 ? Num((float)d.firstSeen) : std::string("none")) +
                " seconds_to_maybe=" + (d.firstMaybe >= 0 ? Num((float)d.firstMaybe) : std::string("none")) +
-               " max_progress=" + Num(d.maxProgress) + " seconds=" + Num((float)d.clock.sim) +
+               " max_progress=" + Fine(d.maxProgress) + " seconds=" + Num((float)d.clock.sim) +
                " timeout=" + Num((float)d.timeout) + " dist=" + Num(FlatDistance(s->getPosition(), o->getPosition())) +
                " start_dist=" + Num(d.startDist) + " stealth_mode=" + (s->isStealthMode() ? "1" : "0") +
                " los=" + Num(los) + " observer_perception_mult=" + Num(pmult) +
@@ -838,7 +847,7 @@ void BalanceTick(GameWorld *world) {
         const double active = h.firstRise >= 0 ? h.lastRise - h.firstRise : 0;
         done = h.mName + " treated " + h.pName + " finished=" + (settled ? "1" : "0") +
                " seconds_to_first_bandage=" + (h.firstRise >= 0 ? Num((float)h.firstRise) : std::string("none")) +
-               " seconds_bandaging=" + Num((float)active) + " bandaging " + Num(h.bandStart) + " -> " + Num(band) +
+               " seconds_bandaging=" + Num((float)active) + " bandaging " + Fine(h.bandStart) + " -> " + Fine(band) +
                " bandage_rate=" + Num(active > 0 ? (float)((band - h.bandStart) / active) : 0.0f) +
                " need " + Num(h.needStart) + " -> " + Num(need) + " wounds=" + Num(WoundSum(p)) +
                " seconds=" + Num((float)h.clock.sim) + " real_seconds=" + Num(h.clock.Real());
