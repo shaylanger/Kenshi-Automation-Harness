@@ -500,6 +500,45 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
     return true;
   }
 
+  if (cmd == "face") { // face <npc> <who>: turn his whole body toward him (Character::lookatPosition), then his senses
+    if (f.size() < 4) {
+      out = "usage: face <npc> <who>";
+      return true;
+    }
+    Character *w = FindCharacter(world, f[3]);
+    if (!w) {
+      out = NotFound(f[3]);
+      return true;
+    }
+    if (w == c) {
+      out = "face: " + c->getName() + " can't face himself";
+      return true;
+    }
+    try {
+      c->lookatPosition(w->getPosition(), true);
+    } catch (...) {
+      out = "face: lookatPosition failed for " + c->getName();
+      return true;
+    }
+    int sees = -1;
+    float fov = -1.0f;
+    try {
+      SensoryData *sd = c->getSensoryData();
+      if (Valid(sd)) {
+        sees = sd->canISeeThisGuy(w) ? 1 : 0;
+        SeenSomeone *s = sd->getDataFor(w);
+        if (Valid(s))
+          fov = s->FOVScore;
+      }
+    } catch (...) {
+    }
+    ok = true;
+    out = c->getName() + " faces " + w->getName() + " sees=" + Int(sees) + " fov=" + Fine(fov) +
+          " dist=" + Num(FlatDistance(w->getPosition(), c->getPosition())) +
+          " observer_ko=" + (c->isUnconcious() ? "1" : "0");
+    return true;
+  }
+
   if (cmd == "detect") { // detect <sneaker>: who notices him sneaking, as the game tracks it
     std::string list;
     int n = 0;

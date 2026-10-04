@@ -53,6 +53,7 @@ Built-in commands:
   balance (KAH 24): chance <npc> ko|kidnap|lockpick|steal <target> [item <name>]   the game's own chance
   detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>]   who notices him sneaking | time until seen
   senses <observer> <who>                                            does his AI see/hear him now (SensoryData)
+  face <npc> <who>                                                   turn his whole body toward him; reply has sees=
   healtime <medic> <patient> [wound <cut>] [timeout <s>]   timed first aid (bandage_rate=)
   water <npc> | findwater <npc> [radius <m>] [depth <m>] | swimtime <npc> <dist> [+x|-x|+z|-z]   swimming
   construct <npc> <building> [dist <m>] | construction <building> [reset] [fill]   build-speed site + progress
