@@ -225,6 +225,7 @@ SCENARIO_HELP = """Scenario file (kah run <file> [--csv out.csv] [--stop]): one 
   @wait-world [timeout_s]
   @wait-game <minutes> [timeout_s]
   @until <timeout_s> <command ...> ~ <regex>   repeat (every 2 s) until the reply matches
+  @any <cmd> ~ <re> || <cmd> ~ <re>             alternatives in order until one passes (PASS names it)
   @set NAME <command ...> ~ <regex with one (group)>   capture; later steps use ${NAME}
   @log <file> ~ <regex>               a line added to <file> since the run started matches
                                       (<file> may contain spaces; quotes optional)
@@ -320,6 +321,35 @@ def run_scenario(d, path, csv_path=None, stop=False):
             rows.append((number, 'FAIL', raw.strip(), 'not run: the game left the world at line %d' % lost_at))
             continue
         line = subst(line)
+        if line.startswith('@any '):
+            # @any <step> [~ regex] || <step> [~ regex] ...: the alternatives run in order until one passes (a state
+            # the game reaches by either of two paths, e.g. a crafted item still in the bench output or already
+            # hauled by the worker); PASS names the alternative that matched, FAIL lists every reply.
+            ok_step, tried = False, []
+            for alt in line[5:].split(' || '):
+                cmd, _, rx = alt.partition(' ~ ')
+                try:
+                    words = shlex.split(cmd.strip())
+                    ok_reply, detail = send(d, words[0], words[1:])
+                except SystemExit as e:
+                    ok_reply, detail = False, str(e)
+                except Exception as e:
+                    ok_reply, detail = False, 'step error: %s' % e
+                if ok_reply and (not rx.strip() or re.search(rx.strip(), detail)):
+                    ok_step, detail = True, 'alt %d: %s' % (len(tried) + 1, detail)
+                    break
+                tried.append('alt %d: %s' % (len(tried) + 1, detail))
+            if not ok_step:
+                detail = 'no alternative matched: ' + ' | '.join(tried)
+            passed += ok_step
+            failed += not ok_step
+            rows.append((number, 'PASS' if ok_step else 'FAIL', raw.strip(), detail))
+            print('%s %3d %s => %s' % ('PASS' if ok_step else 'FAIL', number, raw.strip()[:90],
+                                       detail.replace('\n', ' ')[:200]))
+            sys.stdout.flush()
+            if stop and not ok_step:
+                break
+            continue
         regex = None
         if ' ~ ' in line:
             line, regex = line.split(' ~ ', 1)

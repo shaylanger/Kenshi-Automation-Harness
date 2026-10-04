@@ -82,6 +82,10 @@ rem Scenario @log step (paths with spaces); needs Python 3.
 where py >nul 2>nul
 if not errorlevel 1 (py -3 "%ROOT%tests\kah_log_step_test.py") else (python "%ROOT%tests\kah_log_step_test.py")
 if errorlevel 1 exit /b 1
+rem Scenario @any step (alternatives until one passes); needs Python 3.
+where py >nul 2>nul
+if not errorlevel 1 (py -3 "%ROOT%tests\kah_any_step_test.py") else (python "%ROOT%tests\kah_any_step_test.py")
+if errorlevel 1 exit /b 1
 rem Inbox protocol (client/kah.py with concurrent clients); needs Python 3 (py or python).
 where py >nul 2>nul
 if not errorlevel 1 (py -3 "%ROOT%tests\kah_inbox_test.py") else (python "%ROOT%tests\kah_inbox_test.py")
