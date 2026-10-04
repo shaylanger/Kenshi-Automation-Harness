@@ -116,6 +116,11 @@ struct SwimTimer {
   double deepSeconds, wetSeconds;  // DEEP_WATER / any water
   float deepDist;                  // distance covered while in deep water
   int levelAtStart;
+  // m23-4080: at low Swimming the swimmer stops ~8.5 m short of the target and treads water until the 180 s
+  // timeout (deep_seconds=180 for 21 of 30 m). Track the last real movement so a stop can end the timer.
+  Ogre::Vector3 anchor;            // position at the last movement of more than 0.5 m
+  double lastMoveSim, deepAtMove;  // sim time / deep seconds at that movement
+  float deepDistAtMove;
 };
 std::vector<SwimTimer> g_swims;
 
@@ -714,6 +719,9 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
     s.deepSeconds = s.wetSeconds = 0;
     s.deepDist = 0;
     s.levelAtStart = WaterLevelOf(c);
+    s.anchor = s.start;
+    s.lastMoveSim = s.deepAtMove = 0;
+    s.deepDistAtMove = 0;
     s.clock.Start();
     orders->clearOrders();
     orders->addOrder(MOVE_CUS_ORDERED, hand(), s.target, true, false);
@@ -911,15 +919,29 @@ void BalanceTick(GameWorld *world) {
         s.deepDist += step;
       }
       const float covered = FlatDistance(p, s.start);
-      if (covered >= s.dist - 1.0f || FlatDistance(p, s.target) < 1.5f) {
+      if (FlatDistance(p, s.anchor) > 0.5f) {
+        s.anchor = p;
+        s.lastMoveSim = s.clock.sim;
+        s.deepAtMove = s.deepSeconds;
+        s.deepDistAtMove = s.deepDist;
+      }
+      // stopped short: no movement for 5 game s after at least half the distance; times exclude the idle tail
+      const bool stoppedShort = s.clock.sim - s.lastMoveSim > 5.0 && covered >= 0.5f * s.dist;
+      if (stoppedShort) {
+        s.deepSeconds = s.deepAtMove;
+        s.deepDist = s.deepDistAtMove;
+      }
+      if (covered >= s.dist - 1.0f || FlatDistance(p, s.target) < 1.5f || stoppedShort) {
+        const double moved = stoppedShort ? s.lastMoveSim : s.clock.sim;
         okDone = true;
-        done = s.name + " swam " + Num(covered) + " m seconds=" + Num((float)s.clock.sim) +
-               " speed=" + Num(s.clock.sim > 0 ? (float)(covered / s.clock.sim) : 0.0f) +
+        done = s.name + " swam " + Num(covered) + " m seconds=" + Num((float)moved) +
+               " speed=" + Num(moved > 0 ? (float)(covered / moved) : 0.0f) +
                " m/s deep_seconds=" + Num((float)s.deepSeconds) + " deep_dist=" + Num(s.deepDist) +
                " swim_speed=" + Num(s.deepSeconds > 0 ? (float)(s.deepDist / s.deepSeconds) : 0.0f) +
-               " deep_fraction=" + Num(s.clock.sim > 0 ? (float)(s.deepSeconds / s.clock.sim) : 0.0f) +
+               " deep_fraction=" + Num(moved > 0 ? (float)(s.deepSeconds / moved) : 0.0f) +
                " wet_seconds=" + Num((float)s.wetSeconds) + " start_level=" + WaterLevelName(s.levelAtStart) +
-               " end_level=" + WaterLevelName(level) + " real_seconds=" + Num(s.clock.Real());
+               " end_level=" + WaterLevelName(level) + " real_seconds=" + Num(s.clock.Real()) +
+               (stoppedShort ? " stopped_short=1 remaining=" + Num(FlatDistance(p, s.target)) : std::string(""));
       } else if (s.clock.Real() > 180.0f) {
         done = s.name + " did not arrive within 180 s (covered " + Num(covered) + " of " + Num(s.dist) +
                " m, seconds=" + Num((float)s.clock.sim) + ", deep_seconds=" + Num((float)s.deepSeconds) + ")";
