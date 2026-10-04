@@ -637,7 +637,7 @@ const char *const kBuiltins[] = {
     "chance", "detect", "detecttime", "healtime", "water", "findwater", "swimtime", "construct", "construction", "towns"};
 
 const char *const kHelp =
-    "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> | "
+    "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | "
     "chars [radius] | traders [radius] | benches [radius] [crafts] | research <name> | research start|stop <name> | research status | "
     "blueprint <item> | craft <npc> <item> [at <bench>] [count n] | find <character|squad|item|weapon|armour|container> <text> | "
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
@@ -665,6 +665,35 @@ const char *const kHelp =
     "<npc> = name (exact match nearest the player wins, else nearest substring), "
     "#serial/index (exact, as printed) or #serial (refused if not unique), @player or @selected.";
 
+// speed <x> hold: long unattended runs (PG balance at 20-50x on Full-Base) were stopped for good by the game's own
+// pauses (m19-4080: "Bandit Demands has arrived at Your Outpost" paused the game and the scenario waited on).
+// While a hold is active the harness unpauses and restores the speed 2 s after any pause it did not make itself.
+float g_holdSpeed = 0;
+DWORD g_holdPausedAt = 0;
+int g_holdResumes = 0;
+
+void HoldSpeedTick(GameWorld *world) {
+  if (g_holdSpeed <= 0 || !Valid(world))
+    return;
+  if (!world->isPaused()) {
+    g_holdPausedAt = 0;
+    return;
+  }
+  const DWORD now = GetTickCount();
+  if (!g_holdPausedAt) {
+    g_holdPausedAt = now;
+    return;
+  }
+  if (now - g_holdPausedAt < 2000)
+    return;
+  world->userPause(false);
+  world->setGameSpeed(g_holdSpeed, false);
+  world->setFrameSpeedMultiplier(g_holdSpeed);
+  g_holdPausedAt = 0;
+  ++g_holdResumes;
+  Log("KAH: speed hold: the game paused itself, resumed at " + Num(g_holdSpeed) + " (resume " + Int(g_holdResumes) + ")");
+}
+
 } // namespace
 
 void SampleProduction(GameWorld *world) {
@@ -681,6 +710,10 @@ void KeepWalkTimers() {
   }
   try {
     BalanceTick(ou);
+  } catch (...) {
+  }
+  try {
+    HoldSpeedTick(ou);
   } catch (...) {
   }
   try {
@@ -1126,10 +1159,13 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   Character *player = FirstPlayerCharacter(world);
   Ogre::Vector3 origin = player->getPosition();
 
-  if (cmd == "speed") { // speed <0|0.5..50>: 0 pauses
+  if (cmd == "speed") { // speed <0|0.5..50> [hold]: 0 pauses; hold = resume after the game's own pauses
     float v = f.size() >= 3 ? (float)atof(f[2].c_str()) : -1.0f;
     if (!(v == 0.0f || (v >= 0.5f && v <= 50.0f)))
-      return "usage: speed <0|0.5..50>";
+      return "usage: speed <0|0.5..50> [hold]";
+    const bool hold = v > 0.0f && f.size() >= 4 && Lower(f[3]) == "hold";
+    g_holdSpeed = hold ? v : 0.0f;
+    g_holdPausedAt = 0;
     float before = world->getFrameSpeedMultiplier();
     if (v == 0.0f) {
       world->userPause(true);
@@ -1145,7 +1181,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     Log("KAH: speed requested=" + f[2] + " before=" + Num(before) + " after=" + Num(after) +
         " paused=" + (paused ? "1" : "0"));
     ok = true;
-    return "speed " + Num(before) + " -> " + Num(after) + " paused=" + (paused ? "1" : "0");
+    return "speed " + Num(before) + " -> " + Num(after) + " paused=" + (paused ? "1" : "0") +
+           (hold ? " hold=1 resumes_so_far=" + Int(g_holdResumes) : std::string(""));
   }
 
   {
