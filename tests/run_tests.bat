@@ -49,6 +49,11 @@ cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests
 if errorlevel 1 (type "%ROOT%obj\tests\build_import_flags.log" & echo TEST BUILD FAILED & exit /b 1)
 "%ROOT%obj\tests\import_flags_test.exe"
 if errorlevel 1 exit /b 1
+cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\ground_owner_test.exe" ^
+  "%ROOT%tests\ground_owner_test.cpp" > "%ROOT%obj\tests\build_ground_owner.log" 2>&1
+if errorlevel 1 (type "%ROOT%obj\tests\build_ground_owner.log" & echo TEST BUILD FAILED & exit /b 1)
+"%ROOT%obj\tests\ground_owner_test.exe"
+if errorlevel 1 exit /b 1
 cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\walk_arrival_test.exe" ^
   "%ROOT%tests\walk_arrival_test.cpp" > "%ROOT%obj\tests\build_walk_arrival.log" 2>&1
 if errorlevel 1 (type "%ROOT%obj\tests\build_walk_arrival.log" & echo TEST BUILD FAILED & exit /b 1)

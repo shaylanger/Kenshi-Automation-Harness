@@ -11,6 +11,7 @@
 #include "ProductionCounter.h"
 #include "ImportFlags.h"
 #include "WalkArrival.h"
+#include "GroundOwner.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -1316,7 +1317,15 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       if (!item)
         return why;
       Faction *ownerF = item->getFaction();
-      const bool owned = Valid(ownerF) && ownerF != c->getFaction();
+      // A plain drop keeps the game's empty faction "No Faction": not owned (to-do 19).
+      Faction *emptyF = nullptr;
+      try {
+        if (Valid(world->factionMgr))
+          emptyF = world->factionMgr->getEmptyFaction();
+      } catch (...) {
+      }
+      const bool owned = OwnedByOtherFaction(Valid(ownerF), Valid(ownerF) && ownerF == emptyF,
+                                             ownerF == c->getFaction(), FactionName(ownerF));
       if (owned || forceOrder) {
         OrdersReceiver *orders = c->getOrdersReciever();
         if (!Valid(orders))
