@@ -2141,8 +2141,43 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
         return "no inventory";
       bool equipped = inv->equipItem(item);
       ok = equipped && item->isEquipped;
-      Log("KAH: equip " + c->getName() + " " + DescribeItem(item) + " ok=" + (ok ? "1" : "0"));
-      return std::string(ok ? "equipped " : "equip failed ") + DescribeItem(item);
+      // m29-5090 (PG gate 89): a spawned NPC already wearing something in that slot (a bandit's own hat) makes
+      // equipItem fail: move every other worn item of the same slot type to the main inventory, then retry
+      std::string replaced;
+      if (!ok) {
+        std::vector<Item *> worn;
+        lektor<InventorySection *> &sections = inv->sectionsInSearchOrder;
+        for (uint32_t s = 0; s < sections.size(); ++s) {
+          InventorySection *section = sections[s];
+          if (!Valid(section))
+            continue;
+          const Ogre::vector<InventorySection::SectionItem>::type &items = section->getItems();
+          for (uint32_t i = 0; i < items.size(); ++i) {
+            Item *other = items[i].item;
+            if (Valid(other) && other != item && other->isEquipped && other->slotType == item->slotType)
+              worn.push_back(other);
+          }
+        }
+        InventorySection *main = inv->getSection("main");
+        for (size_t i = 0; i < worn.size(); ++i) {
+          const std::string name = worn[i]->getName();
+          const int qty = worn[i]->quantity > 0 ? worn[i]->quantity : 1;
+          Item *moved = inv->removeItemDontDestroy_returnsItem(worn[i], qty, false);
+          if (!Valid(moved))
+            continue;
+          if (!(Valid(main) && main->addItem(moved, qty)))
+            inv->dropItem(moved);
+          replaced += (replaced.empty() ? "" : ",") + name;
+        }
+        if (!replaced.empty()) {
+          equipped = inv->equipItem(item);
+          ok = equipped && item->isEquipped;
+        }
+      }
+      Log("KAH: equip " + c->getName() + " " + DescribeItem(item) + " ok=" + (ok ? "1" : "0") +
+          (replaced.empty() ? "" : " replaced=" + replaced));
+      return std::string(ok ? "equipped " : "equip failed ") + DescribeItem(item) +
+             (replaced.empty() ? "" : " replaced=" + replaced);
     }
 
     if (cmd == "unequip") {
