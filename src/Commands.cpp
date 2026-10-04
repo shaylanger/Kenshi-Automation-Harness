@@ -1406,6 +1406,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       std::set<GameData *> seen;
       const int desk = tech->getResearchDeskLevel();
       const lektor<std::string> &cats = tech->getCategories();
+      int rejDone = 0, rejQueued = 0, rejReq = 0, rejBench = 0, rejCost = 0, rejErr = 0;
       for (uint32_t ci = 0; ci < cats.size(); ++ci) {
         lektor<GameData *> avail;
         try {
@@ -1419,10 +1420,14 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
             continue;
           seen.insert(d);
           try {
-            if (tech->isFinished(d) || tech->isInQueue(d) || !tech->checkRequirements(d, false, false) ||
-                tech->needsATechBench(d) > desk || !tech->canPayCosts(d))
-              continue;
+            // count why techs are skipped, so "candidates=0" names the cause (m23-4080: pg54 had 0, no reason)
+            if (tech->isFinished(d)) { ++rejDone; continue; }
+            if (tech->isInQueue(d)) { ++rejQueued; continue; }
+            if (!tech->checkRequirements(d, false, false)) { ++rejReq; continue; }
+            if (tech->needsATechBench(d) > desk) { ++rejBench; continue; }
+            if (!tech->canPayCosts(d)) { ++rejCost; continue; }
           } catch (...) {
+            ++rejErr;
             continue;
           }
           float t = 0.0f;
@@ -1437,7 +1442,9 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
                 [](const std::pair<float, GameData *> &a, const std::pair<float, GameData *> &b) {
                   return a.first > b.first;
                 });
-      std::string out = "candidates=" + Int((long long)cands.size());
+      std::string out = "candidates=" + Int((long long)cands.size()) + " skipped(done=" + Int(rejDone) +
+                        " queued=" + Int(rejQueued) + " reqs=" + Int(rejReq) + " bench=" + Int(rejBench) +
+                        " cost=" + Int(rejCost) + " err=" + Int(rejErr) + ")";
       int started = 0;
       for (size_t i = 0; i < cands.size() && started < want; ++i) {
         bool okOne = false;
