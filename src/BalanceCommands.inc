@@ -102,8 +102,25 @@ struct HealTimer {
   double timeout;
   float needStart, bandStart, bandLast;
   double firstRise, lastRise;  // sim seconds of the first / last bandaging increase
+  // m30-4080 (PG gate 84): right after `wound` the game still scores the patient's first-aid need 0 (it is
+  // recomputed only while time runs) and the medic drops a FIRST_AID_ORDER given then: every second healtime
+  // timed out with no bandaging. The order now waits until the need is above 0, and is given again every
+  // 10 game seconds (up to 5 times) while no bandaging has started.
+  int orders;
+  double lastOrder;  // sim seconds of the last order, -1 = not ordered yet
 };
 std::vector<HealTimer> g_heals;
+
+void HealOrder(Character *medic, Character *patient, HealTimer &h) {
+  OrdersReceiver *orders = medic->getOrdersReciever();
+  if (!Valid(orders))
+    return;
+  orders->addOrder(FIRST_AID_ORDER, patient->getHandle(), patient->getPosition(), true, false);
+  ++h.orders;
+  h.lastOrder = h.clock.sim;
+  Log("KAH: healtime order " + Num((float)h.orders) + " " + h.mName + " -> " + h.pName +
+      " need=" + Num(patient->medical.scoreFirstAidNeed(false)) + " at " + Num((float)h.clock.sim) + " s");
+}
 
 // --- swimtime: a timed move along an axis, with the water level sampled.
 struct SwimTimer {
@@ -282,6 +299,62 @@ DoorLock *FindLock(GameWorld *world, Character *c, const std::string &target, fl
   return b->getDoorLock();
 }
 
+// The lockpick chance the game really uses. Character::getLockpickChance (KenshiLib) is a dead stub in Kenshi
+// 1.0.65: it reads the stat and returns 0.0 (m29 PG gate: 0.0000 at every skill). The lockpick action calls an
+// unnamed DoorLock function instead: chance = 0.9 if level <= skill, else 0.9 / 2^((level - skill) * 0.1), with
+// skill = CharStats::getStat(LOCKPICKING) minus 10 while the picker is in a cage (IN_PRISON). It is found by its
+// code bytes (Steam 1.0.65 RVA 0x297D80; also unique in the newer Steam exe), so a game build without it reports
+// method=formula (the same formula from the lock level, which the game fn refreshes first).
+typedef float(__fastcall *LockChanceFn)(DoorLock *lock, float skill);
+LockChanceFn FindLockChanceFn() {
+  static bool searched = false;
+  static LockChanceFn fn = nullptr;
+  if (searched)
+    return fn;
+  searched = true;
+  static const char *sig = "40 53 48 83 ec 30 48 83 79 08 00 0f 29 74 24 20 48 8b d9 0f 28 f1 74 15 48 8b 49 08 48 8b 01 "
+                           "ff 90 28 02 00 00 48 8b c8 e8 ?? ?? ?? ?? 66 0f 6e 0b 0f 57 c0 0f 5b c9 f3 0f 5c ce 0f 2f "
+                           "c1 72 13 f3 0f 10 05 ?? ?? ?? ?? 0f 28 74 24 20 48 83 c4 30 5b c3 f3 0f 59 0d ?? ?? ?? ?? "
+                           "f3 0f 10 05 ?? ?? ?? ?? e8 ?? ?? ?? ?? f3 0f 10 0d ?? ?? ?? ?? 0f 28 74 24 20 f3 0f 5e c8 "
+                           "0f 28 c1 48 83 c4 30 5b c3";
+  std::vector<int> pat;
+  for (const char *p = sig; *p;) {
+    if (*p == ' ') {
+      ++p;
+      continue;
+    }
+    pat.push_back(p[0] == '?' ? -1 : (int)strtol(std::string(p, 2).c_str(), nullptr, 16));
+    p += 2;
+  }
+  unsigned char *base = (unsigned char *)GetModuleHandleA(nullptr);
+  IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+  IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+  for (unsigned s = 0; s < nt->FileHeader.NumberOfSections; ++s, ++sec) {
+    if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE))
+      continue;
+    unsigned char *t = base + sec->VirtualAddress;
+    const size_t n = sec->Misc.VirtualSize;
+    for (size_t i = 0; i + pat.size() <= n; ++i) {
+      size_t k = 0;
+      while (k < pat.size() && (pat[k] < 0 || t[i + k] == pat[k]))
+        ++k;
+      if (k == pat.size()) {
+        if (fn) { // not unique: don't guess
+          Log("KAH: lockpick chance fn found twice, using the formula");
+          fn = nullptr;
+          return fn;
+        }
+        fn = (LockChanceFn)(t + i);
+      }
+    }
+  }
+  char at[64];
+  sprintf_s(at, "+0x%llX", (unsigned long long)((unsigned char *)fn - base));
+  Log(fn ? std::string("KAH: lockpick chance fn at ") + at
+         : std::string("KAH: lockpick chance fn not found, using the formula"));
+  return fn;
+}
+
 bool RunBalanceWorldCommand(GameWorld *world, const std::vector<std::string> &f, const Ogre::Vector3 &origin,
                             bool &ok, std::string &out) {
   const std::string cmd = Lower(f[1]);
@@ -456,7 +529,22 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
         out = why;
         return true;
       }
-      out = c->getName() + " lockpick_chance=" + Fine(c->getLockpickChance(lock)) + " lock=" + label;
+      // see FindLockChanceFn: the game's own lock chance, not the dead Character::getLockpickChance stub
+      const float stat = c->stats->getStat(STAT_LOCKPICKING, false);
+      const bool caged = c->inSomething == IN_PRISON;
+      const float skill = stat - (caged ? 10.0f : 0.0f);
+      LockChanceFn lc = FindLockChanceFn();
+      float chance = 0;
+      if (lc)
+        chance = lc(lock, skill);
+      const int level = *(int *)lock;
+      if (!lc) {
+        const float d = (float)level - skill;
+        chance = d <= 0 ? 0.9f : 0.9f / powf(2.0f, d * 0.1f);
+      }
+      out = c->getName() + " lockpick_chance=" + Fine(chance) + " lock_level=" + Num((float)level) +
+            " skill=" + Num(skill) + " stat=" + Num(stat) + " caged=" + (caged ? "1" : "0") +
+            " method=" + (lc ? "game" : "formula") + " lock=" + label;
       ok = true;
       return true;
     }
@@ -624,10 +712,17 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
       }
     } catch (...) {
     }
+    // m31-5090 (PG gate 87/89): line of sight right now (the value detecttime reports at its end), so a balance
+    // point can require a clear view before it starts timing; -1 = the call failed
+    float los = -1.0f;
+    try {
+      los = c->lineOfSightCheck(w);
+    } catch (...) {
+    }
     ok = true;
     out = c->getName() + " faces " + w->getName() + " sees=" + Int(sees) + " fov=" + Fine(fov) +
           " dist=" + Num(FlatDistance(w->getPosition(), c->getPosition())) +
-          " observer_ko=" + (c->isUnconcious() ? "1" : "0");
+          " observer_ko=" + (c->isUnconcious() ? "1" : "0") + " los=" + Fine(los);
     return true;
   }
 
@@ -757,8 +852,11 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
     h.needStart = p->medical.scoreFirstAidNeed(false);
     h.bandStart = h.bandLast = BandagingSum(p);
     h.firstRise = h.lastRise = -1;
+    h.orders = 0;
+    h.lastOrder = -1;
     h.clock.Start();
-    orders->addOrder(FIRST_AID_ORDER, p->getHandle(), p->getPosition(), true, false);
+    if (h.needStart > 0)
+      HealOrder(c, p, h);
     for (size_t i = 0; i < g_heals.size(); ++i)
       if (SameHandle(g_heals[i].medic, h.medic)) {
         WriteOutbox(g_heals[i].id, false, "replaced by a new healtime for " + h.mName);
@@ -1040,6 +1138,8 @@ void BalanceTick(GameWorld *world) {
       }
       h.bandLast = band;
       const float need = p->medical.scoreFirstAidNeed(false);
+      if (h.firstRise < 0 && need > 0 && h.orders < 6 && (h.lastOrder < 0 || h.clock.sim - h.lastOrder >= 10.0))
+        HealOrder(m, p, h);
       // Finished: bandaging rose and then stood still for 10 game seconds.
       const bool settled = h.firstRise >= 0 && h.clock.sim - h.lastRise >= 10.0;
       const bool timedOut = h.clock.sim >= h.timeout || h.clock.Real() > 180.0f;
@@ -1051,7 +1151,8 @@ void BalanceTick(GameWorld *world) {
                " seconds_bandaging=" + Num((float)active) + " bandaging " + Fine(h.bandStart) + " -> " + Fine(band) +
                " bandage_rate=" + Num(active > 0 ? (float)((band - h.bandStart) / active) : 0.0f) +
                " need " + Num(h.needStart) + " -> " + Num(need) + " wounds=" + Num(WoundSum(p)) +
-               " seconds=" + Num((float)h.clock.sim) + " real_seconds=" + Num(h.clock.Real());
+               " seconds=" + Num((float)h.clock.sim) + " real_seconds=" + Num(h.clock.Real()) +
+               " orders=" + Num((float)h.orders);
         if (!okDone)
           done += " (no bandaging at all: no first aid kit on the medic, or he never reached the patient?)";
       }
