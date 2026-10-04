@@ -59,6 +59,10 @@ cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests
 if errorlevel 1 (type "%ROOT%obj\tests\build_walk_arrival.log" & echo TEST BUILD FAILED & exit /b 1)
 "%ROOT%obj\tests\walk_arrival_test.exe"
 if errorlevel 1 exit /b 1
+rem Scenario @log step (paths with spaces); needs Python 3.
+where py >nul 2>nul
+if not errorlevel 1 (py -3 "%ROOT%tests\kah_log_step_test.py") else (python "%ROOT%tests\kah_log_step_test.py")
+if errorlevel 1 exit /b 1
 rem Inbox protocol (client/kah.py with concurrent clients); needs Python 3 (py or python).
 where py >nul 2>nul
 if not errorlevel 1 (py -3 "%ROOT%tests\kah_inbox_test.py") else (python "%ROOT%tests\kah_inbox_test.py")

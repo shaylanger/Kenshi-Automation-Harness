@@ -224,8 +224,22 @@ SCENARIO_HELP = """Scenario file (kah run <file> [--csv out.csv] [--stop]): one 
   @until <timeout_s> <command ...> ~ <regex>   repeat (every 2 s) until the reply matches
   @set NAME <command ...> ~ <regex with one (group)>   capture; later steps use ${NAME}
   @log <file> ~ <regex>               a line added to <file> since the run started matches
+                                      (<file> may contain spaces; quotes optional)
   @echo <text>
   # comment (blank lines ignored). Arguments are shell-quoted ("Dried Meat")."""
+
+
+def log_step_path(line):
+    """The file of an `@log <file> ~ <regex>` step: everything up to ' ~ ',
+    so a path may contain spaces; quotes around it are dropped. Taken raw
+    (shlex would eat Windows backslashes)."""
+    rest = re.sub(r'^\s*@log\s+', '', line, count=1)
+    if ' ~ ' in rest:
+        rest = rest.split(' ~ ', 1)[0]
+    rest = rest.strip()
+    if len(rest) >= 2 and rest[0] == rest[-1] and rest[0] in ('"', "'"):
+        rest = rest[1:-1]
+    return rest
 
 
 def run_scenario(d, path, csv_path=None, stop=False):
@@ -251,9 +265,8 @@ def run_scenario(d, path, csv_path=None, stop=False):
         lines = f.read().splitlines()
     # Note the size of every log a step will look at, before anything runs.
     for line in lines:
-        m = re.match(r'\s*@log\s+(\S+)', line)
-        if m:
-            file = to_local(m.group(1))
+        if re.match(r'\s*@log\s', line):
+            file = to_local(log_step_path(line))
             log_offsets[file] = os.path.getsize(file) if os.path.exists(file) else 0
     for number, raw in enumerate(lines, 1):
         line = raw.strip()
@@ -266,7 +279,12 @@ def run_scenario(d, path, csv_path=None, stop=False):
             line = line.strip()
         ok_step, detail = True, ''
         try:
-            if line.startswith('@'):
+            if re.match(r'@log\s', line):
+                file = log_step_path(line)
+                text = log_since(file)
+                ok_step = bool(regex and re.search(regex, text))
+                detail = 'matched' if ok_step else 'no new line matching in ' + file
+            elif line.startswith('@'):
                 words = shlex.split(line[1:])
                 kind = words[0]
                 if kind == 'sleep':
@@ -295,12 +313,6 @@ def run_scenario(d, path, csv_path=None, stop=False):
                     if m:
                         variables[name] = m.group(1)
                         detail = '%s=%s' % (name, m.group(1))
-                elif kind == 'log':
-                    # The path is taken raw (shlex would eat Windows backslashes).
-                    words[1] = re.match(r'\s*@log\s+(\S+)', line).group(1)
-                    text = log_since(words[1])
-                    ok_step = bool(regex and re.search(regex, text))
-                    detail = 'matched' if ok_step else 'no new line matching in ' + words[1]
                 else:
                     ok_step, detail = False, 'unknown step @' + kind
             else:
