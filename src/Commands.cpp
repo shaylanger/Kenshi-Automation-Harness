@@ -14,6 +14,7 @@
 #include "GroundOwner.h"
 #include "HitCredit.h"
 #include "ProtectRules.h"
+#include "CrimeArgs.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -653,7 +654,7 @@ const char *const kHelp =
     "faction <npc> <faction> | sleep <npc> [bed <name>] | wake <npc> | "
     "damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | protect [<npc> on|off] | shackle <npc> [owner <npc>] | unshackle <npc> | "
     "cage|uncage <npc> [cage] | shopstock <trader> [radius <m>] | trade <buyer> <trader> <item> [radius <m>] | "
-    "eat <npc> <food> | stealth <npc> on|off | crime <npc> [radius <m>] | "
+    "eat <npc> <food> | stealth <npc> on|off | crime <npc> [radius <m>] | crime <npc> commit <crime> against <owner> [witnessed] | "
     "chance <npc> ko|kidnap|lockpick|steal <target> [item <name>] | detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>] | "
     "healtime <medic> <patient> [wound <cut>] [timeout <s>] | water <npc> | findwater <npc> [radius <m>] [depth <m>] | "
     "swimtime <npc> <dist> [+x|-x|+z|-z] [walk|run] | construct <npc> <building> [dist <m>] | construction <building> [reset] [fill] | towns [filter,...] [max <n>] | "
@@ -1542,6 +1543,35 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     return c->getName() + " stealth_mode=" + (c->isStealthMode() ? "1" : "0");
   }
 
+  if (cmd == "crime" && f.size() >= 4 && Lower(f[3]) == "commit") {
+    // crime <npc> commit <crime> against <owner npc> [witnessed]: KAH 23. Puts him in the game's own
+    // "committing a crime" state against the owner's faction (BountyManager::setCrime), so the owner and his
+    // faction react through their own AI (theft: HUNT_MY_THIEF); `witnessed` also books it as seen
+    // (notifyCrimeWitnessed: bounty). For tests where the game's sight check never raises the alarm.
+    const int crime = f.size() >= 5 ? ParseCrimeName(Lower(f[4])) : -1;
+    if (crime < 0 || f.size() < 7 || Lower(f[5]) != "against")
+      return "usage: crime <npc> commit <stealing|looting|assault|...> against <owner npc> [witnessed]";
+    Character *owner = FindCharacter(world, f[6]);
+    if (!owner)
+      return NotFound(f[6]);
+    Faction *fac = owner->getFaction();
+    if (!Valid(fac))
+      return "error: " + owner->getName() + " has no faction";
+    const bool witnessed = f.size() >= 8 && Lower(f[7]) == "witnessed";
+    const hand oh = owner->getHandle();
+    bool set = false;
+    try {
+      set = c->crimes.setCrime((CrimeEnum)crime, fac, oh);
+      if (witnessed)
+        c->crimes.notifyCrimeWitnessed(fac, oh, 30, (CrimeEnum)crime);
+    } catch (...) {
+      return "error: setCrime threw";
+    }
+    ok = c->crimes.isCommittingCrime();
+    Log("KAH: crime commit " + c->getName() + " " + BountyManager::crimeToStr((CrimeEnum)crime) + " against " +
+        owner->getName() + " [" + FactionName(fac) + "] set=" + (set ? "1" : "0") + (witnessed ? " witnessed" : ""));
+    return std::string("set=") + (set ? "1" : "0") + (witnessed ? " witnessed" : "") + " | " + CrimeReport(world, c, 200);
+  }
   if (cmd == "crime") { // crime <npc> [radius <m>]: bounty, crime, who hunts him (KAH 22)
     float radius = (float)atof(Option(f, 3, "radius", "200").c_str());
     if (!(radius > 0) || radius > 1000)
