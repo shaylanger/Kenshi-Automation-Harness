@@ -2306,12 +2306,61 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
   if (cmd == "cage" || cmd == "uncage") { // cage <npc> [cage name] | uncage <npc> [cage name]
     float dist = 0;
     const std::string cageName = f.size() >= 4 ? f[3] : "cage";
-    UseableStuff *cage = FindBuildingT<UseableStuff>(world, c->getPosition(), cageName, 300.0f, dist);
+    UseableStuff *cage = nullptr;
+    int skippedOccupied = 0;
+    if (cmd == "cage") {
+      // Only a free cage (or the one already holding <npc>): a second prisoner in an occupied
+      // cage left the game reading a null character in the prisoner checks (crash c0000005 read
+      // 0x2f8 = Character::inSomething, REL SR19 m22 batch N). Exact name wins, then nearest.
+      lektor<RootObject *> nearby;
+      world->getObjectsWithinSphere(nearby, c->getPosition(), 300.0f, BUILDING, 1024, nullptr);
+      const std::string wanted = Lower(cageName);
+      bool exactFound = false;
+      for (uint32_t i = 0; i < nearby.size(); ++i) {
+        UseableStuff *b = dynamic_cast<UseableStuff *>(nearby.stuff[i]);
+        if (!Valid(b))
+          continue;
+        std::string bn;
+        float d = 0;
+        Character *occ = nullptr;
+        try {
+          bn = Lower(b->getName());
+          d = b->getPosition().distance(c->getPosition());
+          const hand &oh = b->getOccupant();
+          if (oh.isValid())
+            occ = oh.getCharacter();
+        } catch (...) {
+          continue;
+        }
+        const bool exact = bn == wanted;
+        if (!exact && bn.find(wanted) == std::string::npos)
+          continue;
+        if (occ && occ != c) {
+          ++skippedOccupied;
+          continue;
+        }
+        if (exactFound && !exact)
+          continue;
+        if (!cage || (exact && !exactFound) || d < dist) {
+          cage = b;
+          dist = d;
+          exactFound = exactFound || exact;
+        }
+      }
+    } else {
+      cage = FindBuildingT<UseableStuff>(world, c->getPosition(), cageName, 300.0f, dist);
+    }
     if (!cage) {
-      out = "no cage matching '" + cageName + "' within 300 of " + c->getName();
+      out = "no " + std::string(cmd == "cage" ? "free " : "") + "cage matching '" + cageName +
+            "' within 300 of " + c->getName() +
+            (skippedOccupied ? " (" + Int(skippedOccupied) + " occupied)" : "");
       return true;
     }
     if (cmd == "cage") {
+      // The game only cages unconscious people (carried in); a conscious one is knocked out
+      // first (wakes up inside like after a carry), so its AI never runs mid-transfer.
+      if (!c->isUnconcious())
+        c->medical.knockoutForceTimer(10.0f);
       c->teleport(cage->getPosition(), Ogre::Quaternion::IDENTITY);
       c->setPrisonMode(true, cage);
     } else {
