@@ -227,7 +227,10 @@ SCENARIO_HELP = """Scenario file (kah run <file> [--csv out.csv] [--stop]): one 
   @log <file> ~ <regex>               a line added to <file> since the run started matches
                                       (<file> may contain spaces; quotes optional)
   @echo <text>
-  # comment (blank lines ignored). Arguments are shell-quoted ("Dried Meat")."""
+  # comment (blank lines ignored). Arguments are shell-quoted ("Dried Meat").
+  Once the game was in the world, a step that finds it back at the main menu
+  (no load/newgame sent since) ends the run: the rest is FAIL "not run". An
+  @sleep of 60 s or more checks `status` every 30 s and ends early then."""
 
 
 def log_step_path(line):
@@ -243,6 +246,38 @@ def log_step_path(line):
     return rest
 
 
+# Commands after which leaving the world is the scenario's own doing (a load,
+# a new game): the world-lost stop (item 122) waits for the next world.
+TRANSITION_COMMANDS = ('load', 'newgame', 'import', 'ui', 'click', 'key')
+WATCH_SLEEP_MIN = 60   # an @sleep this long checks the game every WATCH_EVERY s
+WATCH_EVERY = 30
+
+
+def world_lost(detail):
+    """'menu' when a reply says the game is back at the main menu (the whole
+    squad died, or the world was left some other way), else None."""
+    if re.search(r'no game loaded \(phase=menu\)|(^|\s)phase=menu\b', detail or ''):
+        return 'menu'
+    return None
+
+
+def watched_sleep(d, seconds, every=WATCH_EVERY):
+    """Sleeps <seconds>, asking `status` every <every> s; returns the reply
+    that shows the game left the world (and ends the sleep early), else None."""
+    end = time.time() + seconds
+    while True:
+        left = end - time.time()
+        if left <= 0:
+            return None
+        time.sleep(min(every, left))
+        try:
+            ok, detail = send(d, 'status', [], timeout=15)
+        except SystemExit:
+            continue  # busy at high speed: try again at the next check
+        if world_lost(detail):
+            return detail
+
+
 def run_scenario(d, path, csv_path=None, stop=False):
     import csv as csvmod
     import shlex
@@ -250,6 +285,9 @@ def run_scenario(d, path, csv_path=None, stop=False):
     log_offsets = {}
     rows = []
     passed = failed = 0
+    world_seen = False   # the scenario has seen the game world
+    transition = False   # a load/new game was sent since: leaving the world is expected
+    lost_at = None       # line where the game left the world (item 122)
 
     def subst(text):
         return re.sub(r'\$\{(\w+)\}', lambda m: variables.get(m.group(1), m.group(0)), text)
@@ -273,6 +311,10 @@ def run_scenario(d, path, csv_path=None, stop=False):
         line = raw.strip()
         if not line or line.startswith('#'):
             continue
+        if lost_at is not None:
+            failed += 1
+            rows.append((number, 'FAIL', raw.strip(), 'not run: the game left the world at line %d' % lost_at))
+            continue
         line = subst(line)
         regex = None
         if ' ~ ' in line:
@@ -289,7 +331,13 @@ def run_scenario(d, path, csv_path=None, stop=False):
                 words = shlex.split(line[1:])
                 kind = words[0]
                 if kind == 'sleep':
-                    time.sleep(float(words[1]))
+                    seconds = float(words[1])
+                    if world_seen and not transition and seconds >= WATCH_SLEEP_MIN:
+                        reply = watched_sleep(d, seconds, WATCH_EVERY)
+                        if reply:
+                            ok_step, detail = False, 'game left the world during the sleep: ' + reply
+                    else:
+                        time.sleep(seconds)
                 elif kind == 'echo':
                     detail = ' '.join(words[1:])
                 elif kind == 'wait-world':
@@ -320,6 +368,8 @@ def run_scenario(d, path, csv_path=None, stop=False):
                 expect_error = line.startswith('!')
                 words = shlex.split(line.lstrip('!').strip())
                 ok_reply, detail = send(d, words[0], words[1:])
+                if words[0].lower() in TRANSITION_COMMANDS:
+                    transition = True
                 ok_step = ok_reply != expect_error
                 if ok_step and regex and not re.search(regex, detail):
                     ok_step = False
@@ -328,6 +378,12 @@ def run_scenario(d, path, csv_path=None, stop=False):
             ok_step, detail = False, str(e)
         except Exception as e:  # malformed step
             ok_step, detail = False, 'step error: %s' % e
+        if 'phase=world' in (detail or ''):
+            world_seen, transition = True, False
+        if not ok_step and world_seen and not transition and world_lost(detail):
+            lost_at = number
+            detail = 'ABORT: the game left the world (phase=menu: squad dead or world closed); ' \
+                     'remaining steps not run. ' + (detail or '')
         passed += ok_step
         failed += not ok_step
         rows.append((number, 'PASS' if ok_step else 'FAIL', raw.strip(), detail))
@@ -336,6 +392,9 @@ def run_scenario(d, path, csv_path=None, stop=False):
         sys.stdout.flush()
         if stop and not ok_step:
             break
+    if lost_at is not None:
+        print('ABORT at line %d: the game left the world; %d steps not run' %
+              (lost_at, sum(1 for r in rows if r[3].startswith('not run:'))))
     print('== %d passed, %d failed (%s)' % (passed, failed, path))
     if csv_path:
         with open(csv_path, 'w', newline='', encoding='utf-8') as f:
