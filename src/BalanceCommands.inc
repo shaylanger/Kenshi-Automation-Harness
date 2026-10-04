@@ -458,6 +458,48 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
     return true;
   }
 
+  if (cmd == "senses") { // senses <observer> <who>: does the observer's AI see/hear him right now (SensoryData)
+    if (f.size() < 4) {
+      out = "usage: senses <observer> <who>";
+      return true;
+    }
+    Character *w = FindCharacter(world, f[3]);
+    if (!w) {
+      out = NotFound(f[3]);
+      return true;
+    }
+    SensoryData *sd = nullptr;
+    try {
+      sd = c->getSensoryData();
+    } catch (...) {
+      sd = nullptr;
+    }
+    if (!Valid(sd)) {
+      out = c->getName() + " has no sensory data";
+      return true;
+    }
+    int sees = -1, hears = -1, aware = -1, entry = 0;
+    float lastSeen = -1.0f, fov = -1.0f;
+    try {
+      sees = sd->canISeeThisGuy(w) ? 1 : 0;
+      hears = sd->canIHearThisGuy(w) ? 1 : 0;
+      aware = sd->amIAwareOfThisGuy(w, true) ? 1 : 0;
+      SeenSomeone *s = sd->getDataFor(w);
+      if (Valid(s)) {
+        entry = 1;
+        lastSeen = s->lastSeenInSeconds();
+        fov = s->FOVScore;
+      }
+    } catch (...) {
+    }
+    ok = true;
+    out = c->getName() + " -> " + w->getName() + " sees=" + Int(sees) + " hears=" + Int(hears) + " aware=" + Int(aware) +
+          " entry=" + Int(entry) + " last_seen_s=" + Num(lastSeen) + " fov=" + Fine(fov) +
+          " dist=" + Num(FlatDistance(w->getPosition(), c->getPosition())) +
+          " observer_ko=" + (c->isUnconcious() ? "1" : "0");
+    return true;
+  }
+
   if (cmd == "detect") { // detect <sneaker>: who notices him sneaking, as the game tracks it
     std::string list;
     int n = 0;
