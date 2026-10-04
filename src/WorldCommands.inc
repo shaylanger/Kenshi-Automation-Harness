@@ -1802,6 +1802,36 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
         countArg = f[i];
     }
     bool ambiguous = false;
+    if (Lower(countArg) == "all" && !owned) {
+      // drop <npc> <item> all: every unworn instance (kits with uses don't stack, m23-4080 pg84 kept one);
+      // ok with 0 dropped, so a test setup can clear an item whatever he carries.
+      Inventory *allInv = c->getInventory();
+      int dropped = 0, failed = 0;
+      for (int guard = 0; guard < 64; ++guard) {
+        bool amb = false;
+        Item *it = FindInventoryItem(c, f[3], amb);
+        if (!it || amb || it->isEquipped)
+          break;
+        const bool pend = it->creatingPhysical || it->physicalShouldExist;
+        try {
+          allInv->dropItem(it);
+        } catch (...) {
+        }
+        if (Valid(it) && !it->isInInventory && PlacedOrDropping(it, pend))
+          ++dropped;
+        else {
+          ++failed;
+          break;
+        }
+      }
+      bool amb2 = false;
+      Item *left = FindInventoryItem(c, f[3], amb2);
+      ok = failed == 0 && !amb2 && (!left || left->isEquipped);
+      Log("KAH: drop all " + c->getName() + " " + f[3] + " dropped=" + Int(dropped) + " ok=" + (ok ? "1" : "0"));
+      out = std::string(ok ? "dropped all " : "drop all failed: ") + f[3] + " dropped=" + Int(dropped) +
+            " left=" + (left && !amb2 ? Int(left->quantity) : std::string(amb2 ? "ambiguous" : "0"));
+      return true;
+    }
     Item *item = FindInventoryItem(c, f[3], ambiguous);
     if (!item) {
       out = ambiguous ? "several items match '" + f[3] + "': use the full name or sid"
