@@ -42,6 +42,8 @@
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/SaveManager.h>
 #include <kenshi/SaveInfo.h>
+#include <kenshi/ShopTrader.h>
+#include <kenshi/ShopTraderInventory.h>
 #include <kenshi/Town.h>
 #include <kenshi/util/hand.h>
 #include <kenshi/util/UtilityT.h>

@@ -1575,6 +1575,52 @@ void CollectShopSources(GameWorld *world, Character *trader, float radius,
   }
 }
 
+// KAH 3: what the game's own trade window sells. Opening trade with a
+// shopkeeper (ForgottenGUI::showTraderInventory) builds a ShopTrader around
+// her: a RootObject named after her whose ShopTraderInventory joins her own
+// goods and the storage of the shop she owns (Character::getOwnerships), and
+// whose money is hers (ShopTrader::getMoney/takeMoney forward to the trader).
+// Inventory::buyItem on it is a real player purchase from a shop container:
+// the game prices the item for that trader, pays her, and Inventory::owner
+// (what mods report as the seller) is the ShopTrader, not the barrel.
+// Built for one command and deleted again (the game deletes and rebuilds it
+// every time a trade window opens). Only for real traders (isATrader).
+static_assert(sizeof(ShopTrader) == 0xD0, "ShopTrader layout (the game allocates 0xD0)");
+struct GameShop {
+  ShopTrader *shop;
+  explicit GameShop(Character *trader) : shop(nullptr) {
+    if (!Valid(trader))
+      return;
+    try {
+      if (!trader->isATrader())
+        return;
+      shop = new ShopTrader(trader);
+      ShopTraderInventory *si = dynamic_cast<ShopTraderInventory *>(shop->getInventory());
+      if (si)
+        si->updateInventory();
+    } catch (...) {
+    }
+  }
+  ~GameShop() {
+    if (shop) {
+      try {
+        delete shop;
+      } catch (...) {
+      }
+    }
+  }
+  Inventory *inv() const {
+    if (!shop)
+      return nullptr;
+    try {
+      Inventory *i = shop->getInventory();
+      return Valid(i) ? i : nullptr;
+    } catch (...) {
+      return nullptr;
+    }
+  }
+};
+
 // World commands about one character (f[2] is the character, already resolved as c).
 bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Character *c,
                          const Ogre::Vector3 &origin, bool &ok, std::string &out) {
@@ -2056,6 +2102,18 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
         out += " [" + items[k]->getName() + " x" + Int(items[k]->quantity) + " $" +
                Int(items[k]->getValueSingle(true)) + (items[k]->isEquipped ? " worn" : "") + "]";
     }
+    // KAH 3: the game's trade window (own goods + her shop's storage), priced as the game sells them.
+    GameShop shop(c);
+    if (Inventory *window = shop.inv()) {
+      std::vector<Item *> items;
+      InventoryItems(window, items);
+      out += " || trade window (" + Int((long long)items.size()) + " items, what trade buys from first):";
+      for (size_t k = 0; k < items.size() && k < 60; ++k)
+        out += " [" + items[k]->getName() + " x" + Int(items[k]->quantity) + " $" +
+               Int(items[k]->getValueSingle(true)) + "]";
+    } else {
+      out += " || trade window: none (" + std::string(c->isATrader() ? "the game built no shop" : "not a trader") + ")";
+    }
     ok = true;
     return true;
   }
@@ -2073,7 +2131,17 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
       return true;
     }
     std::vector<ShopSource> sources;
+    // KAH 3: buy through the game's trade window first (a ShopTrader, as a
+    // player's purchase from the shop, barrels and counters included); the
+    // radius search below is the fallback for goods the window doesn't show
+    // (non-traders, storage of her faction she doesn't own).
+    GameShop shop(trader);
+    if (Inventory *window = shop.inv()) {
+      ShopSource src = {trader->getName() + " trade window", window};
+      sources.push_back(src);
+    }
     CollectShopSources(world, trader, radius, sources);
+    Inventory *shopInv = shop.inv();
     const std::string wanted = Lower(f[4]);
     Item *item = nullptr;
     Inventory *from = nullptr;
@@ -2133,7 +2201,7 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
     // fallback price (game value, else average price, else game data value),
     // the trader gets the cats, the item goes to the buyer.
     Inventory *storage = nullptr;
-    if (from != traderInv) {
+    if (from != traderInv && from != shopInv) {
       if (!Valid(traderInv)) {
         out = "trade failed: " + trader->getName() + " has no inventory to sell " + itemName + " from";
         return true;
@@ -2279,11 +2347,11 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
           c->takeMoney(-paidNow);
         if (receivedNow != 0)
           trader->takeMoney(receivedNow);
-        Inventory *home = storage ? storage : traderInv;
+        Inventory *home = storage ? storage : (from == shopInv && shopInv ? shopInv : traderInv);
         bool back = false;
         try {
           back = Valid(home) && home->addItem(bought, qty, false, false);
-          if (!back && storage && Valid(traderInv))
+          if (!back && (storage || from == shopInv) && Valid(traderInv))
             back = traderInv->addItem(bought, qty, false, false);
         } catch (...) {
           back = false;
