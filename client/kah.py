@@ -54,6 +54,7 @@ Built-in commands:
   healtime <medic> <patient> [wound <cut>] [timeout <s>]   timed first aid (bandage_rate=)
   water <npc> | findwater <npc> [radius <m>] [depth <m>] | swimtime <npc> <dist> [+x|-x|+z|-z]   swimming
   construct <npc> <building> [dist <m>] | construction <building> [reset] [fill]   build-speed site + progress
+  towns [filter,...] [max <n>]            towns/ruins nearest the player with pos=x,y,z
   shackle|unshackle <npc> | cage|uncage <npc> [cage] | shopstock <trader> [radius <m>]
   trade <buyer> <trader> <item> [radius <m>]   (shop storage radius: default 60, max 300)
   ui [filter] [all] | click <widget> | messages [n] | screenshot [name]

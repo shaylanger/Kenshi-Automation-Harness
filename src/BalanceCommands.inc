@@ -250,6 +250,54 @@ DoorLock *FindLock(GameWorld *world, Character *c, const std::string &target, fl
 bool RunBalanceWorldCommand(GameWorld *world, const std::vector<std::string> &f, const Ogre::Vector3 &origin,
                             bool &ok, std::string &out) {
   const std::string cmd = Lower(f[1]);
+  if (cmd == "towns") { // towns [filter[,filter...]] [max <n>]: towns, nests, ruins nearest the player
+    std::vector<std::string> needles;
+    const std::string filter = f.size() >= 3 && Lower(f[2]) != "max" ? Lower(f[2]) : "";
+    for (size_t a = 0, b; a <= filter.size(); a = b + 1) {
+      b = filter.find(',', a);
+      if (b == std::string::npos)
+        b = filter.size();
+      if (b > a)
+        needles.push_back(filter.substr(a, b - a));
+    }
+    int maxN = atoi(Option(f, 2, "max", "20").c_str());
+    if (maxN < 1 || maxN > 200)
+      maxN = 20;
+    if (!Valid(shou) || !Valid(shou->townList)) {
+      out = "no town list";
+      return true;
+    }
+    lektor<RootObject *> &all = shou->townList->getAllTowns();
+    std::vector<std::pair<float, TownBase *> > found;
+    for (uint32_t i = 0; i < all.size(); ++i) {
+      TownBase *t = dynamic_cast<TownBase *>(all.stuff[i]);
+      if (!Valid(t))
+        continue;
+      std::string name;
+      try {
+        name = t->getName();
+        if (Valid(t->data))
+          name += " / " + t->data->name;
+      } catch (...) {
+        continue;
+      }
+      bool match = needles.empty();
+      for (size_t k = 0; k < needles.size() && !match; ++k)
+        match = Lower(name).find(needles[k]) != std::string::npos;
+      if (match)
+        found.push_back(std::make_pair(FlatDistance(t->getPosition(), origin), t));
+    }
+    std::sort(found.begin(), found.end());
+    out = Int(found.size()) + " of " + Int(all.size()) + " towns match";
+    for (size_t i = 0; i < found.size() && (int)i < maxN; ++i) {
+      TownBase *t = found[i].second;
+      const Ogre::Vector3 p = t->getPosition();
+      out += " | " + Int(i + 1) + ": " + t->getName() + (Valid(t->data) ? " [" + t->data->name + "]" : std::string()) +
+             " pos=" + Num(p.x) + "," + Num(p.y) + "," + Num(p.z) + " dist=" + Num(found[i].first);
+    }
+    ok = true;
+    return true;
+  }
   if (cmd == "construction") { // construction <building> [reset] [fill] [radius <m>]
     if (f.size() < 3) {
       out = "usage: construction <building> [reset] [fill] [radius <m>]";
@@ -566,6 +614,8 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
     static const float dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
     static const char *const dirNames[4] = {"+x", "-x", "+z", "-z"};
     std::string runs;
+    int bestDir = 0;
+    float bestRun = -1;
     for (int k = 0; k < 4; ++k) {
       float len = 0;
       while (len < 500) {
@@ -575,6 +625,10 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
         len += 2;
       }
       runs += std::string(" ") + dirNames[k] + "=" + Num(len);
+      if (len > bestRun) {
+        bestRun = len;
+        bestDir = k;
+      }
     }
     float surface = 0;
     try {
@@ -583,7 +637,7 @@ bool RunBalanceCommand(GameWorld *world, const std::vector<std::string> &f, Char
     }
     ok = true;
     out = "water at " + Num(bx) + " " + Num(surface) + " " + Num(bz) + " depth=" + Num(bd) + " dist=" + Num(best) +
-          " runs" + runs + " (teleport <npc> x y z there, then swimtime along the longest run)";
+          " runs" + runs + " best=" + dirNames[bestDir] + " best_run=" + Num(bestRun) + " (teleport <npc> x y z there, then swimtime along the longest run)";
     return true;
   }
 
