@@ -421,6 +421,27 @@ GameData *FindData(GameWorld *world, itemType type, const std::string &name,
   return nullptr;
 }
 
+// FindData over several item types, an exact name/stringID in any of them first: otherwise a partial match in
+// an earlier type wins ("Toothpick" (CROSSBOW) found "Bolts [Toothpicks]" (ITEM), m46)
+GameData *FindDataTypes(GameWorld *world, const itemType *types, int n, const std::string &name,
+                        std::string &error) {
+  const std::string wanted = Lower(name);
+  for (int t = 0; t < n; ++t) {
+    const auto categoryIt = world->gamedata.gamedataCatSID.find((int)types[t]);
+    if (categoryIt == world->gamedata.gamedataCatSID.end())
+      continue;
+    for (auto it = categoryIt->second.begin(); it != categoryIt->second.end(); ++it) {
+      GameData *data = it->second;
+      if (Valid(data) && (Lower(data->stringID) == wanted || Lower(data->name) == wanted))
+        return data;
+    }
+  }
+  GameData *data = nullptr;
+  for (int t = 0; t < n && !data; ++t)
+    data = FindData(world, types[t], name, error);
+  return data;
+}
+
 Faction *FindFaction(GameWorld *world, const std::string &name) {
   if (!Valid(world->factionMgr))
     return nullptr;
@@ -2934,9 +2955,9 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return "count must be 1..50";
     std::string error;
     GameData *data = nullptr;
-    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER, ARTIFACTS};
-    for (int t = 0; t < 5 && !data; ++t)
-      data = FindData(world, types[t], f[3], error);
+    // CROSSBOW: crossbows are their own item type (m46: "give Malzin Toothpick" found the bolts instead)
+    const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER, ARTIFACTS, CROSSBOW};
+    data = FindDataTypes(world, types, 6, f[3], error);
     if (!data)
       return error;
     Inventory *inv = c->getInventory();
