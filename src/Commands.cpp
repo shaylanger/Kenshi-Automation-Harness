@@ -1237,10 +1237,20 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
         std::string ld = d;
         for (size_t k = 0; k < ld.size(); ++k)
           ld[k] = (char)tolower((unsigned char)ld[k]);
-        bool hit = false;
-        for (size_t k = 0; k < alts.size() && !hit; ++k)
-          hit = ld.find(alts[k]) != std::string::npos;
-        if (!hit)
+        // `!text` excludes lines containing text; `!ko` / `!dead` exclude by state (rel-enslaved m33: the
+        // knocked-out nearest 40 filled the cap and hid the awake guards behind them)
+        bool hit = false, pos = false, drop = false;
+        for (size_t k = 0; k < alts.size() && !drop; ++k) {
+          if (alts[k][0] == '!') {
+            std::string x = alts[k].substr(1);
+            bool dead = c->isDead(), ko = !dead && c->isUnconcious();
+            drop = x == "ko" ? ko : x == "dead" ? dead : (!x.empty() && ld.find(x) != std::string::npos);
+          } else {
+            pos = true;
+            hit = hit || ld.find(alts[k]) != std::string::npos;
+          }
+        }
+        if (drop || (pos && !hit))
           continue;
       }
       out += (n ? " | " : "") + d;
