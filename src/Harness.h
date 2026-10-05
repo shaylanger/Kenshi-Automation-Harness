@@ -47,6 +47,10 @@ void KeepSuppliedPowered();
 void KeepProtected();
 // Ends "walktime" walks (reply on arrival); every frame.
 void KeepWalkTimers();
+// Counts turret shots (GunClass::shoot hook) for "turret"; game thread.
+class GunClass;
+class RootObject;
+void RecordGunShot(GunClass *gun, Character *me, RootObject *target, int stat);
 
 bool IsBuiltinCommand(const std::string &name);
 

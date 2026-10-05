@@ -28,6 +28,10 @@
 #include <kenshi/Building/ProductionBuilding.h>
 #include <kenshi/Building/StorageBuilding.h>
 #include <kenshi/Building/UseableStuff.h>
+#include <kenshi/Building/TurretBuilding.h>
+#include <kenshi/GunClass.h>
+#include <kenshi/combat/RangedCombatClass.h>
+#include <map>
 #include <kenshi/util/TimeOfDay.h>
 #include <mygui/MyGUI_Gui.h>
 #include <mygui/MyGUI_TextBox.h>
@@ -626,6 +630,7 @@ std::string CurrentSave() {
 
 #include "WorldCommands.inc"
 #include "BalanceCommands.inc"
+#include "TurretCommands.inc"
 
 const char *const kBuiltins[] = {
     "help",  "status", "load",     "save",    "speed",  "chars",   "find",  "spawn",
@@ -638,7 +643,7 @@ const char *const kBuiltins[] = {
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
     "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "hit", "newgame", "import", "stealth", "crime",
-    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "construct", "construction", "towns"};
+    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "construct", "construction", "towns", "turret"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | "
@@ -659,7 +664,7 @@ const char *const kHelp =
     "eat <npc> <food> | stealth <npc> on|off | crime <npc> [radius <m>] | crime <npc> commit <crime> against <owner> [witnessed] | "
     "chance <npc> ko|kidnap|lockpick|steal <target> [item <name>] | detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>] | senses <observer> <who> | face <npc> <who> | pin <npc> [at <npc|x y z>] [dist m] [face <who>] | pin <npc> off | "
     "healtime <medic> <patient> [wound <cut>] [timeout <s>] | water <npc> | findwater <npc> [radius <m>] [depth <m>] | "
-    "swimtime <npc> <dist> [+x|-x|+z|-z] [walk|run] | construct <npc> <building> [dist <m>] | construction <building> [reset] [fill] | towns [filter,...] [max <n>] | "
+    "swimtime <npc> <dist> [+x|-x|+z|-z] [walk|run] | construct <npc> <building> [dist <m>] | construction <building> [reset] [fill] | towns [filter,...] [max <n>] | turret <building> [radius <m>] [target <npc>] [front <m>] | "
     "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
@@ -699,6 +704,14 @@ void HoldSpeedTick(GameWorld *world) {
 }
 
 } // namespace
+
+// GunClass::shoot hook (Plugin.cpp) -> per-turret shot counts for "turret".
+void RecordGunShot(GunClass *gun, Character *me, RootObject *target, int stat) {
+  try {
+    RecordGunShotImpl(gun, me, target, stat);
+  } catch (...) {
+  }
+}
 
 void SampleProduction(GameWorld *world) {
   try {
@@ -1196,6 +1209,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   {
     std::string reply;
     if (RunWorldCommand(world, f, origin, ok, reply))
+      return reply;
+    if (RunTurretCommand(world, f, origin, ok, reply))
       return reply;
     if (RunBalanceWorldCommand(world, f, origin, ok, reply))
       return reply;

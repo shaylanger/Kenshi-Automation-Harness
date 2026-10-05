@@ -15,6 +15,8 @@
 
 #include <core/Functions.h>
 #include <kenshi/GameWorld.h>
+#include <kenshi/GunClass.h>
+#include <kenshi/RootObject.h>
 #include <kenshi/Globals.h> // ou
 #include <kenshi/Kenshi.h>
 #include <kenshi/SaveManager.h>
@@ -402,7 +404,24 @@ void __fastcall Hook_UpdatePowerGrid(Town *town) {
   KeepSuppliedPowered();
 }
 
+// "turret" (KAH 25): count turret shots per gun and target.
+typedef void(__fastcall *GunShootFn)(GunClass *, Character *, RootObject *, StatsEnumerated, const Ogre::Vector3 &);
+GunShootFn g_gunShootOrig = nullptr;
+
+void __fastcall Hook_GunShoot(GunClass *gun, Character *me, RootObject *target, StatsEnumerated stat,
+                              const Ogre::Vector3 &aimpos) {
+  RecordGunShot(gun, me, target, (int)stat);
+  g_gunShootOrig(gun, me, target, stat, aimpos);
+}
+
 void InstallHooks() {
+  __int64 shootAddr = KenshiLib::GetRealAddress(&GunClass::shoot);
+  if (shootAddr) {
+    int s = (int)KenshiLib::AddHook((void *)shootAddr, (void *)Hook_GunShoot, (void **)&g_gunShootOrig);
+    Log("KAH: GunClass::shoot hook status=" + Int(s));
+  } else {
+    Log("KAH: GunClass::shoot not found; turret shot counts off");
+  }
   __int64 gridAddr = KenshiLib::GetRealAddress(&Town::_NV_updatePowerGrid);
   if (gridAddr) {
     int s = (int)KenshiLib::AddHook((void *)gridAddr, (void *)Hook_UpdatePowerGrid,
