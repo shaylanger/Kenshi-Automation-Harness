@@ -81,8 +81,59 @@ struct AccelTimer {
   bool stopGiven;
   float topSpeed;             // highest CharMovement::currentSpeed (for comparison with runspeed)
   std::vector<AccelSample> samples;
+  // Camera (PG 254): CharMovement::update runs the physics path (acceleration clamp) only while
+  // Character::isOnScreen; off screen it uses HavokCharacter::moveAlongPath (no speed-up, no slide).
+  bool follow;                // keep the game camera on him (CameraClass::followObject) for the whole run
+  bool ordered;               // the move order is out (with follow: only once he has been on screen 0.3 s)
+  bool moved;                 // first movement seen: isOnScreen is counted from here
+  int onFrames, offFrames;    // frames with Character::isOnScreen set / clear since the first movement
+  int refollows;              // times the camera had to be put back on him
+  DWORD onSinceTick;          // follow, before the order: real tick since he is on screen (0: not on screen)
+  hand prevFollow;            // what the camera followed before (restored at the end)
 };
 std::vector<AccelTimer> g_accels;
+
+CameraClass *GameCamera(GameWorld *world) {
+  return world && Valid(world->player) && Valid(world->player->camera) ? world->player->camera : nullptr;
+}
+
+// Puts the game's own follow ("track") on him; true if the camera had to be (re)pointed.
+bool CameraFollow(GameWorld *world, Character *c) {
+  CameraClass *cam = GameCamera(world);
+  if (!cam || !Valid(c))
+    return false;
+  if (SameHandle(cam->getFollowObject(), c->getHandle()))
+    return false;
+  cam->followObject(c->getHandle());
+  return true;
+}
+
+void AccelCameraRestore(GameWorld *world, AccelTimer &a) {
+  if (!a.follow)
+    return;
+  try {
+    CameraClass *cam = GameCamera(world);
+    if (!cam || !SameHandle(cam->getFollowObject(), a.who))
+      return; // somebody else moved it since: leave it
+    if (a.prevFollow.isValid())
+      cam->followObject(a.prevFollow);
+    else
+      cam->stopFollowing();
+  } catch (...) {
+  }
+}
+
+void AccelOrder(AccelTimer &a, Character *c) {
+  OrdersReceiver *orders = c->getOrdersReciever();
+  if (Valid(orders)) {
+    orders->clearOrders();
+    orders->addOrder(MOVE_CUS_ORDERED, hand(), a.target, true, false);
+  }
+  a.ordered = true;
+  a.sim = 0;
+  a.samples.clear();
+  a.startTick = GetTickCount();
+}
 
 std::string AccelReply(const AccelTimer &a) {
   const AccelResult r = AnalyzeAccel(a.samples, a.stopGiven ? a.stopIndex : a.samples.size(), 1.0);
@@ -92,7 +143,9 @@ std::string AccelReply(const AccelTimer &a) {
                     " stop=" + a.stopMode + " stop_at=" + Num(a.stopGiven ? a.samples[a.stopIndex].d : 0.0f) +
                     " stop_dist=" + Fine(r.stopDist) + " stop_seconds=" + Fine((float)r.stopSeconds) +
                     " top_speed=" + Num(a.topSpeed) + " samples=" + Int((int)a.samples.size()) +
-                    " seconds=" + Num((float)a.sim);
+                    " seconds=" + Num((float)a.sim) + " follow=" + (a.follow ? "1" : "0") +
+                    " onscreen_frames=" + Int(a.onFrames) + " offscreen_frames=" + Int(a.offFrames) +
+                    " refollows=" + Int(a.refollows);
   return out;
 }
 
@@ -123,7 +176,23 @@ void AccelTick(GameWorld *world) {
     bool okDone = false;
     if (!Valid(c)) {
       done = a.name + " is gone (unloaded or a load)";
+    } else if (!a.ordered) {
+      // follow: wait until the camera has him on screen (0.3 s real) before the move order
+      CameraFollow(world, c);
+      if (!c->isOnScreen)
+        a.onSinceTick = 0;
+      else if (a.onSinceTick == 0)
+        a.onSinceTick = GetTickCount() | 1;
+      if (a.onSinceTick != 0 && GetTickCount() - a.onSinceTick >= 300) {
+        AccelOrder(a, c);
+        Log("KAH: acceltime " + a.name + " on screen, move order given");
+      } else if (GetTickCount() - a.startTick > 20000) {
+        done = a.name + " acceltime follow: the camera did not get him on screen within 20 s (paused game, "
+               "free camera mode, inside a building?)";
+      }
     } else if (!paused && dt > 0) {
+      if (a.follow && CameraFollow(world, c))
+        ++a.refollows;
       a.sim += dt * mult;
       const Ogre::Vector3 p = c->getPosition();
       Ogre::Vector3 flat = p - a.start;
@@ -132,6 +201,10 @@ void AccelTick(GameWorld *world) {
       s.t = a.sim;
       s.d = flat.dotProduct(a.dir);
       a.samples.push_back(s);
+      if (!a.moved && s.d > kAccelMoveEps)
+        a.moved = true;
+      if (a.moved)
+        ++(c->isOnScreen ? a.onFrames : a.offFrames);
       CharMovement *m = c->movement;
       if (Valid(m) && m->currentSpeed > a.topSpeed)
         a.topSpeed = m->currentSpeed;
@@ -164,12 +237,13 @@ void AccelTick(GameWorld *world) {
         done = a.name + " never started: stood still for 20 s after the order (axis=" + a.axis + ")";
       }
     }
-    if (done.empty() && GetTickCount() - a.startTick > 120000)
+    if (done.empty() && a.ordered && GetTickCount() - a.startTick > 120000)
       done = a.name + " acceltime did not finish within 120 s (covered " +
              Num(a.samples.empty() ? 0.0f : a.samples.back().d) + " of stop_at " + Num(a.stopAt) +
              ", stop_given=" + (a.stopGiven ? "1" : "0") + "): blocked path, paused game or KO?";
     if (!done.empty()) {
       Log("KAH: acceltime " + done);
+      AccelCameraRestore(world, a);
       WriteOutbox(a.id, okDone, done);
       g_accels.erase(g_accels.begin() + i);
     } else {

@@ -55,6 +55,7 @@
 #include <kenshi/MedicalSystem.h>
 #include <kenshi/Platoon.h>
 #include <kenshi/PlayerInterface.h>
+#include <kenshi/CameraClass.h> // acceltime follow, camfollow
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/RaceData.h>
 #include <kenshi/NavMesh.h> // walktime: is the target on the navmesh
@@ -661,7 +662,7 @@ const char *const kBuiltins[] = {
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
     "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "hit", "newgame", "import", "stealth", "crime",
-    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "construct", "construction", "towns", "turret"};
+    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "towns", "turret"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | "
@@ -683,7 +684,7 @@ const char *const kHelp =
     "chance <npc> ko|kidnap|lockpick|steal <target> [item <name>] | detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>] | senses <observer> <who> | face <npc> <who> | pin <npc> [at <npc|x y z>] [dist m] [face <who>] | pin <npc> off | "
     "healtime <medic> <patient> [wound <cut>] [timeout <s>] | water <npc> | findwater <npc> [radius <m>] [depth <m>] | "
     "swimtime <npc> <dist> [+x|-x|+z|-z] [walk|run] | construct <npc> <building> [dist <m>] | construction <building> [reset] [fill] | towns [filter,...] [max <n>] | turret <building> [radius <m>] [target <npc>] [front <m>] [aim <npc>|off] | "
-    "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [+x|-x|+z|-z] [walk|run] | acceltime <npc> <dist> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
+    "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [+x|-x|+z|-z] [walk|run] | acceltime <npc> <dist> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt] [follow] | camfollow <npc> [on|off] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | "
@@ -2130,15 +2131,18 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
   if (cmd == "acceltime") { // acceltime <npc> <dist> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt]: PG 254 / Shay D4
     const float dist = f.size() >= 4 ? (float)atof(f[3].c_str()) : 0.0f;
     if (!(dist >= 10.0f && dist <= 500.0f))
-      return "usage: acceltime <npc> <dist 10..500> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt] (he runs toward a "
+      return "usage: acceltime <npc> <dist 10..500> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt] [follow] (he runs toward a "
              "point dist along the axis; at stopat (default dist/2) he is stopped; reply: start_delay t50 t90 "
              "cruise_speed stop_dist stop_seconds)";
     std::string mode, axis = "+x", stopMode = "order";
     Ogre::Vector3 dir(1, 0, 0);
     float stopAt = dist * 0.5f;
+    bool follow = false;
     for (size_t k = 4; k < f.size(); ++k) {
       const std::string a = Lower(f[k]);
-      if (a == "walk" || a == "run")
+      if (a == "follow")
+        follow = true;
+      else if (a == "walk" || a == "run")
         mode = a;
       else if (a == "halt" || a == "order")
         stopMode = a;
@@ -2153,7 +2157,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       else if (a == "-z")
         axis = "-z", dir = Ogre::Vector3(0, 0, -1);
       else
-        return "acceltime: unknown option " + f[k] + " (+x|-x|+z|-z, walk|run, stopat <d>, halt|order)";
+        return "acceltime: unknown option " + f[k] + " (+x|-x|+z|-z, walk|run, stopat <d>, halt|order, follow)";
     }
     if (!(stopAt >= 5.0f && stopAt < dist))
       return "acceltime: stopat must be 5 .. below dist";
@@ -2184,8 +2188,20 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     a.stopIndex = 0;
     a.stopGiven = false;
     a.topSpeed = 0;
-    orders->clearOrders();
-    orders->addOrder(MOVE_CUS_ORDERED, hand(), a.target, true, false);
+    a.follow = follow;
+    a.ordered = a.moved = false;
+    a.onFrames = a.offFrames = a.refollows = 0;
+    a.onSinceTick = 0;
+    if (follow) {
+      CameraClass *cam = GameCamera(world);
+      if (!cam)
+        return "acceltime follow: no game camera";
+      a.prevFollow = cam->getFollowObject();
+      CameraFollow(world, c);
+      orders->clearOrders(); // stand still until the camera has him; the order goes out in AccelTick
+    } else {
+      AccelOrder(a, c);
+    }
     for (size_t i = 0; i < g_accels.size(); ++i)
       if (SameHandle(g_accels[i].who, a.who)) {
         WriteOutbox(g_accels[i].id, false, "replaced by a new acceltime for " + a.name);
@@ -2194,10 +2210,28 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       }
     g_accels.push_back(a);
     Log("KAH: acceltime " + a.name + " dist=" + Num(dist) + " stopat=" + Num(stopAt) + " axis=" + axis + " mode=" +
-        (mode.empty() ? "as is" : mode) + " stop=" + stopMode + " paused=" + (world->isPaused() ? "1" : "0"));
+        (mode.empty() ? "as is" : mode) + " stop=" + stopMode + " follow=" + (follow ? "1" : "0") +
+        " paused=" + (world->isPaused() ? "1" : "0"));
     pending = true; // answered by AccelTick after the stop
     ok = true;
     return "";
+  }
+
+  if (cmd == "camfollow") { // camfollow <npc> [on|off]: the game camera follows him (CameraClass::followObject)
+    const std::string onOff = f.size() >= 4 ? Lower(f[3]) : "on";
+    if (onOff != "on" && onOff != "off")
+      return "usage: camfollow <npc> [on|off]";
+    CameraClass *cam = GameCamera(world);
+    if (!cam)
+      return "camfollow: no game camera";
+    if (onOff == "on")
+      CameraFollow(world, c);
+    else if (SameHandle(cam->getFollowObject(), c->getHandle()))
+      cam->stopFollowing();
+    ok = true;
+    return c->getName() + " camfollow=" + onOff + " following=" +
+           (SameHandle(cam->getFollowObject(), c->getHandle()) ? "1" : "0") +
+           " on_screen=" + (c->isOnScreen ? "1" : "0");
   }
 
   if (cmd == "hit") { // hit <attacker> <victim> <part> <damage>: a credited wound, no fight (REL B 55)
