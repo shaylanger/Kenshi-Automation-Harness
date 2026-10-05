@@ -633,6 +633,50 @@ bool RunBalanceWorldCommand(GameWorld *world, const std::vector<std::string> &f,
       Log("KAH: construction " + out);
     return true;
   }
+  // farm: crop state of a farm, and a way to make it ripe again (m44-5090 gate-90-farming: after the field was
+  // harvested the crop replanted at grown=0, the farm went IMPOSSIBLE and the farmer made no operate calls for
+  // the next point). `grown` sets FarmBuilding::grown, `skip` runs the game's own FarmBuilding::timeSkip.
+  if (cmd == "farm") { // farm <building> [grown <0..1>] [skip <hours>] [radius <m>]
+    if (f.size() < 3) {
+      out = "usage: farm <building> [grown <0..1>] [skip <hours>] [radius <m>]";
+      return true;
+    }
+    float radius = 0, dist = 0;
+    if (!ParseSearchRadius(f, 3, 0, kDefaultSearchRadius, radius, out))
+      return true;
+    Building *b = FindBuilding(world, origin, f[2], radius, dist);
+    FarmBuilding *farm = Valid(b) ? dynamic_cast<FarmBuilding *>(b) : nullptr;
+    if (!Valid(farm)) {
+      out = "no farm matching '" + f[2] + "' within " + Num(radius);
+      return true;
+    }
+    std::string note;
+    const std::string skip = Option(f, 3, "skip", "");
+    if (!skip.empty()) {
+      const float h = (float)atof(skip.c_str());
+      if (h <= 0 || h > 1000) {
+        out = "skip needs hours in (0, 1000]";
+        return true;
+      }
+      farm->timeSkip(h, true);
+      note += " skipped=" + Num(h) + "h";
+    }
+    const std::string grown = Option(f, 3, "grown", "");
+    if (!grown.empty()) {
+      const float v = (float)atof(grown.c_str());
+      if (v < 0 || v > 1) {
+        out = "grown needs a value in [0, 1]";
+        return true;
+      }
+      note += " grown_was=" + Num(farm->grown);
+      farm->grown = v;
+    }
+    ok = true;
+    out = BuildingInfo(b, origin) + note;
+    if (!note.empty())
+      Log("KAH: farm " + out);
+    return true;
+  }
   return false;
 }
 
