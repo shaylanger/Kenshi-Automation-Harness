@@ -412,6 +412,7 @@ GunShootFn g_gunShootOrig = nullptr;
 void __fastcall Hook_GunShoot(GunClass *gun, Character *me, RootObject *target, StatsEnumerated stat,
                               const Ogre::Vector3 &aimpos) {
   RecordGunShot(gun, me, target, (int)stat);
+  RecordRangedShot(gun, me, target, (int)stat); // before the shot: the stats the shot code reads
   g_gunShootOrig(gun, me, target, stat, aimpos);
 }
 

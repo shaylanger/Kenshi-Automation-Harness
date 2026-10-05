@@ -154,7 +154,7 @@ def write_command(d, line, deadline):
 
 
 # Commands the game answers later (seconds the client waits by default).
-LONG_COMMANDS = {'walktime': 200, 'pickup': 200, 'swimtime': 200, 'detecttime': 200, 'healtime': 200, 'hit': 60, 'acceltime': 150}
+LONG_COMMANDS = {'walktime': 200, 'pickup': 200, 'swimtime': 200, 'detecttime': 200, 'healtime': 200, 'hit': 60, 'acceltime': 150, 'rangedtest': 1900}
 
 
 def send(d, cmd, args, timeout=None):

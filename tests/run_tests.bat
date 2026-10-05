@@ -54,6 +54,11 @@ cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests
 if errorlevel 1 (type "%ROOT%obj\tests\build_hit_credit.log" & echo TEST BUILD FAILED & exit /b 1)
 "%ROOT%obj\tests\hit_credit_test.exe"
 if errorlevel 1 exit /b 1
+cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\ranged_shots_test.exe" ^
+  "%ROOT%tests\ranged_shots_test.cpp" > "%ROOT%obj\tests\build_ranged_shots.log" 2>&1
+if errorlevel 1 (type "%ROOT%obj\tests\build_ranged_shots.log" & echo TEST BUILD FAILED & exit /b 1)
+"%ROOT%obj\tests\ranged_shots_test.exe"
+if errorlevel 1 exit /b 1
 cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\ground_owner_test.exe" ^
   "%ROOT%tests\ground_owner_test.cpp" > "%ROOT%obj\tests\build_ground_owner.log" 2>&1
 if errorlevel 1 (type "%ROOT%obj\tests\build_ground_owner.log" & echo TEST BUILD FAILED & exit /b 1)
