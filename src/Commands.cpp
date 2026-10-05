@@ -800,6 +800,21 @@ MyGUI::Widget *FindConfirmButton(MyGUI::Widget *w, int depth) {
   return nullptr;
 }
 
+// Visible button-like widgets (name ends in "Button" or has a caption), for the log when CONFIRM
+// isn't found: "name 'caption'" joined by " | ", at most `max`.
+void ListConfirmCandidates(MyGUI::Widget *w, int depth, std::string &out, int &n, int max) {
+  if (!w || depth > 40 || n >= max || !w->getInheritedVisible())
+    return;
+  const std::string name = Lower(w->getName());
+  const std::string caption = Caption(w);
+  if ((name.size() >= 6 && name.compare(name.size() - 6, 6, "button") == 0) || !caption.empty()) {
+    out += (n ? " | " : "") + w->getName() + " '" + OneLine(caption) + "'";
+    ++n;
+  }
+  for (size_t i = 0; i < w->getChildCount() && n < max; ++i)
+    ListConfirmCandidates(w->getChildAt(i), depth + 1, out, n, max);
+}
+
 // Every frame (via WatchLoads) while a harness newgame is pending: report
 // what the game is doing every 10 s, and confirm the character editor.
 void WatchNewGame() {
@@ -845,10 +860,15 @@ void WatchNewGame() {
     Log("KAH: newgame character editor open");
     return;
   }
+  // PG 132/133/240 (pg-58): the editor reported open 2 s before its widgets existed; 3 tries 2 s apart
+  // all missed ConfirmButton, which was there (and worked with `click`) a few seconds later. Keep trying
+  // every 2 s for 2 minutes, logging the visible buttons now and then
+  const int kConfirmTries = 60;
   if (g_chargenStep == 0 && now - g_chargenAt >= 2000) { // let the editor finish building
-    if (g_chargenTries >= 3) {
-      if (g_chargenTries == 3) {
-        Log("KAH: newgame could not confirm the character editor after 3 tries; ui/click it");
+    if (g_chargenTries >= kConfirmTries) {
+      if (g_chargenTries == kConfirmTries) {
+        Log("KAH: newgame could not confirm the character editor after " + Int(kConfirmTries) +
+            " tries; ui/click it");
         ++g_chargenTries;
       }
       return;
@@ -862,7 +882,15 @@ void WatchNewGame() {
         b = FindConfirmButton(roots.current(), 0);
     }
     if (!b) {
-      Log("KAH: newgame no CONFIRM button visible (try " + Int(g_chargenTries) + ")");
+      std::string seen;
+      if (mg && (g_chargenTries == 1 || g_chargenTries % 10 == 0 || g_chargenTries == kConfirmTries)) {
+        int n = 0;
+        MyGUI::EnumeratorWidgetPtr all = mg->getEnumerator();
+        while (all.next() && n < 25)
+          ListConfirmCandidates(all.current(), 0, seen, n, 25);
+        seen = " visible buttons: " + (seen.empty() ? std::string("none") : seen);
+      }
+      Log("KAH: newgame no CONFIRM button visible (try " + Int(g_chargenTries) + ")" + seen);
       g_chargenAt = now;
       return;
     }
