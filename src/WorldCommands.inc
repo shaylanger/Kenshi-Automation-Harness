@@ -30,6 +30,11 @@ std::string TaskName(int t) {
   return t >= 0 && t < kTaskCount ? std::string(kTaskNames[t]) : "task " + Int(t);
 }
 
+// Orders (distance, text) rows nearest first (`buildings`).
+bool LessFirst(const std::pair<float, std::string> &a, const std::pair<float, std::string> &b) {
+  return a.first < b.first;
+}
+
 // Nearest building whose name contains `name` (an exact name wins) within
 // `radius` of `at`; with `cls` the building must also be that class.
 template <class T>
@@ -1530,9 +1535,9 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
     }
     lektor<RootObject *> nearby;
     world->getObjectsWithinSphere(nearby, at, radius, BUILDING, 1024, nullptr);
-    int n = 0;
-    out = "";
-    for (uint32_t i = 0; i < nearby.size() && n < 60; ++i) {
+    // Nearest first (PG 250: a scenario takes the first entry's pos= to go to a town's nearest building).
+    std::vector<std::pair<float, std::string> > rows;
+    for (uint32_t i = 0; i < nearby.size(); ++i) {
       Building *b = dynamic_cast<Building *>(nearby.stuff[i]);
       if (!Valid(b))
         continue;
@@ -1555,11 +1560,17 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
       } catch (...) {
       }
       const Ogre::Vector3 bp = b->getPosition();
-      out += " | " + bn + " dist=" + Num(bp.distance(at)) + " pos=" + Num(bp.x) + "," +
-             Num(bp.y) + "," + Num(bp.z) + " [" +
-             (Valid(bf) ? bf->getName() : std::string("-")) + "]" + (Valid(binv) ? " inv" : "");
-      ++n;
+      const float bd = bp.distance(at);
+      rows.push_back(std::make_pair(bd, " | " + bn + " dist=" + Num(bd) + " pos=" + Num(bp.x) + "," +
+                                            Num(bp.y) + "," + Num(bp.z) + " [" +
+                                            (Valid(bf) ? bf->getName() : std::string("-")) + "]" +
+                                            (Valid(binv) ? " inv" : "")));
     }
+    std::stable_sort(rows.begin(), rows.end(), LessFirst);
+    int n = 0;
+    out = "";
+    for (size_t i = 0; i < rows.size() && n < 60; ++i, ++n)
+      out += rows[i].second;
     ok = true;
     out = Int(n) + " buildings within " + Num(radius) + ":" + out;
     return true;
