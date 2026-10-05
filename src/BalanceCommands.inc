@@ -636,9 +636,9 @@ bool RunBalanceWorldCommand(GameWorld *world, const std::vector<std::string> &f,
   // farm: crop state of a farm, and a way to make it ripe again (m44-5090 gate-90-farming: after the field was
   // harvested the crop replanted at grown=0, the farm went IMPOSSIBLE and the farmer made no operate calls for
   // the next point). `grown` sets FarmBuilding::grown, `skip` runs the game's own FarmBuilding::timeSkip.
-  if (cmd == "farm") { // farm <building> [grown <0..1>] [skip <hours>] [radius <m>]
+  if (cmd == "farm") { // farm <building> [grown <0..1>] [skip <hours>] [empty] [radius <m>]
     if (f.size() < 3) {
-      out = "usage: farm <building> [grown <0..1>] [skip <hours>] [radius <m>]";
+      out = "usage: farm <building> [grown <0..1>] [skip <hours>] [empty] [radius <m>]";
       return true;
     }
     float radius = 0, dist = 0;
@@ -670,6 +670,39 @@ bool RunBalanceWorldCommand(GameWorld *world, const std::vector<std::string> &f,
       }
       note += " grown_was=" + Num(farm->grown);
       farm->grown = v;
+    }
+    // empty: the output store holds 20 Wheatstraw; full, the farm stops (state FULL) in the middle of a window
+    // (m44-5090 gate g3/g4 started at 18 and 20 and read 4.7 and 0)
+    bool empty = false;
+    for (size_t i = 3; i < f.size(); ++i)
+      if (Lower(f[i]) == "empty")
+        empty = true;
+    if (empty) {
+      Inventory *inv = nullptr;
+      try {
+        inv = b->getInventory();
+      } catch (...) {
+      }
+      int removed = 0;
+      if (Valid(inv)) {
+        std::vector<Item *> outItems;
+        lektor<InventorySection *> &sections = inv->getAllSections();
+        for (uint32_t si = 0; si < sections.size(); ++si) {
+          InventorySection *section = sections.stuff[si];
+          if (!Valid(section) || Lower(section->name) != "out")
+            continue;
+          const Ogre::vector<InventorySection::SectionItem>::type &items = section->getItems();
+          for (size_t k = 0; k < items.size(); ++k)
+            if (Valid(items[k].item))
+              outItems.push_back(items[k].item);
+        }
+        for (size_t k = 0; k < outItems.size(); ++k) {
+          const int qty = outItems[k]->quantity;
+          if (inv->removeItemAutoDestroy(outItems[k], qty))
+            removed += qty;
+        }
+      }
+      note += " emptied=" + Int(removed);
     }
     ok = true;
     out = BuildingInfo(b, origin) + note;
