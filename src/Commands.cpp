@@ -1179,7 +1179,11 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     }
     // The game offers Import only from New Game; importing into a world
     // loaded from a save crashed the game ~2 s later in town code (KAH 23,
-    // kenshi_x64.exe+0x94d6db reading +0x270 of a null pointer).
+    // kenshi_x64.exe+0x94d6db reading +0x270 of a null pointer). PG 132 (m36):
+    // the same crash also follows an import into a fresh new game (0.6 s after
+    // the import signal, inside GameWorld::mainLoop_GPUSensitiveStuff ->
+    // ResourceLoader / Building / TownBase code, no plugin frame), so this
+    // guard is not enough on its own: the cause is still open.
     if (!g_freshNewGame)
       return "refused: import works only right after a new game (newgame <start>, wait-world, then "
              "import); the current world came from a save (" +
