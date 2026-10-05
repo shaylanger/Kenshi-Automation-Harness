@@ -58,6 +58,9 @@
 #include <kenshi/RaceData.h>
 #include <kenshi/NavMesh.h> // walktime: is the target on the navmesh
 #include <kenshi/SaveManager.h>
+#include <kenshi/gui/LoadSaveWindow.h> // ImportGameMenu (import ... menu)
+#include <mygui/MyGUI_Button.h>
+#include <mygui/MyGUI_MultiListBox.h>
 #include <kenshi/SaveInfo.h>
 #include <kenshi/ShopTrader.h>
 #include <kenshi/ShopTraderInventory.h>
@@ -742,9 +745,15 @@ void SampleProduction(GameWorld *world) {
   }
 }
 
+void ImportMenuTick();
+
 void KeepWalkTimers() {
   try {
     WalkTick(ou);
+  } catch (...) {
+  }
+  try {
+    ImportMenuTick();
   } catch (...) {
   }
   try {
@@ -952,6 +961,147 @@ void WatchLoads() {
   } catch (...) {
   }
   WatchNewGame();
+}
+
+// import <save> [flags] menu (PG 132): the game's own Import dialog instead of a direct
+// SaveManager::import. ImportGameMenu::importPress (1.0.65 Steam, disassembled) only reads the
+// list's selected row, refuses names starting "ERROR", ORs IMPORT_SQUAD into getOptions() (the
+// option checkbox at index k adds bit k) and calls SaveManager::import(games[row], flags); so
+// this opens the dialog (SaveManager::showImport), sets the checkboxes and the row a frame
+// later, then clicks its Import button like the player. Each step is logged.
+struct ImportMenuJob {
+  std::string id, save, method, options;
+  int flags;  // -1 = keep the dialog's own checkboxes
+  int step;   // 0 idle, 1 dialog opening, 2 row selected, 3 clicked
+  DWORD at;
+};
+ImportMenuJob g_importMenu = {"", "", "", "", -1, 0, 0};
+
+MyGUI::Widget *FindImportButton(MyGUI::Widget *w, ImportGameMenu *menu, bool exact, int depth) {
+  if (!w || depth > 40 || !w->getInheritedVisible())
+    return nullptr;
+  bool isOption = false;
+  for (uint32_t k = 0; k < menu->options.size(); ++k)
+    if ((MyGUI::Widget *)menu->options.stuff[k] == w)
+      isOption = true;
+  if (!isOption && w->castType<MyGUI::Button>(false)) {
+    const std::string c = Lower(Caption(w));
+    if (exact ? c == "import" : c.find("import") != std::string::npos)
+      return w;
+  }
+  for (size_t i = 0; i < w->getChildCount(); ++i) {
+    MyGUI::Widget *found = FindImportButton(w->getChildAt(i), menu, exact, depth + 1);
+    if (found)
+      return found;
+  }
+  return nullptr;
+}
+
+void FinishImportMenu(bool ok, const std::string &detail) {
+  Log(std::string("KAH: import menu ") + (ok ? "done: " : "failed: ") + detail);
+  WriteOutbox(g_importMenu.id, ok, detail);
+  g_importMenu.step = 0;
+}
+
+void ImportMenuTick() {
+  if (g_importMenu.step == 0)
+    return;
+  const DWORD now = GetTickCount();
+  SaveManager *sm = SaveManager::getSingleton();
+  if (!Valid(sm)) {
+    FinishImportMenu(false, "no SaveManager");
+    return;
+  }
+  ImportGameMenu *menu = sm->importMenu;
+  if (g_importMenu.step == 1) {
+    if (now - g_importMenu.at < 700)
+      return;
+    if (!menu || !menu->list) {
+      FinishImportMenu(false, "the Import dialog did not open (SaveManager::importMenu is null)");
+      return;
+    }
+    int row = -1;
+    for (uint32_t i = 0; i < menu->games.size() && row < 0; ++i)
+      if (menu->games.stuff[i].name == g_importMenu.save)
+        row = (int)i;
+    for (uint32_t i = 0; i < menu->games.size() && row < 0; ++i)
+      if (Lower(menu->games.stuff[i].name) == Lower(g_importMenu.save))
+        row = (int)i;
+    const size_t rows = menu->list->getItemCount();
+    if (row < 0 || (size_t)row >= rows) {
+      FinishImportMenu(false, "save " + g_importMenu.save + " is not in the Import dialog (" +
+                                  Int(menu->games.size()) + " saves, " + Int((long long)rows) + " rows)");
+      return;
+    }
+    std::string opts;
+    int covered = 0;
+    for (uint32_t k = 0; k < menu->options.size(); ++k) {
+      MyGUI::Button *b = menu->options.stuff[k];
+      if (!b)
+        continue;
+      covered |= (int)k;
+      if (g_importMenu.flags >= 0)
+        b->setStateSelected((g_importMenu.flags & (int)k) != 0);
+      opts += (opts.empty() ? "" : ",") + ImportFlagNames((int)k) + "=" + (b->getStateSelected() ? "1" : "0");
+    }
+    g_importMenu.options = opts.empty() ? std::string("none") : opts;
+    std::string missing;
+    if (g_importMenu.flags >= 0 && (g_importMenu.flags & ~covered & ~0x2))
+      missing = " no_checkbox_for=" + ImportFlagNames(g_importMenu.flags & ~covered & ~0x2);
+    menu->list->setIndexSelected((size_t)row);
+    Log("KAH: import menu step 2: row " + Int(row) + "/" + Int((long long)rows) + " = " +
+        menu->games.stuff[row].name + " options " + g_importMenu.options + missing);
+    g_importMenu.options += missing;
+    g_importMenu.step = 2;
+    g_importMenu.at = now;
+    return;
+  }
+  if (g_importMenu.step == 2) {
+    if (now - g_importMenu.at < 500)
+      return;
+    if (!menu || !menu->list) {
+      FinishImportMenu(false, "the Import dialog closed before the click");
+      return;
+    }
+    const size_t sel = menu->list->getIndexSelected();
+    if (sel >= menu->games.size() || Lower(menu->games.stuff[sel].name) != Lower(g_importMenu.save)) {
+      FinishImportMenu(false, "the dialog's selected row is not " + g_importMenu.save + " (row " +
+                                  Int((long long)sel) + ")");
+      return;
+    }
+    MyGUI::Widget *b = FindImportButton(menu->mMainWidget, menu, true, 0);
+    if (!b)
+      b = FindImportButton(menu->mMainWidget, menu, false, 0);
+    if (b) {
+      g_importMenu.method = "button " + b->getName() + " '" + OneLine(Caption(b)) + "'";
+      Log("KAH: import menu step 3: click " + g_importMenu.method);
+      b->eventMouseButtonClick(b);
+    } else {
+      g_importMenu.method = "importPress (no Import button found)";
+      Log("KAH: import menu step 3: no Import button visible, calling ImportGameMenu::importPress");
+      menu->importPress(nullptr);
+    }
+    g_importMenu.step = 3;
+    g_importMenu.at = now;
+    return;
+  }
+  if (g_importMenu.step == 3) {
+    const int signal = sm->signal;
+    if (signal == SaveManager::IMPORTGAME || g_lastSignal == SaveManager::IMPORTGAME) {
+      g_freshNewGame = false;
+      g_loadedSave = "import:" + g_importMenu.save;
+      g_loadPending = true;
+      g_loadSawEmpty = false;
+      g_loadStarted = now;
+      g_loadOldLeader = FirstPlayerCharacter(ou);
+      FinishImportMenu(true, "importing " + g_importMenu.save + " via the game's Import dialog (" +
+                                 g_importMenu.method + "; options " + g_importMenu.options +
+                                 "; the game always adds squad); wait-world, then status");
+    } else if (now - g_importMenu.at > 3000) {
+      FinishImportMenu(false, "the dialog's Import did nothing within 3 s (signal=" + Int(signal) + ", " +
+                                  g_importMenu.method + ")");
+    }
+  }
 }
 
 bool IsBuiltinCommand(const std::string &name) {
@@ -1162,17 +1312,27 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
            "wait-world, then status";
   }
 
-  if (cmd == "import") { // import <save> [squad,buildings,research,npcs,relations,reset]: the game's Import (KAH 21)
+  if (cmd == "import") { // import <save> [squad,buildings,research,npcs,relations,reset] [menu]: the game's Import (KAH 21)
     if (f.size() < 3 || f[2].empty())
-      return "usage: import <save> [flags: squad,buildings,research,npcs,relations,reset | all]";
+      return "usage: import <save> [flags: squad,buildings,research,npcs,relations,reset | all] [menu]";
     SaveManager *sm = SaveManager::getSingleton();
     if (!Valid(sm))
       return "no SaveManager";
     int flags = SaveManager::IMPORT_SQUAD | SaveManager::IMPORT_BUILDINGS | SaveManager::IMPORT_RESEARCH |
                 SaveManager::IMPORT_NPC_STATES | SaveManager::IMPORT_RELATIONS;
-    if (f.size() >= 4) {
+    bool viaMenu = false;
+    std::string flagText;
+    for (size_t k = 3; k < f.size(); ++k) {
+      if (Lower(f[k]) == "menu")
+        viaMenu = true;
+      else if (flagText.empty())
+        flagText = f[k];
+      else
+        return "usage: import <save> [flags: squad,buildings,research,npcs,relations,reset | all] [menu]";
+    }
+    if (!flagText.empty()) {
       std::string bad;
-      const int parsed = ParseImportFlags(f[3], bad);
+      const int parsed = ParseImportFlags(flagText, bad);
       if (parsed < 0)
         return "unknown import flag: " + bad + " (squad,buildings,research,npcs,relations,reset,all)";
       flags = parsed;
@@ -1201,6 +1361,24 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
         at = (int)i;
     if (at < 0)
       return "no save named: " + f[2] + " (" + Int(saves.size()) + " saves in " + sm->getSavePath() + ")";
+    if (viaMenu) {
+      if (g_importMenu.step != 0)
+        return "refused: an import through the menu is already running";
+      g_importMenu.id = f[0];
+      g_importMenu.save = saves.stuff[at].name;
+      g_importMenu.flags = flagText.empty() ? -1 : flags;
+      g_importMenu.method.clear();
+      g_importMenu.options.clear();
+      Log("KAH: import menu step 1: showImport save=" + g_importMenu.save + " flags=" +
+          (flagText.empty() ? std::string("dialog defaults") : ImportFlagNames(flags)) + " phase=" + Phase(world) +
+          " paused=" + (world->isPaused() ? "1" : "0"));
+      sm->showImport();
+      g_importMenu.step = 1;
+      g_importMenu.at = GetTickCount();
+      pending = true; // answered by ImportMenuTick after the click
+      ok = true;
+      return "";
+    }
     Log("KAH: import save=" + saves.stuff[at].name + " flags=" + ImportFlagNames(flags) + " phase=" +
         Phase(world));
     sm->import(saves.stuff[at], flags);

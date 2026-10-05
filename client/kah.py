@@ -13,7 +13,7 @@
 Built-in commands:
   status                                  phase (menu|loading|chargen|world), save, speed, squad
   load <save> | save <name>
-  newgame <start name|sid> [edit] | import <save> [squad,buildings,research,npcs,relations,reset|all]
+  newgame <start name|sid> [edit] | import <save> [squad,buildings,research,npcs,relations,reset|all] [menu]
   speed <0|0.5..50>                       0 pauses
   chars [radius] | traders [radius]       characters near the player | real traders
   benches [radius] [crafts]               crafting benches: queue, needs, craft menu, contents
@@ -48,7 +48,7 @@ Built-in commands:
   protect [<npc> on|off]                  test cheat: kept at full health, a KO cleared at once
   sever <npc> left_arm|right_arm|left_leg|right_leg [noitem] [ko]   real amputation (limb state stump)
   unload <npc> | reload <name>            stream his squad out / back in (game streaming)
-  runspeed <npc> | walktime <npc> <dist> [walk|run]   movement speeds | timed walk (seconds=, speed=)
+  runspeed <npc> | walktime <npc> <dist> [+x|-x|+z|-z] [walk|run]   movement speeds | timed walk (seconds=, speed=)
   hit <attacker> <victim> <part> <damage>  cut wound credited to <attacker>, no fight (ko=yes|no)
   balance (KAH 24): chance <npc> ko|kidnap|lockpick|steal <target> [item <name>]   the game's own chance
   detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>]   who notices him sneaking | time until seen
