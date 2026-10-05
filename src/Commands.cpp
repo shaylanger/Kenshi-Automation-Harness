@@ -11,6 +11,7 @@
 #include "ProductionCounter.h"
 #include "ImportFlags.h"
 #include "WalkArrival.h"
+#include "AccelProfile.h"
 #include "GroundOwner.h"
 #include "HitCredit.h"
 #include "ProtectRules.h"
@@ -660,7 +661,7 @@ const char *const kBuiltins[] = {
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
     "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "hit", "newgame", "import", "stealth", "crime",
-    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "construct", "construction", "towns", "turret"};
+    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "construct", "construction", "towns", "turret"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | "
@@ -682,7 +683,7 @@ const char *const kHelp =
     "chance <npc> ko|kidnap|lockpick|steal <target> [item <name>] | detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>] | senses <observer> <who> | face <npc> <who> | pin <npc> [at <npc|x y z>] [dist m] [face <who>] | pin <npc> off | "
     "healtime <medic> <patient> [wound <cut>] [timeout <s>] | water <npc> | findwater <npc> [radius <m>] [depth <m>] | "
     "swimtime <npc> <dist> [+x|-x|+z|-z] [walk|run] | construct <npc> <building> [dist <m>] | construction <building> [reset] [fill] | towns [filter,...] [max <n>] | turret <building> [radius <m>] [target <npc>] [front <m>] [aim <npc>|off] | "
-    "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [+x|-x|+z|-z] [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
+    "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [+x|-x|+z|-z] [walk|run] | acceltime <npc> <dist> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | "
@@ -758,6 +759,10 @@ void KeepWalkTimers() {
   }
   try {
     BalanceTick(ou);
+  } catch (...) {
+  }
+  try {
+    AccelTick(ou);
   } catch (...) {
   }
   try {
@@ -2118,6 +2123,79 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
         (mode.empty() ? "as is" : mode) + " paused=" + (world->isPaused() ? "1" : "0") + " start=" +
         Num(w.start.x) + "," + Num(w.start.y) + "," + Num(w.start.z) + " target_on_navmesh=" + Int(w.targetOnNav));
     pending = true; // answered by WalkTick when he arrives
+    ok = true;
+    return "";
+  }
+
+  if (cmd == "acceltime") { // acceltime <npc> <dist> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt]: PG 254 / Shay D4
+    const float dist = f.size() >= 4 ? (float)atof(f[3].c_str()) : 0.0f;
+    if (!(dist >= 10.0f && dist <= 500.0f))
+      return "usage: acceltime <npc> <dist 10..500> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt] (he runs toward a "
+             "point dist along the axis; at stopat (default dist/2) he is stopped; reply: start_delay t50 t90 "
+             "cruise_speed stop_dist stop_seconds)";
+    std::string mode, axis = "+x", stopMode = "order";
+    Ogre::Vector3 dir(1, 0, 0);
+    float stopAt = dist * 0.5f;
+    for (size_t k = 4; k < f.size(); ++k) {
+      const std::string a = Lower(f[k]);
+      if (a == "walk" || a == "run")
+        mode = a;
+      else if (a == "halt" || a == "order")
+        stopMode = a;
+      else if (a == "stopat" && k + 1 < f.size())
+        stopAt = (float)atof(f[++k].c_str());
+      else if (a == "+x" || a == "x")
+        axis = "+x", dir = Ogre::Vector3(1, 0, 0);
+      else if (a == "-x")
+        axis = "-x", dir = Ogre::Vector3(-1, 0, 0);
+      else if (a == "+z" || a == "z")
+        axis = "+z", dir = Ogre::Vector3(0, 0, 1);
+      else if (a == "-z")
+        axis = "-z", dir = Ogre::Vector3(0, 0, -1);
+      else
+        return "acceltime: unknown option " + f[k] + " (+x|-x|+z|-z, walk|run, stopat <d>, halt|order)";
+    }
+    if (!(stopAt >= 5.0f && stopAt < dist))
+      return "acceltime: stopat must be 5 .. below dist";
+    if (c->isUnconcious() || c->isDead())
+      return c->getName() + " can't run (KO or dead)";
+    OrdersReceiver *orders = c->getOrdersReciever();
+    if (!Valid(orders))
+      return c->getName() + " takes no orders";
+    CharMovement *m = c->movement;
+    if (Valid(m) && (mode == "walk" || mode == "run"))
+      m->setDesiredSpeedOrders(mode == "walk" ? WALK : RUN);
+    AccelTimer a;
+    a.id = f[0];
+    a.who = c->getHandle();
+    a.name = c->getName();
+    a.start = c->getPosition();
+    a.dir = dir;
+    a.target = a.start + dir * dist;
+    a.dist = dist;
+    a.stopAt = stopAt;
+    a.axis = axis;
+    a.stopMode = stopMode;
+    a.sim = 0;
+    QueryPerformanceCounter(&a.last);
+    a.startTick = GetTickCount();
+    a.stopSim = a.peakSim = 0;
+    a.peak = 0;
+    a.stopIndex = 0;
+    a.stopGiven = false;
+    a.topSpeed = 0;
+    orders->clearOrders();
+    orders->addOrder(MOVE_CUS_ORDERED, hand(), a.target, true, false);
+    for (size_t i = 0; i < g_accels.size(); ++i)
+      if (SameHandle(g_accels[i].who, a.who)) {
+        WriteOutbox(g_accels[i].id, false, "replaced by a new acceltime for " + a.name);
+        g_accels.erase(g_accels.begin() + i);
+        break;
+      }
+    g_accels.push_back(a);
+    Log("KAH: acceltime " + a.name + " dist=" + Num(dist) + " stopat=" + Num(stopAt) + " axis=" + axis + " mode=" +
+        (mode.empty() ? "as is" : mode) + " stop=" + stopMode + " paused=" + (world->isPaused() ? "1" : "0"));
+    pending = true; // answered by AccelTick after the stop
     ok = true;
     return "";
   }

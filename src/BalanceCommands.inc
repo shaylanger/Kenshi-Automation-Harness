@@ -62,6 +62,121 @@ struct SimClock {
   float Real() const { return (GetTickCount() - startTick) / 1000.0f; }
 };
 
+
+// --- acceltime (PG 254, Shay D4): run along an axis, stop on the way, and time the speed-up and the slide.
+// Every frame: (sim seconds, distance covered along the axis). Analysis in AccelProfile.h.
+struct AccelTimer {
+  std::string id;
+  hand who;
+  std::string name;
+  Ogre::Vector3 start, dir, target;
+  float dist, stopAt;
+  std::string axis, stopMode; // stopMode: order (MOVE_CUS_ORDERED to where he is) | halt (CharMovement::halt)
+  double sim;                 // real frame time x game speed while unpaused (QueryPerformanceCounter)
+  LARGE_INTEGER last;
+  DWORD startTick;
+  double stopSim, peakSim;    // sim seconds at the stop order / when the farthest point last grew
+  float peak;
+  size_t stopIndex;           // first sample at or after the stop (samples.size() until then)
+  bool stopGiven;
+  float topSpeed;             // highest CharMovement::currentSpeed (for comparison with runspeed)
+  std::vector<AccelSample> samples;
+};
+std::vector<AccelTimer> g_accels;
+
+std::string AccelReply(const AccelTimer &a) {
+  const AccelResult r = AnalyzeAccel(a.samples, a.stopGiven ? a.stopIndex : a.samples.size(), 1.0);
+  std::string out = a.name + " accel axis=" + a.axis + " start_delay=" + Fine((float)r.startT) +
+                    " cruise_speed=" + Num(r.cruise) + " t50=" + (r.reached50 ? Fine((float)r.t50) : std::string("none")) +
+                    " t90=" + (r.reached90 ? Fine((float)r.t90) : std::string("none")) + " d90=" + Num(r.d90) +
+                    " stop=" + a.stopMode + " stop_at=" + Num(a.stopGiven ? a.samples[a.stopIndex].d : 0.0f) +
+                    " stop_dist=" + Fine(r.stopDist) + " stop_seconds=" + Fine((float)r.stopSeconds) +
+                    " top_speed=" + Num(a.topSpeed) + " samples=" + Int((int)a.samples.size()) +
+                    " seconds=" + Num((float)a.sim);
+  return out;
+}
+
+void AccelTick(GameWorld *world) {
+  if (g_accels.empty())
+    return;
+  LARGE_INTEGER now, freq;
+  QueryPerformanceCounter(&now);
+  QueryPerformanceFrequency(&freq);
+  for (size_t i = 0; i < g_accels.size();) {
+    AccelTimer &a = g_accels[i];
+    const double dt = (double)(now.QuadPart - a.last.QuadPart) / (double)freq.QuadPart;
+    a.last = now;
+    bool paused = true;
+    float mult = 0;
+    try {
+      paused = world->isPaused();
+      mult = world->getFrameSpeedMultiplier();
+    } catch (...) {
+    }
+    Character *c = nullptr;
+    try {
+      c = a.who.getCharacter();
+    } catch (...) {
+      c = nullptr;
+    }
+    std::string done;
+    bool okDone = false;
+    if (!Valid(c)) {
+      done = a.name + " is gone (unloaded or a load)";
+    } else if (!paused && dt > 0) {
+      a.sim += dt * mult;
+      const Ogre::Vector3 p = c->getPosition();
+      Ogre::Vector3 flat = p - a.start;
+      flat.y = 0;
+      AccelSample s;
+      s.t = a.sim;
+      s.d = flat.dotProduct(a.dir);
+      a.samples.push_back(s);
+      CharMovement *m = c->movement;
+      if (Valid(m) && m->currentSpeed > a.topSpeed)
+        a.topSpeed = m->currentSpeed;
+      if (!a.stopGiven && s.d >= a.stopAt) {
+        a.stopGiven = true;
+        a.stopIndex = a.samples.size() - 1;
+        a.stopSim = a.peakSim = a.sim;
+        a.peak = s.d;
+        if (a.stopMode == "halt") {
+          if (Valid(m))
+            m->halt();
+        } else {
+          OrdersReceiver *orders = c->getOrdersReciever();
+          if (Valid(orders)) {
+            orders->clearOrders();
+            orders->addOrder(MOVE_CUS_ORDERED, hand(), p, true, false);
+          }
+        }
+        Log("KAH: acceltime " + a.name + " stop (" + a.stopMode + ") at " + Num(s.d) + " after " +
+            Num((float)a.sim) + " s");
+      } else if (a.stopGiven && s.d > a.peak + kAccelPeakEps) {
+        a.peak = s.d;
+        a.peakSim = a.sim;
+      }
+      // done: 1.5 s after the farthest point stopped growing (at least 2 s after the stop)
+      if (a.stopGiven && a.sim - a.stopSim >= 2.0 && a.sim - a.peakSim >= 1.5) {
+        okDone = true;
+        done = AccelReply(a);
+      } else if (!a.stopGiven && a.sim >= 20.0 && (a.samples.empty() || a.samples.back().d < kAccelMoveEps)) {
+        done = a.name + " never started: stood still for 20 s after the order (axis=" + a.axis + ")";
+      }
+    }
+    if (done.empty() && GetTickCount() - a.startTick > 120000)
+      done = a.name + " acceltime did not finish within 120 s (covered " +
+             Num(a.samples.empty() ? 0.0f : a.samples.back().d) + " of stop_at " + Num(a.stopAt) +
+             ", stop_given=" + (a.stopGiven ? "1" : "0") + "): blocked path, paused game or KO?";
+    if (!done.empty()) {
+      Log("KAH: acceltime " + done);
+      WriteOutbox(a.id, okDone, done);
+      g_accels.erase(g_accels.begin() + i);
+    } else {
+      ++i;
+    }
+  }
+}
 const char *const kSeeStates[] = {"no", "yes", "maybe"};
 
 std::string SeeState(int key) { return key >= 0 && key < 3 ? kSeeStates[key] : "?"; }
