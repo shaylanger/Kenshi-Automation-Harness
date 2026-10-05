@@ -38,6 +38,46 @@ void RecordGunShotImpl(GunClass *gun, Character *me, RootObject *target, int sta
   }
 }
 
+// "turret <b> aim <npc>": the operator's designated target. A passive dummy is
+// never picked by the turret's own targeting (PG 192 probes: ranged=WAITING,
+// ranged_target=none; an `attack` order makes the operator leave the turret
+// and melee it). RangedCombatClass::updateT is hooked (Plugin.cpp): for that
+// turret's operator the target goes in as designatedTarget and
+// suggestedTarget, the way a player's target reaches it; if the operator
+// still has another/no target after 3 s, setTarget(target) is called before
+// each update (aim_mode=forced). Aiming, the shot check, accuracy, reload and
+// damage stay the game's own.
+struct TurretAim {
+  bool on;
+  hand turret;
+  hand target;
+  std::string targetName;
+  DWORD since;
+  bool forced;
+  int forcedSets;
+  int updates;
+  TurretAim() : on(false), since(0), forced(false), forcedSets(0), updates(0) {}
+};
+TurretAim g_turretAim;
+
+bool TurretAimForImpl(RangedCombatClass *rc, hand &out) {
+  if (!g_turretAim.on || !rc || !SameHandle(rc->turret, g_turretAim.turret))
+    return false;
+  Character *t = g_turretAim.target.getCharacter();
+  if (!Valid(t))
+    return false;
+  ++g_turretAim.updates;
+  Character *cur = rc->currentTarget.getCharacter();
+  if (cur != t && !g_turretAim.forced && GetTickCount() - g_turretAim.since > 3000)
+    g_turretAim.forced = true;
+  if (g_turretAim.forced && cur != t) {
+    rc->setTarget(t);
+    ++g_turretAim.forcedSets;
+  }
+  out = g_turretAim.target;
+  return true;
+}
+
 const char *RangedStateName(int s) {
   static const char *const names[] = {"SHOOTING", "MOVING", "RELOADING", "WAITING", "THINKING"};
   return s >= 0 && s < 5 ? names[s] : "?";
@@ -57,9 +97,9 @@ bool RunTurretCommand(GameWorld *world, const std::vector<std::string> &f, const
                       bool &ok, std::string &out) {
   if (Lower(f[1]) != "turret")
     return false;
-  // turret <building> [radius <m>] [target <npc>] [front <m>]
+  // turret <building> [radius <m>] [target <npc>] [front <m>] [aim <npc>|off]
   if (f.size() < 3) {
-    out = "usage: turret <building> [radius <m>] [target <npc>] [front <m>]";
+    out = "usage: turret <building> [radius <m>] [target <npc>] [front <m>] [aim <npc>|off]";
     return true;
   }
   const float radius = (float)atof(Option(f, 3, "radius", "1500").c_str());
@@ -113,6 +153,26 @@ bool RunTurretCommand(GameWorld *world, const std::vector<std::string> &f, const
          " last_shot_by=" + (s.shots ? s.lastShooter : "none") + " last_shot_stat=" + Int(s.lastStat) +
          " last_shot_skill01=" + Fine(s.lastSkill01) + " all_turret_shots=" + Int(g_turretShotsTotal);
 
+  const std::string aimArg = Option(f, 3, "aim", "");
+  if (Lower(aimArg) == "off") {
+    g_turretAim = TurretAim();
+    out += " aim=off";
+  } else if (!aimArg.empty()) {
+    Character *x = FindCharacter(world, aimArg);
+    if (!Valid(x)) {
+      out += " aim=" + NotFound(aimArg);
+      return true;
+    }
+    g_turretAim = TurretAim();
+    g_turretAim.on = true;
+    g_turretAim.turret = t->getHandle();
+    g_turretAim.target = x->getHandle();
+    g_turretAim.targetName = CharLabel(x);
+    g_turretAim.since = GetTickCount();
+  }
+  if (g_turretAim.on && SameHandle(g_turretAim.turret, t->getHandle()))
+    out += " aim=" + g_turretAim.targetName + " aim_mode=" + (g_turretAim.forced ? "forced" : "designated") +
+           " aim_updates=" + Int(g_turretAim.updates) + " forced_sets=" + Int(g_turretAim.forcedSets);
   const std::string frontArg = Option(f, 3, "front", "");
   if (!frontArg.empty()) {
     const float m = (float)atof(frontArg.c_str());

@@ -51,6 +51,10 @@ void KeepWalkTimers();
 class GunClass;
 class RootObject;
 void RecordGunShot(GunClass *gun, Character *me, RootObject *target, int stat);
+// "turret <b> aim <npc>": the designated target for that turret's operator.
+class RangedCombatClass;
+class hand;
+bool TurretAimFor(RangedCombatClass *rc, hand &out);
 
 bool IsBuiltinCommand(const std::string &name);
 
