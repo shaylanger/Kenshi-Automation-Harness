@@ -1182,12 +1182,33 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
         note += " WARNING still " + Num(offBy) + " off the target height " + Num(targetY);
     }
     g_built.push_back(b->getHandle());
+    // m22 batch Z (PG 250): a chest built with `faction Drifters` was skipped by pg_lootscan as player-owned:
+    // the reply named the requested faction, not the building's. Read the building's own faction back, set it
+    // when the factory left another one, and report (and require) what the building really has.
+    Faction *got = nullptr;
+    try {
+      got = b->getFaction();
+      if (got != owner) {
+        Log("KAH: build " + b->getName() + " came out as " + (Valid(got) ? got->getName() : std::string("none")) +
+            ", setting faction " + owner->getName());
+        b->setFaction(owner, nullptr);
+        got = b->getFaction();
+        note += " (faction set after creation)";
+      }
+    } catch (...) {
+      got = nullptr;
+    }
+    if (got != owner) {
+      out = "built " + b->getName() + " serial=" + Int(b->getHandle().serial) + " but its faction is " +
+            (Valid(got) ? got->getName() : std::string("none")) + ", not " + owner->getName();
+      return true;
+    }
     const Ogre::Vector3 bp = b->getPosition();
     ok = true;
     Log("KAH: build " + b->getName() + " serial=" + Int(b->getHandle().serial) + " y=" + Num(bp.y) +
         " target=" + Num(targetY) + " terrain=" + (haveTerrain ? Num(terrain) : std::string("?")));
     out = "built " + b->getName() + " serial=" + Int(b->getHandle().serial) + " pos=" + Num(bp.x) +
-          "," + Num(bp.y) + "," + Num(bp.z) + " [" + owner->getName() + "] dist=" +
+          "," + Num(bp.y) + "," + Num(bp.z) + " [" + got->getName() + "] dist=" +
           Num(bp.distance(origin)) + note;
     return true;
   }
