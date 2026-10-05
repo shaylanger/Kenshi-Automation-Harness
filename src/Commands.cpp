@@ -706,12 +706,11 @@ void HoldSpeedTick(GameWorld *world) {
 } // namespace
 
 // GunClass::shoot hook (Plugin.cpp) -> per-turret shot counts for "turret".
-// RangedCombatClass::updateT hook (Plugin.cpp): "turret <b> aim <npc>".
-bool TurretAimFor(RangedCombatClass *rc, hand &out) {
+// "turret <b> aim <npc>": every frame (Plugin.cpp).
+void KeepTurretAim() {
   try {
-    return TurretAimForImpl(rc, out);
+    KeepTurretAimImpl();
   } catch (...) {
-    return false;
   }
 }
 

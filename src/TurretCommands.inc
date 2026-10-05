@@ -38,44 +38,46 @@ void RecordGunShotImpl(GunClass *gun, Character *me, RootObject *target, int sta
   }
 }
 
-// "turret <b> aim <npc>": the operator's designated target. A passive dummy is
-// never picked by the turret's own targeting (PG 192 probes: ranged=WAITING,
-// ranged_target=none; an `attack` order makes the operator leave the turret
-// and melee it). RangedCombatClass::updateT is hooked (Plugin.cpp): for that
-// turret's operator the target goes in as designatedTarget and
-// suggestedTarget, the way a player's target reaches it; if the operator
-// still has another/no target after 3 s, setTarget(target) is called before
-// each update (aim_mode=forced). Aiming, the shot check, accuracy, reload and
-// damage stay the game's own.
+// "turret <b> aim <npc>": the operator's target. A passive dummy is never
+// picked by the turret's own targeting (PG 192 probes: ranged=WAITING,
+// ranged_target=none), and an `attack` order makes the operator leave the
+// turret to melee it. Every frame (KeepTurretAim) each operator on that turret
+// whose ranged combat target is not the character gets
+// RangedCombatClass::setTarget(character) (forced_sets counts them); aiming,
+// the shot check, accuracy, reload and damage stay the game's own. (A hook on
+// RangedCombatClass::updateT made the game exit at the menu twice: dropped.)
 struct TurretAim {
   bool on;
   hand turret;
   hand target;
   std::string targetName;
-  DWORD since;
-  bool forced;
   int forcedSets;
   int updates;
-  TurretAim() : on(false), since(0), forced(false), forcedSets(0), updates(0) {}
+  TurretAim() : on(false), forcedSets(0), updates(0) {}
 };
-TurretAim g_turretAim;
+// heap, not a global object: no game `hand` constructor runs while the DLL loads
+TurretAim *g_turretAim = nullptr;
 
-bool TurretAimForImpl(RangedCombatClass *rc, hand &out) {
-  if (!g_turretAim.on || !rc || !SameHandle(rc->turret, g_turretAim.turret))
-    return false;
-  Character *t = g_turretAim.target.getCharacter();
-  if (!Valid(t))
-    return false;
-  ++g_turretAim.updates;
-  Character *cur = rc->currentTarget.getCharacter();
-  if (cur != t && !g_turretAim.forced && GetTickCount() - g_turretAim.since > 3000)
-    g_turretAim.forced = true;
-  if (g_turretAim.forced && cur != t) {
-    rc->setTarget(t);
-    ++g_turretAim.forcedSets;
+void KeepTurretAimImpl() {
+  if (!g_turretAim || !g_turretAim->on)
+    return;
+  TurretBuilding *tb = dynamic_cast<TurretBuilding *>(g_turretAim->turret.getBuilding());
+  Character *t = g_turretAim->target.getCharacter();
+  if (!Valid(tb) || !Valid(t))
+    return;
+  for (auto it = tb->currentOperators.begin(); it != tb->currentOperators.end(); ++it) {
+    Character *o = it->getCharacter();
+    if (!Valid(o) || !SameHandle(o->isUsingTurret, g_turretAim->turret))
+      continue;
+    RangedCombatClass *rc = o->rangedCombat;
+    if (!rc)
+      continue;
+    ++g_turretAim->updates;
+    if (rc->currentTarget.getCharacter() != t) {
+      rc->setTarget(t);
+      ++g_turretAim->forcedSets;
+    }
   }
-  out = g_turretAim.target;
-  return true;
 }
 
 const char *RangedStateName(int s) {
@@ -155,7 +157,8 @@ bool RunTurretCommand(GameWorld *world, const std::vector<std::string> &f, const
 
   const std::string aimArg = Option(f, 3, "aim", "");
   if (Lower(aimArg) == "off") {
-    g_turretAim = TurretAim();
+    delete g_turretAim;
+    g_turretAim = nullptr;
     out += " aim=off";
   } else if (!aimArg.empty()) {
     Character *x = FindCharacter(world, aimArg);
@@ -163,16 +166,16 @@ bool RunTurretCommand(GameWorld *world, const std::vector<std::string> &f, const
       out += " aim=" + NotFound(aimArg);
       return true;
     }
-    g_turretAim = TurretAim();
-    g_turretAim.on = true;
-    g_turretAim.turret = t->getHandle();
-    g_turretAim.target = x->getHandle();
-    g_turretAim.targetName = CharLabel(x);
-    g_turretAim.since = GetTickCount();
+    delete g_turretAim;
+    g_turretAim = new TurretAim();
+    g_turretAim->on = true;
+    g_turretAim->turret = t->getHandle();
+    g_turretAim->target = x->getHandle();
+    g_turretAim->targetName = CharLabel(x);
   }
-  if (g_turretAim.on && SameHandle(g_turretAim.turret, t->getHandle()))
-    out += " aim=" + g_turretAim.targetName + " aim_mode=" + (g_turretAim.forced ? "forced" : "designated") +
-           " aim_updates=" + Int(g_turretAim.updates) + " forced_sets=" + Int(g_turretAim.forcedSets);
+  if (g_turretAim && g_turretAim->on && SameHandle(g_turretAim->turret, t->getHandle()))
+    out += " aim=" + g_turretAim->targetName +
+           " aim_frames=" + Int(g_turretAim->updates) + " forced_sets=" + Int(g_turretAim->forcedSets);
   const std::string frontArg = Option(f, 3, "front", "");
   if (!frontArg.empty()) {
     const float m = (float)atof(frontArg.c_str());

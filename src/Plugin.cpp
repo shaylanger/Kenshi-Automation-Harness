@@ -16,8 +16,6 @@
 #include <core/Functions.h>
 #include <kenshi/GameWorld.h>
 #include <kenshi/GunClass.h>
-#include <kenshi/combat/RangedCombatClass.h>
-#include <kenshi/util/hand.h>
 #include <kenshi/RootObject.h>
 #include <kenshi/Globals.h> // ou
 #include <kenshi/Kenshi.h>
@@ -272,6 +270,7 @@ void FrameWork(bool fromOgre) {
   SampleProduction(ou);
   KeepSuppliedPowered();
   KeepProtected();
+  KeepTurretAim();
   KeepWalkTimers();
   if (++g_framesSinceLaunch % 600 == 0)
     Log("KAH: fps frames=" + Int(g_framesSinceLaunch) + " source=" + (fromOgre ? "ogre" : "mygui") +
@@ -416,28 +415,7 @@ void __fastcall Hook_GunShoot(GunClass *gun, Character *me, RootObject *target, 
   g_gunShootOrig(gun, me, target, stat, aimpos);
 }
 
-// "turret <b> aim <npc>" (KAH 25): the operator's designated target.
-typedef void(__fastcall *RangedUpdateTFn)(RangedCombatClass *, float, const hand &, const hand &);
-RangedUpdateTFn g_rangedUpdateTOrig = nullptr;
-
-void __fastcall Hook_RangedUpdateT(RangedCombatClass *rc, float frameTime, const hand &designated,
-                                   const hand &suggested) {
-  hand forced;
-  if (TurretAimFor(rc, forced)) {
-    g_rangedUpdateTOrig(rc, frameTime, forced, forced);
-    return;
-  }
-  g_rangedUpdateTOrig(rc, frameTime, designated, suggested);
-}
-
 void InstallHooks() {
-  __int64 updTAddr = KenshiLib::GetRealAddress(&RangedCombatClass::updateT);
-  if (updTAddr) {
-    int s = (int)KenshiLib::AddHook((void *)updTAddr, (void *)Hook_RangedUpdateT, (void **)&g_rangedUpdateTOrig);
-    Log("KAH: RangedCombatClass::updateT hook status=" + Int(s));
-  } else {
-    Log("KAH: RangedCombatClass::updateT not found; turret aim off");
-  }
   __int64 shootAddr = KenshiLib::GetRealAddress(&GunClass::shoot);
   if (shootAddr) {
     int s = (int)KenshiLib::AddHook((void *)shootAddr, (void *)Hook_GunShoot, (void **)&g_gunShootOrig);
