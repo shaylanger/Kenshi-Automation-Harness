@@ -69,6 +69,11 @@ cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests
 if errorlevel 1 (type "%ROOT%obj\tests\build_crime_args.log" & echo TEST BUILD FAILED & exit /b 1)
 "%ROOT%obj\tests\crime_args_test.exe"
 if errorlevel 1 exit /b 1
+cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\race_filter_test.exe" ^
+  "%ROOT%tests\race_filter_test.cpp" > "%ROOT%obj\tests\build_race_filter.log" 2>&1
+if errorlevel 1 (type "%ROOT%obj\tests\build_race_filter.log" & echo TEST BUILD FAILED & exit /b 1)
+"%ROOT%obj\tests\race_filter_test.exe"
+if errorlevel 1 exit /b 1
 cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\protect_rules_test.exe" ^
   "%ROOT%tests\protect_rules_test.cpp" > "%ROOT%obj\tests\build_protect_rules.log" 2>&1
 if errorlevel 1 (type "%ROOT%obj\tests\build_protect_rules.log" & echo TEST BUILD FAILED & exit /b 1)

@@ -15,6 +15,7 @@
 #include "HitCredit.h"
 #include "ProtectRules.h"
 #include "CrimeArgs.h"
+#include "RaceFilter.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -54,6 +55,7 @@
 #include <kenshi/Platoon.h>
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/RootObjectFactory.h>
+#include <kenshi/RaceData.h>
 #include <kenshi/SaveManager.h>
 #include <kenshi/SaveInfo.h>
 #include <kenshi/ShopTrader.h>
@@ -343,6 +345,17 @@ std::string DescribeItem(Item *item) {
     s << "unreadable item";
   }
   return s.str();
+}
+
+// The character's race name (RaceData -> GameData name), "?" when unreadable (PG 199).
+std::string RaceName(Character *c) {
+  try {
+    RaceData *r = Valid(c) ? c->getRace() : nullptr;
+    if (r && r->data)
+      return r->data->name;
+  } catch (...) {
+  }
+  return "?";
 }
 
 std::string Describe(Character *c, const Ogre::Vector3 *origin) {
@@ -649,7 +662,7 @@ const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | "
     "chars [radius] [filter] | traders [radius] | benches [radius] [crafts] | research <name> | research start|stop <name> | research status | "
     "blueprint <item> | craft <npc> <item> [at <bench>] [count n] | find <character|squad|item|weapon|armour|container> <text> | "
-    "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] "
+    "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] [race <a|b|!c>] "
     "[size <mult>] | stash <item> <n> [near <npc>] | stat <npc> <stat> | "
     "setstat <npc> <stat> <value> | stat <npc> all | weight <npc|building> | iteminfo|equip|unequip <npc> <item> | "
     "where|hp|inv|sections|select|recruit|kill <npc> | teleport <npc> <npc2 | x y z | building <name>> [dist m] | "
@@ -1276,7 +1289,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
         if (drop || (pos && !hit))
           continue;
       }
-      out += (n ? " | " : "") + d;
+      out += (n ? " | " : "") + d + " race=" + RaceName(c);
       ++n;
     }
     ok = true;
@@ -1330,7 +1343,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     // spawn <character|squad template> <faction> [near <npc>|at x y z] [count n] [dist m] [target <npc>]
     if (f.size() < 4)
       return "usage: spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] "
-             "[target <npc>]";
+             "[target <npc>] [race <substr>|!<substr>...]";
     Faction *faction = FindFaction(world, f[3]);
     if (!faction)
       return "no faction named: " + f[3];
@@ -1378,23 +1391,54 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     GameData *charData = FindData(world, CHARACTER, f[2], error);
     if (!charData)
       return error + (squad ? " (squad match: [" + squad->name + "])" : "");
-    int made = 0;
-    std::string names;
-    for (int i = 0; i < count; ++i) {
+    // "race <a|b|!c>" (PG 199): the template rolls a random race; a spawned character whose race
+    // doesn't pass the filter is destroyed and rolled again, up to 20 tries per character
+    const std::string raceSpec = Option(f, 4, "race", "");
+    const RaceFilter raceFilter = ParseRaceFilter(raceSpec);
+    const int kRaceTries = 20;
+    int made = 0, rerolls = 0;
+    bool raceFailed = false;
+    std::string names, rejected;
+    for (int i = 0; i < count && !raceFailed; ++i) {
       Ogre::Vector3 at = pos;
       at.z += 2.0f * i;
-      RootObject *obj = world->theFactory->createRandomCharacter(faction, at, nullptr,
-                                                                 charData, nullptr, -1.0f);
-      Character *c = dynamic_cast<Character *>(obj);
+      Character *c = nullptr;
+      std::string race;
+      for (int tries = 1;; ++tries) {
+        RootObject *obj = world->theFactory->createRandomCharacter(faction, at, nullptr,
+                                                                   charData, nullptr, -1.0f);
+        c = dynamic_cast<Character *>(obj);
+        if (!Valid(c))
+          break;
+        race = RaceName(c);
+        if (RaceFilterMatches(raceFilter, race))
+          break;
+        if (rejected.find("," + race + ",") == std::string::npos)
+          rejected += (rejected.empty() ? "," : "") + race + ",";
+        world->destroy(c, false, "KAH spawn race reroll");
+        c = nullptr;
+        if (tries >= kRaceTries) {
+          raceFailed = true;
+          break;
+        }
+        ++rerolls;
+      }
       if (!Valid(c))
         break;
       ++made;
-      names += (made > 1 ? ", " : "") + c->getName() + " " + FormatCharacterRef(c->getHandle().serial, c->getHandle().index);
+      names += (made > 1 ? ", " : "") + c->getName() + " " +
+               FormatCharacterRef(c->getHandle().serial, c->getHandle().index) + " race=" + race;
     }
+    std::string extra;
+    if (!raceFilter.empty())
+      extra += " rerolls=" + Int(rerolls);
+    if (raceFailed)
+      extra += " race-failed: no race matching '" + raceSpec + "' in " + Int(kRaceTries) +
+               " tries (rolled " + rejected.substr(1, rejected.empty() ? 0 : rejected.size() - 2) + ")";
     Log("KAH: spawn character=" + charData->name + " faction=" + faction->getName() +
-        " made=" + Int(made) + " " + names);
-    ok = made > 0;
-    return "spawned " + Int(made) + "/" + Int(count) + " " + charData->name + ": " + names;
+        " made=" + Int(made) + " " + names + extra);
+    ok = made > 0 && !raceFailed;
+    return "spawned " + Int(made) + "/" + Int(count) + " " + charData->name + ": " + names + extra;
   }
 
   if (cmd == "benches") { // benches [radius] [crafts] [near <npc|x y z>]: crafting benches, their queue and inventory
@@ -2207,10 +2251,26 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
           ok = equipped && item->isEquipped;
         }
       }
+      // PG 199: on a failure say the wearer's race and whether the game's own race checks allow the item
+      // (RaceLimiter: the item's "races"/"races exclude" lists; RaceData noHats/noShirts/noShoes)
+      std::string why;
+      if (!ok) {
+        why = " race=" + RaceName(c);
+        try {
+          RaceLimiter *limiter = RaceLimiter::getSingleton();
+          if (limiter && item->data)
+            why += std::string(" race_ok=") + (limiter->canEquip(item->data, c) ? "1" : "0");
+          RaceData *r = c->getRace();
+          if (r && ((item->slotType == ATTACH_HAT && r->noHats) || (item->slotType == ATTACH_SHIRT && r->noShirts) ||
+                    (item->slotType == ATTACH_BOOTS && r->noShoes)))
+            why += " race_no_slot=1";
+        } catch (...) {
+        }
+      }
       Log("KAH: equip " + c->getName() + " " + DescribeItem(item) + " ok=" + (ok ? "1" : "0") +
-          (replaced.empty() ? "" : " replaced=" + replaced));
+          (replaced.empty() ? "" : " replaced=" + replaced) + why);
       return std::string(ok ? "equipped " : "equip failed ") + DescribeItem(item) +
-             (replaced.empty() ? "" : " replaced=" + replaced);
+             (replaced.empty() ? "" : " replaced=" + replaced) + why;
     }
 
     if (cmd == "unequip") {
