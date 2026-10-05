@@ -425,7 +425,11 @@ def run_scenario(d, path, csv_path=None, stop=False):
                     ok_step = bool(m)
                     if m:
                         variables[name] = m.group(1)
-                        detail = '%s=%s' % (name, m.group(1))
+                        detail = '%s=%s | %s' % (name, m.group(1), detail)
+                    else:
+                        # never carry an older capture into later steps (m44 gate-90 g4: the read failed and the
+                        # echo printed g3's value as g4's)
+                        variables[name] = 'NA'
                 else:
                     ok_step, detail = False, 'unknown step @' + kind
             else:
