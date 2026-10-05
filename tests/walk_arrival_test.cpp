@@ -63,7 +63,12 @@ int main() {
   }
   {
     WalkProgress p;
-    Check(Simulate(40, 8, 0, 60, false, at, p) == WALK_GOING, "never moved: keeps waiting (180 s timeout)");
+    Check(Simulate(40, 8, 0, 60, false, at, p) == WALK_NEVER_STARTED && at > 19.9 && at < 20.1,
+          "never moved: fails after 20 s (pg-74: target 300 along +x, she stood still 180 s)");
+  }
+  {
+    WalkProgress p;
+    Check(Simulate(40, 8, 0, 60, true, at, p) == WALK_GOING, "never moved but paused the whole time: still waiting");
   }
   {
     WalkProgress p;

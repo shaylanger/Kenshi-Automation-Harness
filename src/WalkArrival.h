@@ -11,7 +11,8 @@ enum WalkVerdict {
   WALK_GOING = 0,
   WALK_ARRIVED,      // reached the point (within 1 m of the distance or 1.5 m of the point)
   WALK_STOPPED_NEAR, // moved, then stopped within the arrival radius: counts as arrived
-  WALK_STOPPED_FAR   // moved, then stood still far from the point: blocked
+  WALK_STOPPED_FAR,  // moved, then stood still far from the point: blocked
+  WALK_NEVER_STARTED // never moved at all (target unreachable / order ignored)
 };
 
 // 25% of the distance, at least 3 m, at most 15 m (40 m walk -> 10 m).
@@ -26,6 +27,9 @@ inline float WalkArrivalRadius(float dist) {
 
 const double kWalkStillSeconds = 1.5;     // real, unpaused seconds without moving = stopped
 const double kWalkStillFarSeconds = 10.0; // stopped this long far from the point = blocked
+// PG 254 (pg-74 batch Y): an order to a point he can't path to leaves him standing (covered 0.0 for the
+// whole 180 s); after this many real unpaused seconds without a single move the walk fails
+const double kWalkNeverStartedSeconds = 20.0;
 const float kWalkMoveEpsilon = 0.05f;     // metres per frame that count as moving
 
 struct WalkProgress {
@@ -56,7 +60,9 @@ inline WalkVerdict WalkUpdate(WalkProgress &p, float dist, float covered, float 
     return WALK_GOING;
   }
   p.stillReal += dtReal;
-  if (!p.moved || p.stillReal < kWalkStillSeconds)
+  if (!p.moved)
+    return p.stillReal >= kWalkNeverStartedSeconds ? WALK_NEVER_STARTED : WALK_GOING;
+  if (p.stillReal < kWalkStillSeconds)
     return WALK_GOING;
   if (left <= WalkArrivalRadius(dist))
     return WALK_STOPPED_NEAR;

@@ -666,6 +666,8 @@ struct WalkTimer {
   std::string name;
   Ogre::Vector3 start, target;
   float dist;
+  std::string axis;   // +x|-x|+z|-z (PG 254)
+  int targetOnNav;    // NavMesh::getPositionValid(target): 1/0, -1 unknown
   double simSeconds;  // real frame time x game speed while unpaused
   DWORD startTick, lastTick;
   double startGameHours;
@@ -733,10 +735,15 @@ void WalkTick(GameWorld *world) {
       } else if (v == WALK_STOPPED_FAR) {
         done = w.name + " stopped " + Num(left.length()) + " m short (covered " + Num(covered) + " of " +
                Num(w.dist) + " m, more than " + Num(WalkArrivalRadius(w.dist)) +
-               " m away for 10 s): blocked path?";
+               " m away for 10 s): blocked path? axis=" + w.axis + " target_on_navmesh=" + Int(w.targetOnNav);
+      } else if (v == WALK_NEVER_STARTED) {
+        done = w.name + " never started: stood still for " + Num((float)kWalkNeverStartedSeconds) +
+               " s after the order (covered " + Num(covered) + " of " + Num(w.dist) + " m along " + w.axis +
+               ", target_on_navmesh=" + Int(w.targetOnNav) + "): target unreachable? try another axis";
       } else if (now - w.startTick > 180000) {
         done = w.name + " did not arrive within 180 s (covered " + Num(covered) + " of " + Num(w.dist) +
-               " m, seconds=" + Num((float)w.simSeconds) + "): blocked path, paused game or KO?";
+               " m, seconds=" + Num((float)w.simSeconds) + ", axis=" + w.axis + " target_on_navmesh=" +
+               Int(w.targetOnNav) + "): blocked path, paused game or KO?";
       }
     }
     if (!done.empty()) {

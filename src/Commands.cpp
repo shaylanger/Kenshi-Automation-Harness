@@ -56,6 +56,7 @@
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/RaceData.h>
+#include <kenshi/NavMesh.h> // walktime: is the target on the navmesh
 #include <kenshi/SaveManager.h>
 #include <kenshi/SaveInfo.h>
 #include <kenshi/ShopTrader.h>
@@ -678,7 +679,7 @@ const char *const kHelp =
     "chance <npc> ko|kidnap|lockpick|steal <target> [item <name>] | detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>] | senses <observer> <who> | face <npc> <who> | pin <npc> [at <npc|x y z>] [dist m] [face <who>] | pin <npc> off | "
     "healtime <medic> <patient> [wound <cut>] [timeout <s>] | water <npc> | findwater <npc> [radius <m>] [depth <m>] | "
     "swimtime <npc> <dist> [+x|-x|+z|-z] [walk|run] | construct <npc> <building> [dist <m>] | construction <building> [reset] [fill] | towns [filter,...] [max <n>] | turret <building> [radius <m>] [target <npc>] [front <m>] [aim <npc>|off] | "
-    "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
+    "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [+x|-x|+z|-z] [walk|run] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
     "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | "
@@ -1870,16 +1871,34 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
            " (m/s at game speed 1; walktime measures a real walk)";
   }
 
-  if (cmd == "walktime") { // walktime <npc> <dist> [walk|run]: timed walk, answered on arrival (KAH 19)
+  if (cmd == "walktime") { // walktime <npc> <dist> [+x|-x|+z|-z] [walk|run]: timed walk, answered on arrival (KAH 19)
     const float dist = f.size() >= 4 ? (float)atof(f[3].c_str()) : 0.0f;
     if (!(dist >= 2.0f && dist <= 500.0f))
-      return "usage: walktime <npc> <dist 2..500> [walk|run] (he walks that far along +x)";
+      return "usage: walktime <npc> <dist 2..500> [+x|-x|+z|-z] [walk|run] (he walks that far along the axis, "
+             "default +x)";
+    // PG 254: an axis like swimtime (pg-74 batch Y: 300 along +x from the home spot was never walked)
+    std::string mode, axis = "+x";
+    Ogre::Vector3 dir(1, 0, 0);
+    for (size_t k = 4; k < f.size(); ++k) {
+      const std::string a = Lower(f[k]);
+      if (a == "walk" || a == "run")
+        mode = a;
+      else if (a == "+x" || a == "x")
+        axis = "+x", dir = Ogre::Vector3(1, 0, 0);
+      else if (a == "-x")
+        axis = "-x", dir = Ogre::Vector3(-1, 0, 0);
+      else if (a == "+z" || a == "z")
+        axis = "+z", dir = Ogre::Vector3(0, 0, 1);
+      else if (a == "-z")
+        axis = "-z", dir = Ogre::Vector3(0, 0, -1);
+      else
+        return "walktime: unknown option " + f[k] + " (+x|-x|+z|-z, walk|run)";
+    }
     if (c->isUnconcious() || c->isDead())
       return c->getName() + " can't walk (KO or dead)";
     OrdersReceiver *orders = c->getOrdersReciever();
     if (!Valid(orders))
       return c->getName() + " takes no orders";
-    const std::string mode = f.size() >= 5 ? Lower(f[4]) : "";
     CharMovement *m = c->movement;
     if (Valid(m) && (mode == "walk" || mode == "run"))
       m->setDesiredSpeedOrders(mode == "walk" ? WALK : RUN);
@@ -1888,8 +1907,16 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     w.who = c->getHandle();
     w.name = c->getName();
     w.start = c->getPosition();
-    w.target = w.start + Ogre::Vector3(dist, 0, 0);
+    w.target = w.start + dir * dist;
     w.dist = dist;
+    w.axis = axis;
+    // the game's own navmesh test of the target point (-1 unknown): reported with every reply
+    w.targetOnNav = -1;
+    try {
+      if (Valid(world) && world->navmesh)
+        w.targetOnNav = world->navmesh->getPositionValid(w.target) ? 1 : 0;
+    } catch (...) {
+    }
     w.simSeconds = 0;
     w.startTick = w.lastTick = GetTickCount();
     w.startGameHours = world->getTimeStamp_inGameHours().getTotalHours();
@@ -1905,8 +1932,9 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
         break;
       }
     g_walks.push_back(w);
-    Log("KAH: walktime " + w.name + " dist=" + Num(dist) + " mode=" + (mode.empty() ? "as is" : mode) +
-        " paused=" + (world->isPaused() ? "1" : "0"));
+    Log("KAH: walktime " + w.name + " dist=" + Num(dist) + " axis=" + axis + " mode=" +
+        (mode.empty() ? "as is" : mode) + " paused=" + (world->isPaused() ? "1" : "0") + " start=" +
+        Num(w.start.x) + "," + Num(w.start.y) + "," + Num(w.start.z) + " target_on_navmesh=" + Int(w.targetOnNav));
     pending = true; // answered by WalkTick when he arrives
     ok = true;
     return "";
