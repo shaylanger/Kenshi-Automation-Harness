@@ -18,11 +18,13 @@ struct RangedShotInfo {
   int stat;
   float weaponBase, weaponEff, percBase, percEff, acc01, dev, devFormula, devBase, range, dist;
   bool turret;
+  int loaded, loadedMax; // GunClass::numShotsCurrent/numShotsMax as the shot starts (loaded bolts)
   std::string target;
   unsigned long shooterSerial, targetSerial;
   RangedShotInfo()
       : stat(-1), weaponBase(-1), weaponEff(-1), percBase(-1), percEff(-1), acc01(-1), dev(-1), devFormula(-1),
-        devBase(-1), range(-1), dist(-1), turret(false), shooterSerial(0), targetSerial(0) {}
+        devBase(-1), range(-1), dist(-1), turret(false), loaded(-1), loadedMax(-1), shooterSerial(0),
+        targetSerial(0) {}
 };
 
 struct RangedShooterLog {
@@ -46,6 +48,7 @@ struct RangedSession {
   float lastWounds;
   int newShots; // from the hook, not yet taken by the tick
   int aimSets, heals;
+  int reloads, prevLoaded; // shots that needed a reload after the previous one emptied the gun
   // sums over this session's shots
   double sumAcc, sumDev, sumDevFormula, sumDist, sumWEff, sumPEff;
   float minDev, maxDev;
@@ -75,6 +78,8 @@ void RecordRangedShotImpl(GunClass *gun, Character *me, RootObject *target, int 
   info.stat = stat;
   info.turret = gun->isTurret() != nullptr;
   info.devBase = gun->accuracyDeviationBase;
+  info.loaded = gun->numShotsCurrent;
+  info.loadedMax = gun->numShotsMax;
   info.range = gun->maxRange;
   CharStats *s = me->getStats();
   if (Valid(s)) {
@@ -106,6 +111,9 @@ void RecordRangedShotImpl(GunClass *gun, Character *me, RootObject *target, int 
 
 void RangedAddShot(RangedSession &r, const RangedShotInfo &info) {
   ++r.newShots;
+  if (r.prevLoaded >= 0 && r.prevLoaded <= 1 && info.loaded >= 1)
+    ++r.reloads; // the previous shot emptied the gun, this one fired loaded again
+  r.prevLoaded = info.loaded;
   r.sumAcc += info.acc01;
   r.sumDev += info.dev;
   r.sumDevFormula += info.devFormula;
@@ -124,14 +132,14 @@ std::string RangedShotLine(const RangedShotInfo &s) {
          " weapon_eff=" + Fine(s.weaponEff) + " perception_base=" + Fine(s.percBase) +
          " perception_eff=" + Fine(s.percEff) + " acc01=" + Fine(s.acc01) + " dev=" + Fine(s.dev) +
          " dev_formula=" + Fine(s.devFormula) + " dev_base=" + Fine(s.devBase) + " range=" + Num(s.range) +
-         " dist=" + Num(s.dist) + " target=" + s.target;
+         " dist=" + Num(s.dist) + " loaded=" + Int(s.loaded) + "/" + Int(s.loadedMax) + " target=" + s.target;
 }
 
 std::string RangedReply(const RangedSession &r, bool complete) {
   const int n = r.tally.shots;
   const double d = n > 0 ? (double)n : 1.0;
   std::string out = r.shooterName + " rangedtest target=" + r.targetName + " complete=" + (complete ? "1" : "0") +
-                    " shots=" + Int(n) + " hits=" + Int(r.tally.hits) + " misses=" + Int(r.tally.misses) +
+                    " shots=" + Int(n) + " hits=" + Int(r.tally.hits) + " misses=" + Int(r.tally.misses) + " reloads=" + Int(r.reloads) +
                     " pending=" + Int((long long)r.tally.pending.size()) +
                     " hit_rate=" + Fine(r.tally.Resolved() > 0 ? (double)r.tally.hits / r.tally.Resolved() : 0.0) +
                     " other_damage=" + Int(r.tally.otherDamage) + " mean_acc01=" + Fine(r.sumAcc / d) +
@@ -224,8 +232,77 @@ void RangedTick(GameWorld *world) {
 
 // rangedtest <shooter> <target> [shots <n>] [window <s>] [timeout <s>] [noheal] [noaim] [attack] [keepranged]
 // rangedtest <shooter> last
+std::string HandLine(const hand &h) {
+  return "type=" + Int((int)h.type) + " index=" + Int((int)h.index) + " serial=" + Int((int)h.serial);
+}
+
+// rangedinfo <npc> [clearturret]: why a personal crossbow does (not) fire. Prints the turret hand, the
+// ranged weapon, its GunClass (active, shots loaded, ammo type), hasAmmoFor, the ranged-mode flag and the
+// RangedCombatClass state. clearturret empties Character::isUsingTurret when it holds no live turret.
+bool RunRangedInfo(const std::vector<std::string> &f, Character *c, bool &ok, std::string &out) {
+  std::string s = c->getName();
+  bool turretLive = false;
+  try {
+    turretLive = c->isUsingTurret.getRootObject() != nullptr;
+  } catch (...) {
+  }
+  s += " turret_hand={" + HandLine(c->isUsingTurret) + "} turret_valid=" + (c->isUsingTurret.isValid() ? "1" : "0") +
+       " turret_live=" + (turretLive ? "1" : "0");
+  bool cleared = false;
+  if (f.size() > 3 && Lower(f[3]) == "clearturret" && !turretLive) {
+    c->isUsingTurret = hand();
+    cleared = true;
+    s += " cleared_turret=1 turret_valid_now=" + std::string(c->isUsingTurret.isValid() ? "1" : "0");
+  }
+  Crossbow *bow = nullptr;
+  try {
+    bow = c->getRangedWeapon();
+  } catch (...) {
+  }
+  s += " bow=" + std::string(Valid(bow) ? bow->getName() : "none");
+  if (Valid(bow)) {
+    GunClass *g = bow->gunClass;
+    bool ammo = false;
+    try {
+      ammo = c->hasAmmoFor(bow);
+    } catch (...) {
+    }
+    s += " has_ammo=" + std::string(ammo ? "1" : "0");
+    if (g) {
+      s += " gun_active=" + Int(g->active ? 1 : 0) + " shots=" + Int(g->numShotsCurrent) + "/" + Int(g->numShotsMax) +
+           " ammo_type=" + (g->ammoType ? g->ammoType->name : std::string("none")) +
+           " gun_user={" + HandLine(g->user) + "} reload_state=" + Fine(g->reloadState);
+    } else
+      s += " gun=null";
+  }
+  unsigned char *flag = UseRangedFlag(c);
+  s += " ranged_mode=" + std::string(flag ? Int(*flag) : "?");
+  try {
+    s += " should_use_ranged=" + std::string(c->shouldUseRangedWeapons() ? "1" : "0") +
+         " in_ranged_combat=" + (c->isInRangedCombatMode() ? "1" : "0");
+  } catch (...) {
+  }
+  RangedCombatClass *rc = c->rangedCombat;
+  if (rc)
+    s += " rc_state=" + Int((int)rc->state) + " rc_gun=" + (rc->gun ? "set" : "null") +
+         " rc_combat_mode=" + Int(rc->combatMode ? 1 : 0) + " rc_target={" + HandLine(rc->currentTarget) +
+         "} rc_reloading=" + Int(rc->_isReloading ? 1 : 0);
+  else
+    s += " rc=null";
+  CharStats *st = c->getStats();
+  if (Valid(st))
+    s += " crossbows=" + Fine(st->getStat(STAT_CROSSBOWS, true));
+  Log("KAH: rangedinfo " + s);
+  out = s;
+  ok = true;
+  (void)cleared;
+  return true;
+}
+
 bool RunRangedCommand(GameWorld *world, const std::vector<std::string> &f, Character *c, bool &ok, bool &pending,
                       std::string &out) {
+  if (Lower(f[1]) == "rangedinfo")
+    return RunRangedInfo(f, c, ok, out);
   if (Lower(f[1]) != "rangedtest")
     return false;
   if (f.size() < 4) {
@@ -283,7 +360,12 @@ bool RunRangedCommand(GameWorld *world, const std::vector<std::string> &f, Chara
     else if (o == "keepranged")
       keepRanged = true;
   }
-  const bool turretUser = c->isUsingTurret.isValid();
+  // hand::isValid() is true for an empty hand (type=11, serial 0): ask for the object instead.
+  bool turretUser = false;
+  try {
+    turretUser = c->isUsingTurret.getRootObject() != nullptr;
+  } catch (...) {
+  }
   Crossbow *bow = nullptr;
   try {
     bow = c->getRangedWeapon();
@@ -309,13 +391,20 @@ bool RunRangedCommand(GameWorld *world, const std::vector<std::string> &f, Chara
   if (attack) {
     RunBeforeAttack(c, t);
     OrdersReceiver *orders = c->getOrdersReciever();
-    if (Valid(orders))
-      orders->addOrder(UNPROVOKED_FOCUSED_MELEE_ATTACK, t->getHandle(), t->getPosition(), true, false);
-    c->attackTarget(t);
+    if (!turretUser) {
+      // a melee order (or Character::attackTarget) makes a crossbow user run in and fight unarmed
+      if (Valid(orders))
+        orders->addOrder(RANGED_ATTACK_FOCUSED_UNPROVOKED, t->getHandle(), t->getPosition(), true, false);
+    } else {
+      if (Valid(orders))
+        orders->addOrder(UNPROVOKED_FOCUSED_MELEE_ATTACK, t->getHandle(), t->getPosition(), true, false);
+      c->attackTarget(t);
+    }
   }
   r.clock.Start();
   r.lastWounds = WoundSum(t);
-  r.newShots = r.aimSets = r.heals = 0;
+  r.newShots = r.aimSets = r.heals = r.reloads = 0;
+  r.prevLoaded = -1;
   r.sumAcc = r.sumDev = r.sumDevFormula = r.sumDist = r.sumWEff = r.sumPEff = 0;
   r.minDev = 1e9f;
   r.maxDev = -1;
