@@ -56,6 +56,10 @@ rc, out = run('@any take A x || info A ~ nomatch\n')
 check(rc == 1 and 'no alternative matched' in out and 'alt 1:' in out and 'alt 2:' in out, 'none passes: FAIL lists every reply')
 rc, out = run('@set V echo x ~ (world)\n@any info ${V} ~ equipped=1\n')
 check(rc == 0 and out.count('PASS') == 2, 'variables are substituted, a single alternative works')
+rc, out = run('@any @set H take A x ~ (.*) || @set H info A ~ (key=\\S+)\n@echo got ${H}\n')
+check(rc == 0 and 'alt 2: H=key=pgp1' in out and 'got key=pgp1' in out, '@set alternative: a failed reply sets nothing, the matching one captures')
+rc, out = run('@any @set H info A ~ (nomatch) || echo hi ~ hello\n@echo got ${H}\n')
+check(rc == 0 and 'alt 2:' in out and 'got ${H}' in out, '@set alternative without a match leaves the variable unset')
 # m31: an @log / @log-wait alternative (wait for progress, else re-issue the order); only lines added since the run
 # started count, and its offset is noted before the run like a plain @log step
 fd, logp = tempfile.mkstemp(suffix='.log')

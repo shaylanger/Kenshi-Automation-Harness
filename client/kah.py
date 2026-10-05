@@ -226,7 +226,7 @@ SCENARIO_HELP = """Scenario file (kah run <file> [--csv out.csv] [--stop]): one 
   @wait-game <minutes> [timeout_s]
   @until <timeout_s> <command ...> ~ <regex>   repeat (every 2 s) until the reply matches
   @any <cmd> ~ <re> || <cmd> ~ <re>             alternatives in order until one passes (PASS names it);
-                                      an alternative may be an @log / @log-wait step
+                                      an alternative may be an @log / @log-wait or @set step
   @set NAME <command ...> ~ <regex with one (group)>   capture; later steps use ${NAME}
   @log <file> ~ <regex>               a line added to <file> since the run started matches
                                       (<file> may contain spaces; quotes optional)
@@ -352,6 +352,15 @@ def run_scenario(d, path, csv_path=None, stop=False):
                         # a log alternative: e.g. wait for progress, else re-issue the order (REL p7-04 m31)
                         ok_reply, detail = log_step(cmd.strip(), rx.strip())
                         rx = ''
+                    elif cmd.strip().startswith('@set '):
+                        # a capture alternative (PG 192 m35: read the dummy's hp, else prove the turret killed it)
+                        words = shlex.split(cmd.strip())
+                        ok_reply, detail = send(d, words[2], words[3:])
+                        m = re.search(rx.strip() or '(.*)', detail) if ok_reply else None
+                        ok_reply, rx = bool(m), ''
+                        if m:
+                            variables[words[1]] = m.group(1)
+                            detail = '%s=%s' % (words[1], m.group(1))
                     else:
                         words = shlex.split(cmd.strip())
                         ok_reply, detail = send(d, words[0], words[1:])

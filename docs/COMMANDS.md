@@ -176,7 +176,7 @@ Timers (`detecttime`, `healtime`, `swimtime`) reply later like `walktime` (the c
 a command must answer ok, `! command` must answer error, `command ~ regex` must match;
 `@sleep`, `@wait-world`, `@wait-game <min>`, `@until <s> command ~ regex`,
 `@set NAME command ~ (group)` (use `${NAME}` later), `@log <file> ~ regex` (new lines since the
-run started; `@log-wait <s> <file> ~ regex` polls every 1 s until one matches), `@echo`, `@any <step> ~ regex || <step> ~ regex` (alternatives in order until one passes; an alternative may be an `@log`/`@log-wait` step, e.g. wait for progress, else re-issue the order: a state the game
+run started; `@log-wait <s> <file> ~ regex` polls every 1 s until one matches), `@echo`, `@any <step> ~ regex || <step> ~ regex` (alternatives in order until one passes; an alternative may be an `@log`/`@log-wait` step or an `@set NAME <cmd> ~ (group)` capture (a non-matching one sets nothing), e.g. wait for progress, else re-issue the order: a state the game
 reaches by either of two paths, e.g. a crafted item still in the bench output or already hauled by the worker). See `scenarios/example.txt`.
 Once the game was in the world, a step that finds it back at the main menu (no `load`/`newgame` sent since; e.g. the whole squad died) ends the run with one `ABORT at line N` line; the remaining steps go to the CSV as FAIL "not run". An `@sleep` of 60 s or more asks `status` every 30 s and ends early then.
 
