@@ -173,6 +173,10 @@ def send(d, cmd, args, timeout=None):
         if os.path.exists(outbox):
             with open(outbox, encoding='utf-8', errors='replace') as f:
                 for line in f:
+                    # The harness may still be writing this line (its stream
+                    # flushes long replies in chunks): only complete lines count.
+                    if not line.endswith('\n'):
+                        continue
                     parts = line.rstrip('\n').split('\t', 2)
                     if parts[0] == cid and len(parts) == 3:
                         return parts[1] == 'ok', parts[2]
