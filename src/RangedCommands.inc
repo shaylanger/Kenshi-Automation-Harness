@@ -299,10 +299,45 @@ bool RunRangedInfo(const std::vector<std::string> &f, Character *c, bool &ok, st
   return true;
 }
 
+// combatmode <npc> [block|ranged|taunt|hold|passive on|off ...]: the orders panel's combat toggles, the bytes
+// CharStats+0x128 _defensiveMode (BLOCK: only blocks, never swings), +0x129 rangedMode, +0x12A tauntMode,
+// +0x12B _holdPositionMode, +0x12C passiveCombatMode (KenshiLib CharStats.h, 1.0.65). Prints all five after
+// the changes. A test setup for melee duels (a BLOCK toggle saved on keeps the fighter from attacking).
+bool RunCombatMode(const std::vector<std::string> &f, Character *c, bool &ok, std::string &out) {
+  static const char *names[] = {"block", "ranged", "taunt", "hold", "passive"};
+  CharStats *st = c->getStats();
+  if (!Valid(st)) {
+    out = c->getName() + " has no stats";
+    return true;
+  }
+  unsigned char *base = (unsigned char *)st + 0x128;
+  for (size_t i = 3; i < f.size(); i += 2) {
+    int which = -1;
+    for (int n = 0; n < 5; ++n)
+      if (Lower(f[i]) == names[n])
+        which = n;
+    std::string v = i + 1 < f.size() ? Lower(f[i + 1]) : "";
+    if (which < 0 || (v != "on" && v != "off")) {
+      out = "usage: combatmode <npc> [block|ranged|taunt|hold|passive on|off ...]";
+      return true;
+    }
+    base[which] = v == "on" ? 1 : 0;
+  }
+  std::string s = c->getName();
+  for (int n = 0; n < 5; ++n)
+    s += std::string(" ") + names[n] + "=" + Int(base[n] ? 1 : 0);
+  Log("KAH: combatmode " + s);
+  out = s;
+  ok = true;
+  return true;
+}
+
 bool RunRangedCommand(GameWorld *world, const std::vector<std::string> &f, Character *c, bool &ok, bool &pending,
                       std::string &out) {
   if (Lower(f[1]) == "rangedinfo")
     return RunRangedInfo(f, c, ok, out);
+  if (Lower(f[1]) == "combatmode")
+    return RunCombatMode(f, c, ok, out);
   if (Lower(f[1]) != "rangedtest")
     return false;
   if (f.size() < 4) {
