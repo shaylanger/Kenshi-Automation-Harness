@@ -41,6 +41,8 @@
 #include <mygui/MyGUI_Widget.h>
 #include <kenshi/gui/ForgottenGUI.h>      // character editor (newgame)
 #include <kenshi/gui/MessageBoxManager.h> // its "are you sure" box
+#include <kenshi/gui/DialogueWindow.h>    // dialog (the open conversation window)
+#include <kenshi/Dialogue.h>
 #include <kenshi/Damages.h>
 #include <kenshi/SensoryData.h> // senses
 #include <kenshi/Faction.h>
@@ -685,7 +687,7 @@ const char *const kBuiltins[] = {
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
     "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "hit", "newgame", "import", "stealth", "crime",
-    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode"};
+    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode", "dialog"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | "
@@ -707,7 +709,7 @@ const char *const kHelp =
     "chance <npc> ko|kidnap|lockpick|steal <target> [item <name>] | detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>] | senses <observer> <who> | face <npc> <who> | pin <npc> [at <npc|x y z>] [dist m] [face <who>] | pin <npc> off | "
     "healtime <medic> <patient> [wound <cut>] [timeout <s>] | water <npc> | findwater <npc> [radius <m>] [depth <m>] | "
     "swimtime <npc> <dist> [+x|-x|+z|-z] [walk|run] | construct <npc> <building> [dist <m>] | construction <building> [reset] [fill] | farm <building> [grown <0..1>] [skip <hours>] [empty] | towns [filter,...] [max <n>] | turret <building> [radius <m>] [target <npc>] [front <m>] [aim <npc>|off] | "
-    "rangedtest <shooter> <target> [shots <n>] [window <s>] [timeout <s>] [noheal] [noaim] [attack] [keepranged] | rangedtest <shooter> last | rangedinfo <npc> [clearturret] | combatmode <npc> [block|ranged|taunt|hold|passive on|off] | "
+    "rangedtest <shooter> <target> [shots <n>] [window <s>] [timeout <s>] [noheal] [noaim] [attack] [keepranged] | rangedtest <shooter> last | rangedinfo <npc> [clearturret] | combatmode <npc> [block|ranged|taunt|hold|passive on|off] | dialog [close] | "
     "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [+x|-x|+z|-z] [walk|run] | acceltime <npc> <dist> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt] [follow] | camfollow <npc> [on|off] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "

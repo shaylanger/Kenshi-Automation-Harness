@@ -1055,6 +1055,47 @@ Item *FindGroundItem(GameWorld *world, const Ogre::Vector3 &at, const std::strin
 bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const Ogre::Vector3 &origin,
                      bool &ok, std::string &out) {
   const std::string cmd = Lower(f[1]);
+  if (cmd == "dialog") { // dialog [close]: the open conversation window (speaker, player side); close = end it
+    // the game's way (Dialogue::endDialogue(true), as when the conversation runs out). A test setup: an NPC's
+    // conversation (e.g. a hungry bandit's food demand) opens the dialogue window, which blocks mod input.
+    const bool close = f.size() >= 3 && Lower(f[2]) == "close";
+    if (f.size() >= 3 && !close) {
+      out = "usage: dialog [close]";
+      return true;
+    }
+    DialogueWindow *w = Valid(::gui) && Valid(::gui->dialogue) ? ::gui->dialogue : nullptr;
+    Dialogue *d = w && Valid(w->dialogue) ? w->dialogue : nullptr;
+    bool visible = false, inDlg = false;
+    try {
+      visible = w && w->getVisible();
+      inDlg = Valid(::gui) && ::gui->inDialogue();
+    } catch (...) {
+    }
+    std::string speaker = d && Valid(d->me) ? d->me->getName() : std::string("none");
+    std::string pc = w && Valid(w->conversationPC) ? w->conversationPC->getName() : std::string("none");
+    std::string s = "open=" + Int((visible || inDlg) ? 1 : 0) + " visible=" + Int(visible ? 1 : 0) +
+                    " in_dialogue=" + Int(inDlg ? 1 : 0) + " speaker=" + speaker + " player=" + pc +
+                    " ended=" + Int(d && d->_hasEnded ? 1 : 0);
+    if (close) {
+      if (!d || !(visible || inDlg)) {
+        out = "no open dialogue: " + s;
+        ok = true;
+        return true;
+      }
+      d->endDialogue(true);
+      bool after = false;
+      try {
+        after = w->getVisible() || ::gui->inDialogue();
+      } catch (...) {
+      }
+      s = "closed " + speaker + " (endDialogue) open_now=" + Int(after ? 1 : 0) + " (the window may hide next frame; "
+          "poll `dialog`) before: " + s;
+    }
+    Log("KAH: dialog " + s);
+    out = s;
+    ok = true;
+    return true;
+  }
   if (cmd == "produced") { // produced <building> [reset] [radius <m>]: output made since the last reset
     if (f.size() < 3) {
       out = "usage: produced <building> [reset] [radius <m>]";
