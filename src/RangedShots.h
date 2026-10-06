@@ -38,7 +38,8 @@ struct RangedPending {
 struct RangedTally {
   std::deque<RangedPending> pending;
   int shots, hits, misses, otherDamage;
-  RangedTally() : shots(0), hits(0), misses(0), otherDamage(0) {}
+  double hitDamage; // flesh lost on the hits (sum; the reply's mean_hit_damage)
+  RangedTally() : shots(0), hits(0), misses(0), otherDamage(0), hitDamage(0) {}
 
   void Shot(double now) {
     RangedPending p;
@@ -46,14 +47,15 @@ struct RangedTally {
     pending.push_back(p);
     ++shots;
   }
-  // damage seen this frame: attribute to the oldest waiting shot
-  void Damage() {
+  // damage seen this frame (amount = flesh lost): attribute to the oldest waiting shot
+  void Damage(float amount = 0) {
     if (pending.empty()) {
       ++otherDamage;
       return;
     }
     pending.pop_front();
     ++hits;
+    hitDamage += amount;
   }
   // expire waiting shots older than the window
   void Expire(double now, double window) {

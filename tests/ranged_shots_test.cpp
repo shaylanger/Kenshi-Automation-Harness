@@ -25,13 +25,14 @@ int main() {
   RangedTally t;
   t.Shot(0.0);
   t.Shot(0.5);
-  t.Damage(); // first shot hits
+  t.Damage(12.5f); // first shot hits
   t.Expire(2.0, 3.0);
   Check(t.hits == 1 && t.misses == 0 && t.pending.size() == 1, "hit goes to the oldest waiting shot");
   t.Expire(3.6, 3.0);
   Check(t.misses == 1 && t.pending.empty(), "shot past its window is a miss");
   t.Damage();
   Check(t.otherDamage == 1 && t.hits == 1, "damage with no waiting shot is not a hit");
+  Check(t.hitDamage > 12.4 && t.hitDamage < 12.6, "only the hits' damage is summed");
   Check(t.shots == 2 && t.Resolved() == 2, "all shots resolved");
   Check(RangedDamageSeen(0, 12) && !RangedDamageSeen(3, 3.3f), "damage threshold");
   printf(g_failed ? "%d FAILED\n" : "all ranged shots tests passed\n", g_failed);

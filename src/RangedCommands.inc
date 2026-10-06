@@ -142,7 +142,8 @@ std::string RangedReply(const RangedSession &r, bool complete) {
                     " shots=" + Int(n) + " hits=" + Int(r.tally.hits) + " misses=" + Int(r.tally.misses) + " reloads=" + Int(r.reloads) +
                     " pending=" + Int((long long)r.tally.pending.size()) +
                     " hit_rate=" + Fine(r.tally.Resolved() > 0 ? (double)r.tally.hits / r.tally.Resolved() : 0.0) +
-                    " other_damage=" + Int(r.tally.otherDamage) + " mean_acc01=" + Fine(r.sumAcc / d) +
+                    " other_damage=" + Int(r.tally.otherDamage) +
+                    " mean_hit_damage=" + Num(r.tally.hits > 0 ? r.tally.hitDamage / r.tally.hits : 0.0) + " mean_acc01=" + Fine(r.sumAcc / d) +
                     " mean_dev=" + Fine(r.sumDev / d) + " mean_dev_formula=" + Fine(r.sumDevFormula / d) +
                     " min_dev=" + Fine(n > 0 ? r.minDev : -1) + " max_dev=" + Fine(n > 0 ? r.maxDev : -1) +
                     " mean_weapon_eff=" + Fine(r.sumWEff / d) + " mean_perception_eff=" + Fine(r.sumPEff / d) +
@@ -193,7 +194,7 @@ void RangedTick(GameWorld *world) {
         r.tally.Shot(r.clock.sim);
       const float wounds = WoundSum(t);
       if (RangedDamageSeen(r.lastWounds, wounds)) {
-        r.tally.Damage();
+        r.tally.Damage(wounds - r.lastWounds);
         if (r.heal) {
           SetAllParts(t, 1.0f);
           t->medical.blood = t->medical.getMaxBlood();
