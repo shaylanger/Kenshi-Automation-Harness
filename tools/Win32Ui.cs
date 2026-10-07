@@ -125,7 +125,7 @@ public static class KenshiPlace {
 
   static string Norm(string device) {
     device = (device ?? "").Trim();
-    return device.StartsWith(@"\.\") ? device.ToUpperInvariant() : (@"\.\" + device).ToUpperInvariant();
+    return device.StartsWith(@"\\.\") ? device.ToUpperInvariant() : (@"\\.\" + device).ToUpperInvariant();
   }
 
   static List<MONITORINFOEX> All() {
