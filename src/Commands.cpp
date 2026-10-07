@@ -3003,13 +3003,24 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return "faction not found";
     float v = (float)atof(f[3].c_str());
     float before = theirs->relations->getFactionRelation(ours);
+    // The game keeps "enemies" (FactionRelations::setEnemy, set when a member is attacked,
+    // e.g. an unprovoked attack order or a sneak knockout) apart from the relation value: a
+    // faction attacked once stays an enemy at relation 20 (fresh spawns of it attack the
+    // player, PlayerInterface::isEnemy true). A value >= 0 also ends that state both ways.
+    bool enemyBefore = theirs->relations->isEnemy(ours) || ours->relations->isEnemy(theirs);
+    if (v >= 0 && enemyBefore) {
+      theirs->relations->setNoLongerEnemies(ours);
+      ours->relations->setNoLongerEnemies(theirs);
+    }
     theirs->relations->setRelation(ours, v);
     ours->relations->setRelation(theirs, v);
+    bool enemyAfter = theirs->relations->isEnemy(ours) || ours->relations->isEnemy(theirs);
+    std::string en = std::string(" enemy=") + (enemyBefore ? "1" : "0") + "->" + (enemyAfter ? "1" : "0");
     ok = true;
     Log("KAH: relation " + theirs->getName() + " <-> " + ours->getName() + " " +
-        Num(before) + " -> " + Num(v));
+        Num(before) + " -> " + Num(v) + en);
     return theirs->getName() + " <-> " + ours->getName() + ": " + Num(before) + " -> " +
-           Num(theirs->relations->getFactionRelation(ours));
+           Num(theirs->relations->getFactionRelation(ours)) + en;
   }
 
   return "unknown command: " + cmd;
