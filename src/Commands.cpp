@@ -1289,6 +1289,19 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       return "no SaveManager";
     if (!sm->saveExists(sm->getSavePath(), f[2]))
       return "no save named: " + f[2] + " (in " + sm->getSavePath() + ")";
+    // b31/b32-4080: a load issued while the game was still loading (streaming a far zone after a character was
+    // flung 80 km) crashed Kenshi at exe+0x37f665 both times. Refuse; the caller waits for phase=world first.
+    {
+      bool busy = false;
+      try {
+        busy = Valid(world) && world->isLoadingFromASaveGame();
+      } catch (...) {
+      }
+      if (busy) {
+        Log("KAH: load save=" + f[2] + " refused: the game is still loading");
+        return "busy: the game is still loading (wait-world, then load again)";
+      }
+    }
     Log("KAH: load save=" + f[2] + " phase=" + Phase(world));
     sm->load(f[2]);
     g_freshNewGame = false;
