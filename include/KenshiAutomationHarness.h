@@ -63,6 +63,11 @@ typedef void (*KAH_CompleteFn)(const char *id, int ok, const char *text);
  * #serial, @player, @selected); game thread only. Returns a Character* or
  * NULL with the reason in error (errorSize bytes, may be 0). */
 typedef void *(*KAH_FindCharacterFn)(const char *ref, char *error, int errorSize);
+/* 1 while the harness input isolation is on (input_isolation on): the game
+ * window is treated as focused and real input is replaced by injected input
+ * (key_inject / mouse_inject; GetAsyncKeyState and DirectInput already return
+ * it). A mod that gates input on window focus should treat 1 as focused. */
+typedef int (*KAH_InputIsolatedFn)(void);
 
 typedef struct KAH_Api {
   int version;
@@ -75,6 +80,8 @@ typedef struct KAH_Api {
   KAH_CompleteFn complete;
   /* Optional: NULL with a harness older than 2026-10-03 (check before use). */
   KAH_FindCharacterFn findCharacter;
+  /* Optional: NULL with a harness older than 2026-10-07 (check before use). */
+  KAH_InputIsolatedFn inputIsolated;
 } KAH_Api;
 
 /* Fills *api and returns 1 when the harness is loaded, else returns 0. */
@@ -97,6 +104,7 @@ static int KAH_Connect(KAH_Api *api) {
   api->log = (KAH_LogFn)GetProcAddress(dll, "KAH_Log");
   api->complete = (KAH_CompleteFn)GetProcAddress(dll, "KAH_Complete");
   api->findCharacter = (KAH_FindCharacterFn)GetProcAddress(dll, "KAH_FindCharacter");
+  api->inputIsolated = (KAH_InputIsolatedFn)GetProcAddress(dll, "KAH_InputIsolated");
   return api->registerCommand && api->registerBeforeAttack && api->log && api->complete ? 1
                                                                                          : 0;
 }

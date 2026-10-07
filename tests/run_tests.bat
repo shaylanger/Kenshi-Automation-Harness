@@ -94,6 +94,11 @@ cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests
 if errorlevel 1 (type "%ROOT%obj\tests\build_protect_rules.log" & echo TEST BUILD FAILED & exit /b 1)
 "%ROOT%obj\tests\protect_rules_test.exe"
 if errorlevel 1 exit /b 1
+cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\input_inject_test.exe" ^
+  "%ROOT%tests\input_inject_test.cpp" > "%ROOT%obj\tests\build_input_inject.log" 2>&1
+if errorlevel 1 (type "%ROOT%obj\tests\build_input_inject.log" & echo TEST BUILD FAILED & exit /b 1)
+"%ROOT%obj\tests\input_inject_test.exe"
+if errorlevel 1 exit /b 1
 rem Scenario runner stops when the game leaves the world (item 122); needs Python 3.
 where py >nul 2>nul
 if not errorlevel 1 (py -3 "%ROOT%tests\kah_world_lost_test.py") else (python "%ROOT%tests\kah_world_lost_test.py")

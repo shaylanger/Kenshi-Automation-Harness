@@ -42,6 +42,11 @@ Paths: set `KAH_DIR` to `<Kenshi>\mods\AutomationHarness` (or pass
    or the user is playing, stop and ask.
 2. The harness must be on **before launch** (`kah on`): it also turns
    autosave off and keeps the game running unfocused.
+   If someone uses the PC during the run, launch with
+   `kenshi-ctl.ps1 launch -Save <s> -Monitor DISPLAYn -Background -Isolate`: the window
+   opens on that monitor without taking the focus, and input isolation is on
+   (real keys/mouse ignored, cursor never clipped; send input with `key_inject` /
+   `mouse_inject`, see docs/COMMANDS.md `input_isolation`).
 3. Use a **test save**: copy a save (a "fixture") and keep the master copy
    elsewhere; restore it by copying it back over the save folder. Never test
    on the user's own saves; commands kill, teleport and change relations

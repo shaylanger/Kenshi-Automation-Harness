@@ -85,3 +85,135 @@ public static class KenshiWin32 {
     PostMessage(dialog, WM_COMMAND, new IntPtr(id), IntPtr.Zero);
   }
 }
+
+// Background launches: put the game's windows on a chosen monitor without
+// activating them, and hand the focus back if the game took it.
+public static class KenshiPlace {
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct MONITORINFOEX {
+    public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szDevice;
+  }
+  delegate bool MonitorEnumProc(IntPtr mon, IntPtr hdc, ref RECT r, IntPtr data);
+  [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumProc cb, IntPtr data);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr mon, ref MONITORINFOEX mi);
+  [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+  [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr ctx);
+  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hwnd);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
+  [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hwnd);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+  [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
+  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+
+  const uint SWP_NOSIZE = 0x1, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_NOOWNERZORDER = 0x200;
+
+  // Physical pixels for everything below (per-monitor DPI aware thread);
+  // returns the previous context (IntPtr.Zero before Windows 10 1607).
+  static IntPtr PhysicalCoords() {
+    try { return SetThreadDpiAwarenessContext(new IntPtr(-4)); } catch (EntryPointNotFoundException) { return IntPtr.Zero; }
+  }
+  static void Restore(IntPtr ctx) {
+    if (ctx == IntPtr.Zero) return;
+    try { SetThreadDpiAwarenessContext(ctx); } catch (EntryPointNotFoundException) { }
+  }
+
+  static string Norm(string device) {
+    device = (device ?? "").Trim();
+    return device.StartsWith(@"\.\") ? device.ToUpperInvariant() : (@"\.\" + device).ToUpperInvariant();
+  }
+
+  static List<MONITORINFOEX> All() {
+    var list = new List<MONITORINFOEX>();
+    EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr m, IntPtr dc, ref RECT r, IntPtr d) => {
+      var mi = new MONITORINFOEX(); mi.cbSize = Marshal.SizeOf(typeof(MONITORINFOEX));
+      if (GetMonitorInfo(m, ref mi)) list.Add(mi);
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
+
+  static string Rect(RECT r) { return string.Format("{0},{1} {2}x{3}", r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top); }
+
+  // "\.\DISPLAY1 0,0 1920x1080 | ..." (physical pixels)
+  public static string Monitors() {
+    IntPtr ctx = PhysicalCoords();
+    try {
+      var parts = new List<string>();
+      foreach (var m in All()) parts.Add(m.szDevice + " " + Rect(m.rcMonitor) + ((m.dwFlags & 1) != 0 ? " primary" : ""));
+      return string.Join(" | ", parts.ToArray());
+    } finally { Restore(ctx); }
+  }
+
+  // Monitor device the window is (mostly) on, or "none".
+  public static string MonitorOf(IntPtr hwnd) {
+    IntPtr ctx = PhysicalCoords();
+    try {
+      IntPtr mon = MonitorFromWindow(hwnd, 0 /* MONITOR_DEFAULTTONULL */);
+      if (mon == IntPtr.Zero) return "none";
+      var mi = new MONITORINFOEX(); mi.cbSize = Marshal.SizeOf(typeof(MONITORINFOEX));
+      return GetMonitorInfo(mon, ref mi) ? mi.szDevice : "?";
+    } finally { Restore(ctx); }
+  }
+
+  // Moves the window to the monitor's top-left corner without activating it
+  // (shrunk to the monitor if bigger; a minimized window is restored without
+  // activation first). Returns "" when placed, else the reason.
+  public static string Place(IntPtr hwnd, string device, out string where) {
+    where = "";
+    IntPtr ctx = PhysicalCoords();
+    try {
+      if (!IsWindow(hwnd)) return "no window";
+      string want = Norm(device);
+      MONITORINFOEX? hit = null;
+      foreach (var m in All()) if (m.szDevice.ToUpperInvariant() == want) hit = m;
+      if (hit == null) return "no monitor " + want + " (have: " + Monitors() + ")";
+      if (IsIconic(hwnd)) ShowWindow(hwnd, 4 /* SW_SHOWNOACTIVATE */);
+      RECT w; GetWindowRect(hwnd, out w);
+      RECT mr = hit.Value.rcMonitor;
+      int cw = w.Right - w.Left, ch = w.Bottom - w.Top;
+      int mw = mr.Right - mr.Left, mh = mr.Bottom - mr.Top;
+      uint flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+      bool shrink = cw > mw || ch > mh;
+      if (!shrink) flags |= SWP_NOSIZE;
+      if (w.Left != mr.Left || w.Top != mr.Top || shrink)
+        SetWindowPos(hwnd, IntPtr.Zero, mr.Left, mr.Top, Math.Min(cw, mw), Math.Min(ch, mh), flags);
+      GetWindowRect(hwnd, out w);
+      where = want + " window " + Rect(w) + " monitor " + Rect(mr) + (shrink ? " (shrunk to the monitor)" : "");
+      return "";
+    } finally { Restore(ctx); }
+  }
+
+  public static bool IsOwnedBy(IntPtr hwnd, uint[] pids) {
+    uint pid; GetWindowThreadProcessId(hwnd, out pid);
+    return Array.IndexOf(pids, pid) >= 0;
+  }
+
+  // The foreground window now, if it belongs to one of pids (else IntPtr.Zero).
+  public static IntPtr ForegroundOf(uint[] pids) {
+    IntPtr fg = GetForegroundWindow();
+    return fg != IntPtr.Zero && IsOwnedBy(fg, pids) ? fg : IntPtr.Zero;
+  }
+
+  // Gives the foreground back to prev (the user's window before the launch)
+  // while the game holds it: attach to the game's input thread, which may
+  // hand the foreground on. Never activates the game.
+  public static bool GiveBack(IntPtr prev) {
+    if (prev == IntPtr.Zero || !IsWindow(prev)) return false;
+    IntPtr fg = GetForegroundWindow();
+    if (fg == prev) return true;
+    uint pid;
+    uint fgThread = GetWindowThreadProcessId(fg, out pid), me = GetCurrentThreadId();
+    bool attached = fgThread != 0 && AttachThreadInput(me, fgThread, true);
+    SetForegroundWindow(prev);
+    if (attached) AttachThreadInput(me, fgThread, false);
+    return GetForegroundWindow() == prev;
+  }
+
+  public static IntPtr Foreground() { return GetForegroundWindow(); }
+}

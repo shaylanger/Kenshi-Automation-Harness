@@ -7,6 +7,11 @@ kenshi-ctl.ps1: start, stop and watch Kenshi for automated test runs.
   kenshi-ctl.ps1 stop                   kill Kenshi (never saves)
   kenshi-ctl.ps1 restart [-Save <name>] stop + launch
   kenshi-ctl.ps1 health                 ok | crashed | hung | not-running (exit code 0/1)
+  kenshi-ctl.ps1 monitors               monitor device names and bounds (physical pixels)
+  kenshi-ctl.ps1 place -Monitor <DISPLAYn>  move the game window there without activating it
+  kenshi-ctl.ps1 window                 which monitor the game window is on + who has the foreground
+  launch/restart options for runs while someone uses the PC: -Monitor <DISPLAYn> -Background -Isolate
+                                        (see the param block)
   kenshi-ctl.ps1 focus                  bring the game window to the foreground (KenshiFP
                                         hides the cursor and takes input only when focused)
   kenshi-ctl.ps1 screenshot [-Save n]   PNG of the game window (works in the background)
@@ -28,7 +33,16 @@ param(
   [int]$TimeoutSec = 300,
   [string]$Kenshi = $(if ($env:KENSHI_DIR) { $env:KENSHI_DIR } else { 'C:\Program Files (x86)\Steam\steamapps\common\Kenshi' }),
   [string]$ArchiveRoot = 'C:\KenshiTestRuns',
-  [string[]]$ExtraLogs = @()
+  [string[]]$ExtraLogs = @(),
+  # launch/restart for automated runs while someone uses the PC:
+  #  -Monitor DISPLAY1  put the launcher and game windows on that monitor (device name, see `monitors`), never activated
+  #  -Background        keep the user's foreground window: if the game takes the focus during the launch, hand it back
+  #  -Isolate           start with harness input isolation on (mods\AutomationHarness\input_isolation.flag, read and
+  #                     deleted by the harness at startup): the game ignores real keys/mouse, never clips the cursor,
+  #                     takes key_inject/mouse_inject input and keeps running unfocused
+  [string]$Monitor = '',
+  [switch]$Background,
+  [switch]$Isolate
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -Path (Join-Path $PSScriptRoot 'Win32Ui.cs')
@@ -84,10 +98,12 @@ function Stop-Kenshi {
 function Wait-Until([scriptblock]$Cond, [int]$Seconds, [string]$What) {
   $deadline = (Get-Date).AddSeconds($Seconds)
   while ((Get-Date) -lt $deadline) {
+    # background launch: place new windows / hand the focus back before (and between) checks
+    if ($script:LaunchKeeper) { & $script:LaunchKeeper }
     $r = & $Cond
     if ($r) { return $r }
     if ((Get-KenshiProcs).Count -eq 0) { throw "Kenshi exited while waiting for $What" }
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds $(if ($script:LaunchKeeper) { 100 } else { 500 })
   }
   throw "timed out after $Seconds s waiting for $What"
 }
@@ -111,6 +127,13 @@ function Start-Kenshi {
     Set-Content -Path "$HarnessDir\autoload.txt" -Value $Save -Encoding Ascii -NoNewline
   }
   Remove-Item "$HarnessDir\inbox.txt", "$HarnessDir\inbox.txt.lock", "$HarnessDir\inbox.txt.reading" -ErrorAction SilentlyContinue
+  $flag = "$HarnessDir\input_isolation.flag"
+  if ($Isolate) { Set-Content -Path $flag -Value 'kenshi-ctl launch -Isolate' -Encoding Ascii }
+  else { Remove-Item $flag -ErrorAction SilentlyContinue }
+  $script:PrevForeground = [KenshiPlace]::Foreground()
+  $script:KeeperNotes = @{}
+  $script:FocusReturns = 0
+  if ($Monitor -or $Background) { $script:LaunchKeeper = { Keep-Background } }
   $t0 = Get-Date
   Start-Process -FilePath "$Kenshi\kenshi_x64.exe" -WorkingDirectory $Kenshi | Out-Null
   $launcher = Wait-Until { Get-Launcher } 120 'the launcher dialog'
@@ -126,6 +149,38 @@ function Start-Kenshi {
   }
   $p = Get-KenshiProcs | Select-Object -First 1
   "running: pid=$($p.ProcessId) cmd=$($p.CommandLine)"
+  if ($script:LaunchKeeper) {
+    & $script:LaunchKeeper
+    $script:LaunchKeeper = $null
+    foreach ($n in $script:KeeperNotes.Values) { "background: $n" }
+    "background: focus handed back $($script:FocusReturns) time(s); foreground now: $(Get-ForegroundDesc)"
+  }
+  if ($Isolate) { "input isolation: starts ON (input_isolation.flag); check with: kah input_isolation status" }
+}
+
+function Get-ForegroundDesc {
+  $fg = [KenshiPlace]::Foreground(); $fgPid = [uint32]0
+  [KenshiWin32]::GetWindowThreadProcessId($fg, [ref]$fgPid) | Out-Null
+  $name = if ($fgPid) { (Get-Process -Id $fgPid -ErrorAction SilentlyContinue).ProcessName } else { 'none' }
+  "$name (pid $fgPid)"
+}
+
+# Background launch keeper (each wait poll): every visible window of the game
+# processes goes to -Monitor without activation; with -Background, if a game
+# window took the foreground, it goes back to the window that had it before.
+function Keep-Background {
+  $pids = [uint32[]]@(Get-Process kenshi_x64 -ErrorAction SilentlyContinue | ForEach-Object { [uint32]$_.Id })
+  if ($pids.Count -eq 0) { return }
+  if ($Monitor) {
+    foreach ($w in [KenshiWin32]::TopWindows($pids)) {
+      $where = ''
+      $err = [KenshiPlace]::Place($w.Handle, $Monitor, [ref]$where)
+      $script:KeeperNotes["$($w.Handle)"] = if ($err) { "$($w.Cls): not placed: $err" } else { "$($w.Cls) on $where" }
+    }
+  }
+  if ($Background -and [KenshiPlace]::ForegroundOf($pids) -ne [IntPtr]::Zero) {
+    if ([KenshiPlace]::GiveBack($script:PrevForeground)) { $script:FocusReturns++ }
+  }
 }
 
 function Get-Health {
@@ -150,7 +205,26 @@ switch ($Command) {
     "launcher open: $([bool](Get-Launcher))   game window: $([bool](Get-GameWindow))   health: $(Get-Health)"
   }
   'launch' { Start-Kenshi }
-  'stop' { Save-Logs 'stop' | Out-Null; Stop-Kenshi }
+  'stop' {
+    Save-Logs 'stop' | Out-Null; Stop-Kenshi
+    # a later manual launch starts with normal input
+    Remove-Item "$HarnessDir\input_isolation.flag", "$HarnessDir\input_isolation.on" -ErrorAction SilentlyContinue
+  }
+  'monitors' { [KenshiPlace]::Monitors() }
+  'place' {
+    $win = Get-GameWindow
+    if (-not $win) { throw 'no game window' }
+    $m = if ($Monitor) { $Monitor } else { throw 'place needs -Monitor <DISPLAYn>' }
+    $where = ''; $err = [KenshiPlace]::Place($win.Handle, $m, [ref]$where)
+    if ($err) { "not placed: $err"; exit 1 }
+    "placed (not activated): $where; on monitor $([KenshiPlace]::MonitorOf($win.Handle)); foreground: $(Get-ForegroundDesc)"
+  }
+  'window' {
+    $win = Get-GameWindow
+    if (-not $win) { throw 'no game window' }
+    $r = New-Object KenshiWin32+RECT; [KenshiWin32]::GetWindowRect($win.Handle, [ref]$r) | Out-Null
+    "monitor=$([KenshiPlace]::MonitorOf($win.Handle)) rect=$($r.Left),$($r.Top) $($r.Right - $r.Left)x$($r.Bottom - $r.Top) (DPI-virtualized for this shell) foreground=$(Get-ForegroundDesc)"
+  }
   'restart' { if ((Get-KenshiProcs).Count -gt 0) { Save-Logs 'restart' | Out-Null; Stop-Kenshi }; Start-Kenshi }
   'health' { $h = Get-Health; $h; if ($h -ne 'ok') { exit 1 } }
   'focus' {

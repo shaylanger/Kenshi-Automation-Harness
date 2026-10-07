@@ -89,6 +89,13 @@ To take the same `<npc>` forms as the built-ins (name, `#serial/index`, `#serial
 handler (game thread): it returns the `Character*` or NULL with the reason in `error`.
 It is NULL with a harness older than 2026-10-03, so check it before use.
 
+If your mod reads input only while the game window has the focus, also accept
+`api.inputIsolated && api.inputIsolated()` (1 while `input_isolation on`): automated
+runs then keep the game in the background and feed it injected input
+(`key_inject` / `mouse_inject`); `GetAsyncKeyState`, `GetKeyState`, `GetCursorPos`
+and DirectInput keyboard/mouse reads already return that injected input in-process.
+NULL with a harness older than 2026-10-07.
+
 A pending command never completed just times out on the client side; a
 `complete` for an unknown or already answered id is ignored (and logged).
 

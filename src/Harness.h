@@ -66,3 +66,12 @@ std::string ExtensionCommandList();
 
 // Inventory.cpp: inventory incl. worn items and backpack, as a JSON array.
 bool BuildInventoryJson(Character *c, std::string &json, int &count);
+
+// InputIsolation.cpp: input isolation (game ignores the user's real input,
+// takes injected input, keeps running unfocused). Startup before the hooks,
+// the tick every frame; RunInputCommand handles input_isolation/key_inject/
+// mouse_inject (false = not one of them).
+void InputIsolationStartup();
+void InputIsolationTick();
+bool InputIsolationOn();
+bool RunInputCommand(const std::vector<std::string> &f, bool &ok, std::string &out);

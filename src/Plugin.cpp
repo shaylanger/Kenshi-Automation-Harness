@@ -323,6 +323,7 @@ void FrameWork(bool fromOgre) {
   else if (g_ogreFrames)
     return;
   MeasureFrame();
+  InputIsolationTick();
   SampleProduction(ou);
   KeepSuppliedPowered();
   // The keepers move, heal, teleport (pin) and order characters: at the safe
@@ -562,7 +563,7 @@ void InstallHooks() {
 
   // Ogre stops rendering (and the game stops updating) while its window is
   // in the background; automated runs keep the game running unfocused.
-  if (!HarnessEnabled())
+  if (!HarnessEnabled() && !InputIsolationOn())
     return;
   int windows = 0;
   Ogre::RenderSystem *rs = root->getRenderSystem();
@@ -640,5 +641,6 @@ __declspec(dllexport) void startPlugin() {
   DeleteFileA((HarnessDir() + "\\harness.log").c_str());
   Log("KAH: Kenshi Automation Harness starting (dir=" + HarnessDir() +
       " enabled=" + (HarnessEnabled() ? "1" : "0") + ")");
+  InputIsolationStartup();
   InstallHooks();
 }

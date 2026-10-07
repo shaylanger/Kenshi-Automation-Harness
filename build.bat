@@ -37,7 +37,7 @@ if exist "%ROOT%obj" rmdir /s /q "%ROOT%obj"
 if not exist "%ROOT%out" mkdir "%ROOT%out"
 mkdir "%ROOT%obj"
 
-set SOURCES=Plugin Commands Extensions Inventory
+set SOURCES=Plugin Commands Extensions Inventory InputIsolation
 
 set CFLAGS=/nologo /c /MD /O2 /Ob2 /GL /GR /EHa /W3 /Zi /DWIN32 /D_WINDOWS /DNDEBUG /DUNICODE /D_UNICODE /DBOOST_ALL_NO_LIB /DBOOST_ERROR_CODE_HEADER_ONLY /DBOOST_SYSTEM_NO_DEPRECATED
 set INCS=/I"%ROOT%compat" /I"%ROOT%src" /I"%KAH_SDK%\Include" /I"%KAH_SDK%\Include\ogre" /I"%KAH_SDK%\Include\mygui" /I"%KAH_BOOST%"
