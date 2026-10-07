@@ -7,6 +7,8 @@ kenshi-ctl.ps1: start, stop and watch Kenshi for automated test runs.
   kenshi-ctl.ps1 stop                   kill Kenshi (never saves)
   kenshi-ctl.ps1 restart [-Save <name>] stop + launch
   kenshi-ctl.ps1 health                 ok | crashed | hung | not-running (exit code 0/1)
+  kenshi-ctl.ps1 focus                  bring the game window to the foreground (KenshiFP
+                                        hides the cursor and takes input only when focused)
   kenshi-ctl.ps1 screenshot [-Save n]   PNG of the game window (works in the background)
                                         -> <ArchiveRoot>\shots\<n|time>.png
 
@@ -151,6 +153,16 @@ switch ($Command) {
   'stop' { Save-Logs 'stop' | Out-Null; Stop-Kenshi }
   'restart' { if ((Get-KenshiProcs).Count -gt 0) { Save-Logs 'restart' | Out-Null; Stop-Kenshi }; Start-Kenshi }
   'health' { $h = Get-Health; $h; if ($h -ne 'ok') { exit 1 } }
+  'focus' {
+    $win = Get-GameWindow
+    if (-not $win) { throw 'no game window' }
+    if ([KenshiWin32]::ForceForeground($win.Handle)) { 'focused'; break }
+    $fg = [KenshiWin32]::GetForegroundWindow(); $fgPid = [uint32]0
+    [KenshiWin32]::GetWindowThreadProcessId($fg, [ref]$fgPid) | Out-Null
+    $fgName = if ($fgPid) { (Get-Process -Id $fgPid -ErrorAction SilentlyContinue).ProcessName } else { 'none' }
+    $locked = [bool](Get-Process LogonUI -ErrorAction SilentlyContinue)
+    "focus refused: foreground=$fg pid=$fgPid ($fgName) logonui=$locked"; exit 1
+  }
   'screenshot' {
     Add-Type -Path (Join-Path $PSScriptRoot 'WindowCapture.cs') -ReferencedAssemblies System.Drawing
     $win = Get-GameWindow
