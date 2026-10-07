@@ -69,6 +69,11 @@ cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests
 if errorlevel 1 (type "%ROOT%obj\tests\build_walk_arrival.log" & echo TEST BUILD FAILED & exit /b 1)
 "%ROOT%obj\tests\walk_arrival_test.exe"
 if errorlevel 1 exit /b 1
+cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\hold_speed_test.exe" ^
+  "%ROOT%tests\hold_speed_test.cpp" > "%ROOT%obj\tests\build_hold_speed.log" 2>&1
+if errorlevel 1 (type "%ROOT%obj\tests\build_hold_speed.log" & echo TEST BUILD FAILED & exit /b 1)
+"%ROOT%obj\tests\hold_speed_test.exe"
+if errorlevel 1 exit /b 1
 cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\accel_profile_test.exe" ^
   "%ROOT%tests\accel_profile_test.cpp" > "%ROOT%obj\tests\build_accel_profile.log" 2>&1
 if errorlevel 1 (type "%ROOT%obj\tests\build_accel_profile.log" & echo TEST BUILD FAILED & exit /b 1)

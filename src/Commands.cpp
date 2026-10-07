@@ -18,6 +18,7 @@
 #include "ProtectRules.h"
 #include "CrimeArgs.h"
 #include "RaceFilter.h"
+#include "HoldSpeed.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -729,16 +730,11 @@ int g_holdResumes = 0;
 void HoldSpeedTick(GameWorld *world) {
   if (g_holdSpeed <= 0 || !Valid(world))
     return;
-  if (!world->isPaused()) {
-    g_holdPausedAt = 0;
-    return;
-  }
-  const DWORD now = GetTickCount();
-  if (!g_holdPausedAt) {
-    g_holdPausedAt = now;
-    return;
-  }
-  if (now - g_holdPausedAt < 2000)
+  // Never resume during a save load / menu (4080 b31: resumed 2 s into a load, then the game crashed in it).
+  unsigned long pausedAt = g_holdPausedAt;
+  const HoldAction act = HoldSpeedDecide(g_holdSpeed, Phase(world), world->isPaused(), GetTickCount(), pausedAt);
+  g_holdPausedAt = pausedAt;
+  if (act != HOLD_RESUME)
     return;
   world->userPause(false);
   world->setGameSpeed(g_holdSpeed, false);
