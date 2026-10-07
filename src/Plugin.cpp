@@ -46,6 +46,10 @@ struct LockInit {
 
 DWORD g_lastPoll = 0;
 bool g_loggedFirstTick = false;
+bool g_safePointHooked = false;  // Hook_ProcessThreadMessages installed
+DWORD g_lastSafePoint = 0;       // GetTickCount of its last call
+
+void PollInbox(GameWorld *world);
 
 } // namespace
 
@@ -223,6 +227,15 @@ void Tick(const char *source) {
         " phase=" + Phase(world) + " thread=" + Int(GetCurrentThreadId()) + ")");
   }
   WatchLoads();
+  // In a loaded world the commands run at the safe point instead (see
+  // Hook_ProcessThreadMessages); the frame listener takes over again when the
+  // safe point has not fired for 500 ms (main menu, loading, game paused).
+  if (g_safePointHooked && GetTickCount() - g_lastSafePoint < 500)
+    return;
+  PollInbox(world);
+}
+
+void PollInbox(GameWorld *world) {
   DWORD now = GetTickCount();
   if (now - g_lastPoll < 250)
     return;
@@ -233,6 +246,44 @@ void Tick(const char *source) {
   } catch (...) {
     Log("KAH: exception in ProcessInbox");
   }
+}
+
+// Safe point for world-changing commands. Every frame the game starts its
+// GameWorld thread (factions, squads, AI) before Ogre renders the frame and
+// joins it in GameWorld::mainLoop_GPUSensitiveStuff (Ogre frameEnded), which
+// then calls processThreadMessages. Ogre frameStarted, where Tick runs, sits
+// inside that window, so commands ran while the world thread was walking the
+// same squads: "unload" (Platoon::deactivate) crashed the world thread in
+// Blackboard::countCharacters (exe+0x268A68, Platoon::activePlatoon null) and
+// the game hung behind RE_Kenshi's crash handler (5090 batch K, 2026-10-07).
+// Right after processThreadMessages the world thread is joined and idle until
+// the next frame's beginThread.
+typedef void(__fastcall *ProcessThreadMessagesFn)(GameWorld *);
+ProcessThreadMessagesFn g_processThreadMessagesOrig = nullptr;
+
+void __fastcall Hook_ProcessThreadMessages(GameWorld *world) {
+  g_processThreadMessagesOrig(world);
+  g_lastSafePoint = GetTickCount();
+  PollInbox(world);
+}
+
+// processThreadMessages is private in the SDK; find it through its call in
+// mainLoop_GPUSensitiveStuff: 48 8B CE (mov rcx,rsi) E8 <rel32>, the first
+// such call after the thread join (Steam 1.0.65: +0x68), following
+// incremental-link thunks. 0 if the bytes differ.
+unsigned char *ProcessThreadMessagesAddr(__int64 gpuAddr) {
+  const unsigned char *p = (const unsigned char *)gpuAddr;
+  if (!p || IsBadReadPtr(p, 0x120))
+    return nullptr;
+  for (int i = 0x10; i < 0x118; ++i) {
+    if (p[i] == 0x48 && p[i + 1] == 0x8B && p[i + 2] == 0xCE && p[i + 3] == 0xE8) {
+      unsigned char *q = (unsigned char *)(p + i + 8) + *(const int *)(p + i + 4);
+      for (int hops = 0; hops < 4 && !IsBadReadPtr(q, 5) && q[0] == 0xE9; ++hops)
+        q = q + 5 + *(const int *)(q + 1);
+      return IsBadReadPtr(q, 16) ? nullptr : q;
+    }
+  }
+  return nullptr;
 }
 
 // Frame times for "fps", measured here with QueryPerformanceCounter (game
@@ -439,6 +490,20 @@ void InstallHooks() {
     Log("KAH: SaveManager::updateAutoSave hook status=" + Int((int)autoSaveStatus));
   } else {
     Log("KAH: SaveManager::updateAutoSave not found; autosave stays on");
+  }
+  __int64 gpuAddr = KenshiLib::GetRealAddress(&GameWorld::_NV_mainLoop_GPUSensitiveStuff);
+  unsigned char *ptmAddr = ProcessThreadMessagesAddr(gpuAddr);
+  if (ptmAddr) {
+    int s = (int)KenshiLib::AddHook((void *)ptmAddr, (void *)Hook_ProcessThreadMessages,
+                                    (void **)&g_processThreadMessagesOrig);
+    g_safePointHooked = (s == 0 && g_processThreadMessagesOrig);
+    char at[32];
+    sprintf_s(at, "+0x%llX", (unsigned long long)(ptmAddr - (unsigned char *)GetModuleHandleA(nullptr)));
+    Log(std::string("KAH: GameWorld::processThreadMessages hook (") + at + ") status=" + Int(s) +
+        (g_safePointHooked ? "; world commands run after the world thread join" : ""));
+  } else {
+    Log("KAH: processThreadMessages call not found in mainLoop_GPUSensitiveStuff; commands run in "
+        "frameStarted (racing the world thread)");
   }
 
   __int64 msgAddr = KenshiLib::GetRealAddress(&GameWorld::showPlayerAMessage);

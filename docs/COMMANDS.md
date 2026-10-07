@@ -22,6 +22,11 @@ temp file unique to the call (`inbox.txt.<pid>.<n>.tmp`), rename it to
 `inbox.txt.reading` before reading it, then deletes that copy, so a new
 inbox written meanwhile is never lost. Arguments can't contain tabs or
 newlines.
+In a loaded world the commands run right after `GameWorld::processThreadMessages`
+(world thread joined), not in the frame callback, so they never race the
+game's squad/AI thread; on the menu, while loading or when that point stops
+firing for 500 ms they run from the frame callback (`harness.log` line
+`KAH: GameWorld::processThreadMessages hook ... status=0` at startup).
 
 ## Characters
 
