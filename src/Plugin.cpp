@@ -50,6 +50,10 @@ bool g_safePointHooked = false;  // Hook_ProcessThreadMessages installed
 DWORD g_lastSafePoint = 0;       // GetTickCount of its last call
 
 void PollInbox(GameWorld *world);
+void WorldKeepers();
+
+// True while the processThreadMessages safe point fires (loaded world, unpaused).
+bool SafePointActive() { return g_safePointHooked && GetTickCount() - g_lastSafePoint < 500; }
 
 } // namespace
 
@@ -230,7 +234,7 @@ void Tick(const char *source) {
   // In a loaded world the commands run at the safe point instead (see
   // Hook_ProcessThreadMessages); the frame listener takes over again when the
   // safe point has not fired for 500 ms (main menu, loading, game paused).
-  if (g_safePointHooked && GetTickCount() - g_lastSafePoint < 500)
+  if (SafePointActive())
     return;
   PollInbox(world);
 }
@@ -264,6 +268,7 @@ ProcessThreadMessagesFn g_processThreadMessagesOrig = nullptr;
 void __fastcall Hook_ProcessThreadMessages(GameWorld *world) {
   g_processThreadMessagesOrig(world);
   g_lastSafePoint = GetTickCount();
+  WorldKeepers();
   PollInbox(world);
 }
 
@@ -320,12 +325,22 @@ void FrameWork(bool fromOgre) {
   MeasureFrame();
   SampleProduction(ou);
   KeepSuppliedPowered();
-  KeepProtected();
-  KeepTurretAim();
-  KeepWalkTimers();
+  // The keepers move, heal, teleport (pin) and order characters: at the safe
+  // point when it fires (see Hook_ProcessThreadMessages), here otherwise.
+  // From frameStarted they raced the world thread like the commands did
+  // (5090 batch K: NavMesh thread crash in findPath, exe+0x3AADAD, 6 s after
+  // a frameStarted "ko" on a fighting bandit, 2026-10-07).
+  if (!SafePointActive())
+    WorldKeepers();
   if (++g_framesSinceLaunch % 600 == 0)
     Log("KAH: fps frames=" + Int(g_framesSinceLaunch) + " source=" + (fromOgre ? "ogre" : "mygui") +
         " window: " + g_frameStats.Report());
+}
+
+void WorldKeepers() {
+  KeepProtected();
+  KeepTurretAim();
+  KeepWalkTimers();
 }
 
 class AutomationFrameListener : public Ogre::FrameListener {
