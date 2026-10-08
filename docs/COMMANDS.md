@@ -179,6 +179,7 @@ Timers (`detecttime`, `healtime`, `swimtime`) reply later like `walktime` (the c
 | Command | Does |
 |---|---|
 | `ui [filter] [all]` | visible widgets (name, caption, position, size); `all` includes hidden ones |
+| `ui tree <name or exact caption> [up <n>]` | the visible subtree of the first visible widget with that name/caption, or of its `n`-th parent (default 1, 0..10): e.g. `ui tree Control up 2` lists every entry of the context menu that holds the option |
 | `click <widget name or caption>` | fire a widget's click (e.g. `click INV` opens the inventory) |
 | `messages [n]` | the last `n` (default 10) on-screen player messages since launch, the game's own ("Saving...", "Research complete: X", "X has died from blood loss.", trade-window errors, faction changes) and mods' (KAH 2): one hook on the MessageRoller function that both `GameWorld::showPlayerAMessage` variants forward to; the reply ends with `(hook: MessageRoller+0x...)`, or `(hook: GameWorld)` when it fell back to hooking the two GameWorld functions. To provoke a vanilla one: `save <name>` ("Saving...") or `research <name>` ("Research complete: <name>") |
 | `screenshot [name]` | the game's own frame, HUD and windows included, to `shots/<name>.png` in the mod folder |

@@ -393,6 +393,37 @@ bool RunAnyPhaseCommand(const std::vector<std::string> &f, bool &ok, std::string
       out = "no MyGUI";
       return true;
     }
+    if (f.size() >= 4 && Lower(f[2]) == "tree") { // ui tree <name|exact caption> [up <n>]: the widget's (or its
+      // n-th parent's) visible subtree, e.g. all entries of the menu that holds an option (captions, positions)
+      int up = 1;
+      if (f.size() >= 6 && Lower(f[4]) == "up")
+        up = atoi(f[5].c_str());
+      if (up < 0 || up > 10 || (f.size() != 4 && f.size() != 6)) {
+        out = "usage: ui tree <widget name or exact caption> [up <0..10>]";
+        return true;
+      }
+      const std::string wanted = Lower(f[3]);
+      MyGUI::Widget *w = nullptr;
+      MyGUI::EnumeratorWidgetPtr roots = gui->getEnumerator();
+      while (!w && roots.next())
+        w = FindWidget(roots.current(), wanted, 0);
+      if (!w) {
+        out = "no visible widget named or captioned '" + f[3] + "'";
+        return true;
+      }
+      int went = 0;
+      while (went < up && w->getParent()) {
+        w = w->getParent();
+        ++went;
+      }
+      int n = 0;
+      std::string list;
+      ListWidgets(w, "", false, 0, list, n);
+      ok = true;
+      out = Int(n) + " widget(s) under " + (w->getName().empty() ? std::string("-") : w->getName()) + " (up " +
+            Int(went) + ")" + (n >= 120 ? " (first 120)" : "") + list;
+      return true;
+    }
     bool all = false;
     std::string filter;
     for (size_t i = 2; i < f.size(); ++i) {
