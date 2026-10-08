@@ -180,7 +180,23 @@ function Keep-Background {
   }
   if ($Background -and [KenshiPlace]::ForegroundOf($pids) -ne [IntPtr]::Zero) {
     if ([KenshiPlace]::GiveBack($script:PrevForeground)) { $script:FocusReturns++ }
+    # nothing to give it back to (launched from a background shell, user idle): drop it instead
+    elseif ([KenshiPlace]::Demote([KenshiPlace]::ForegroundOf($pids))) { $script:FocusReturns++; $script:KeeperNotes['demote'] = 'game had the foreground with no window to hand it to: minimized/restored to drop it' }
   }
+}
+
+# background: re-place the game window (if -Monitor) and make sure it does not hold the foreground; prints `window`
+function Keep-BackgroundNow {
+  $win = Get-GameWindow
+  if (-not $win) { throw 'no game window' }
+  if ($Monitor) { $where = ''; [KenshiPlace]::Place($win.Handle, $Monitor, [ref]$where) | Out-Null }
+  $pids = [uint32[]]@(Get-Process kenshi_x64 -ErrorAction SilentlyContinue | ForEach-Object { [uint32]$_.Id })
+  $note = ''
+  if ([KenshiPlace]::ForegroundOf($pids) -ne [IntPtr]::Zero) {
+    $note = if ([KenshiPlace]::Demote([KenshiPlace]::ForegroundOf($pids))) { ' (foreground dropped)' } else { ' (STILL FOREGROUND)' }
+  }
+  $r = New-Object KenshiWin32+RECT; [KenshiWin32]::GetWindowRect($win.Handle, [ref]$r) | Out-Null
+  "monitor=$([KenshiPlace]::MonitorOf($win.Handle)) rect=$($r.Left),$($r.Top) $($r.Right - $r.Left)x$($r.Bottom - $r.Top) foreground=$(Get-ForegroundDesc)$note"
 }
 
 function Get-Health {
@@ -219,6 +235,7 @@ switch ($Command) {
     if ($err) { "not placed: $err"; exit 1 }
     "placed (not activated): $where; on monitor $([KenshiPlace]::MonitorOf($win.Handle)); foreground: $(Get-ForegroundDesc)"
   }
+  'background' { Keep-BackgroundNow }
   'window' {
     $win = Get-GameWindow
     if (-not $win) { throw 'no game window' }

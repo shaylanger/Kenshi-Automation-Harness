@@ -216,4 +216,17 @@ public static class KenshiPlace {
   }
 
   public static IntPtr Foreground() { return GetForegroundWindow(); }
+
+  // Drops the foreground from the game when there is no window to give it back
+  // to (launch from a background shell while the user was idle, 2026-10-08):
+  // minimizing the foreground window makes Windows activate the next one; the
+  // harness's isolation restores the game window itself without activation
+  // (WM_SIZE SIZE_MINIMIZED -> SW_SHOWNOACTIVATE), else we restore it here.
+  public static bool Demote(IntPtr game) {
+    if (game == IntPtr.Zero || GetForegroundWindow() != game) return true;
+    ShowWindow(game, 6 /* SW_MINIMIZE */);
+    System.Threading.Thread.Sleep(200);
+    if (IsIconic(game)) ShowWindow(game, 4 /* SW_SHOWNOACTIVATE */);
+    return GetForegroundWindow() != game;
+  }
 }
