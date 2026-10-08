@@ -2694,6 +2694,10 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       if (!placed) {
         inv->dropItem(moved);
         where = "ground";
+        // remembered like a `drop`, so `pickup` finds it at once (even before its physics object exists)
+        g_dropped.push_back(moved->getHandle());
+        if (g_dropped.size() > 64)
+          g_dropped.erase(g_dropped.begin());
       }
       ok = !moved->isEquipped;
       Log("KAH: unequip " + c->getName() + " from=" + from + " to=" + where + " " +

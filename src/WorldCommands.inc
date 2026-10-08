@@ -1007,8 +1007,9 @@ Item *FindGroundItem(GameWorld *world, const Ogre::Vector3 &at, const std::strin
     if (OnGround(it))
       found.push_back(it);
   }
-  const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER, BLUEPRINT};
-  for (int t = 0; t < 5; ++t) {
+  // CROSSBOW: a dropped crossbow is its own item type (objectType 107), unseen with the other five
+  const itemType types[] = {ITEM, WEAPON, ARMOUR, CONTAINER, BLUEPRINT, CROSSBOW};
+  for (int t = 0; t < 6; ++t) {
     lektor<RootObject *> nearby;
     try {
       world->getObjectsWithinSphere(nearby, at, radius, types[t], 256, nullptr);
