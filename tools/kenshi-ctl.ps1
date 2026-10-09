@@ -134,6 +134,13 @@ function Start-Kenshi {
   $script:KeeperNotes = @{}
   $script:FocusReturns = 0
   if ($Monitor -or $Background) { $script:LaunchKeeper = { Keep-Background } }
+  # background: lock the foreground before starting the game so it never gets the right to activate its windows
+  # (see KenshiPlace.LockForeground); kept for the whole launch (re-locked each keeper poll), unlocked at the end
+  $script:FgLocked = $false
+  if ($Background) {
+    $script:FgLocked = [KenshiPlace]::LockForeground($true)
+    "background: foreground lock $(if ($script:FgLocked) { 'ON (game starts without the right to take the foreground)' } else { 'not taken (this shell may not force the foreground, so the game may not either)' })"
+  }
   $t0 = Get-Date
   Start-Process -FilePath "$Kenshi\kenshi_x64.exe" -WorkingDirectory $Kenshi | Out-Null
   $launcher = Wait-Until { Get-Launcher } 120 'the launcher dialog'
@@ -149,6 +156,7 @@ function Start-Kenshi {
   }
   $p = Get-KenshiProcs | Select-Object -First 1
   "running: pid=$($p.ProcessId) cmd=$($p.CommandLine)"
+  if ($script:FgLocked) { [KenshiPlace]::LockForeground($false) | Out-Null; $script:FgLocked = $false }
   if ($script:LaunchKeeper) {
     & $script:LaunchKeeper
     $script:LaunchKeeper = $null
@@ -170,6 +178,7 @@ function Get-ForegroundDesc {
 # window took the foreground, it goes back to the window that had it before.
 function Keep-Background {
   $pids = [uint32[]]@(Get-Process kenshi_x64 -ErrorAction SilentlyContinue | ForEach-Object { [uint32]$_.Id })
+  if ($script:FgLocked) { [KenshiPlace]::LockForeground($true) | Out-Null }
   if ($pids.Count -eq 0) { return }
   if ($Monitor) {
     foreach ($w in [KenshiWin32]::TopWindows($pids)) {

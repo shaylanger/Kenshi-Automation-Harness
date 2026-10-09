@@ -106,6 +106,7 @@ public static class KenshiPlace {
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
+  [DllImport("user32.dll")] static extern bool LockSetForegroundWindow(uint code);
   [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hwnd);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
   [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
@@ -216,6 +217,15 @@ public static class KenshiPlace {
   }
 
   public static IntPtr Foreground() { return GetForegroundWindow(); }
+
+  // Foreground lock for background launches (2026-10-09: the game took the foreground on DISPLAY2 and neither GiveBack nor
+  // Demote could drop it while it was loading). Root cause: a new process inherits the right to activate its first window
+  // when the process that starts it may force the foreground, which every process may once the user has been idle longer
+  // than ForegroundLockTimeout (200 s); the launcher dialog / game window then activate themselves. LSFW_LOCK (1) held by
+  // the launching shell makes the foreground "locked", so the game gets no such right and its windows open inactive.
+  // Returns false when this shell may not force the foreground either (user active): then the game can't take it anyway.
+  // LSFW_UNLOCK (2) when the launch is done.
+  public static bool LockForeground(bool on) { return LockSetForegroundWindow(on ? 1u : 2u); }
 
   // Drops the foreground from the game when there is no window to give it back
   // to (launch from a background shell while the user was idle, 2026-10-08):
