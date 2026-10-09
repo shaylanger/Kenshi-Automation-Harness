@@ -168,16 +168,26 @@ def send(d, cmd, args, timeout=None):
     deadline = time.time() + timeout
     # Unique across concurrent clients (a millisecond alone was not).
     cid = 'k%d_%d_%d' % (int(time.time() * 1000), os.getpid(), _sent[0] + 1)
+    # The reply is appended after our command is written: scan only from the
+    # outbox size seen before writing (a long session's outbox grows to tens
+    # of MB and rescanning all of it cost ~1.3 s per command). A file smaller
+    # than that was truncated meanwhile: scan it from the start.
+    try:
+        start = os.path.getsize(outbox)
+    except OSError:
+        start = 0
     write_command(d, '\t'.join([cid, cmd] + args), deadline)
     while time.time() < deadline:
         if os.path.exists(outbox):
-            with open(outbox, encoding='utf-8', errors='replace') as f:
-                for line in f:
+            with open(outbox, 'rb') as f:
+                f.seek(0, 2)
+                f.seek(start if f.tell() >= start else 0)
+                for raw in f:
                     # The harness may still be writing this line (its stream
                     # flushes long replies in chunks): only complete lines count.
-                    if not line.endswith('\n'):
+                    if not raw.endswith(b'\n'):
                         continue
-                    parts = line.rstrip('\n').split('\t', 2)
+                    parts = raw.decode('utf-8', errors='replace').rstrip('\n').split('\t', 2)
                     if parts[0] == cid and len(parts) == 3:
                         return parts[1] == 'ok', parts[2]
         time.sleep(0.2)
