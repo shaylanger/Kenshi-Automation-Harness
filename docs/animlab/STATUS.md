@@ -2,7 +2,7 @@
 
 Owner: animation-lab builder agent (ordered by Shay, 2026-10-09). This file + git are the
 ONLY state (no temp handoffs). Update, commit and push at every milestone.
-Builders #1-#3 stopped (context limit); builder #4 (2026-10-09 evening) finished P2, works on P3.
+Builders #1-#3 stopped (context limit); builder #4 finished P2 + started P3; builder #5 finishes P3.
 
 ## Goal
 An offline animation lab for Kenshi first-person viewmodels, built in 3 phases (all required):
@@ -36,7 +36,20 @@ regression tests run before every commit.
 - [x] P2 metrics lab: DONE (builder #4): `tools/animlab/metricslab.py`, adapter `kfpvm_drive.c` (`build.sh --drive`),
   example `components/KenshiFP/animlab/motions/dualwield-alternate.json`, tests `tests/animlab/test_metricslab.py`,
   USAGE.md "Phase 2", regress.sh steps 4-6. Tag `animlab-p2`.
-- [ ] P3 visual lab: in progress (see Next steps)
+- [ ] P3 visual lab: in progress. Builder #4 (context limit) wrote, builder #5 commits/finishes:
+  - harness `tools/animlab/visual/__init__.py`, `visual/ogre.py` (Ogre .mesh v1.100 + .skeleton v1.80 reader; Ogre
+    skeleton bone chunk size excludes the name string, handled), `visual/render.py` (Rig posing from joints, numpy
+    z-buffer rasteriser, `still|frames|compare` CLI, frames -> MP4 via ffmpeg).
+  - workspace `components/KenshiFP/animlab/visual.json` (game_dir /mnt/d/Steam/steamapps/common/Kenshi, male_skeleton,
+    human_male.mesh (arms = triangles weighted >=0.5 to UA/FA/Hand), katana05.mesh, prop_axes, prop_local_q (g_vm_pldq),
+    prop_roll_deg {"0":60} (= g_vm_groll; without it hand X was 45 deg off), fov 1.245/0.70, near 0.5).
+  - Validation 1: `render.py compare e-flatA.txt e-flatA.png` (copies in /root/animlab-work/p3, from
+    C:\KenshiTestRuns\opt): hand X vs measured mh 0.3 deg; rendered katana outline (red) on the game's blade + guard,
+    arm outline (green) around the gauntlet. e-flatB/e-ready = same pose as e-flatA; e-h90 / e-h-90 differ (frames 2/3).
+  - Left: (1) validate e-h90 + e-h-90; (2) MP4s of a recording (/root/animlab-work/vmrec-q-sword-z0.txt) and the
+    dual-wield drive output (needs `--weapons R,L`); (3) tests/animlab/test_visual.py (synthetic mesh/skeleton binary,
+    raster, posing); (4) USAGE "Phase 3", STATUS, commit, tag animlab-p3 both repos; (5) reply to main.
+  - Gotcha: untracked harness *.obj / vc100.pdb are not ours; sword fixer also commits under tools/animlab.
 
 ## Components
 - Adapter `kfpvm_replay <rec> <out> [--calib L1R,L2R,L1L,L2L,K] [--set k=v] [--set-at f:k=v] [--cold] [--quiet]`
