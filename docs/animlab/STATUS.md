@@ -2,7 +2,7 @@
 
 Owner: animation-lab builder agent (ordered by Shay, 2026-10-09). This file + git are the
 ONLY state (no temp handoffs). Update, commit and push at every milestone.
-Builders #1-#3 stopped (context limit); builder #4 finished P2 + started P3; builder #5 finishes P3.
+Builders #1-#3 stopped (context limit); builder #4 finished P2 + started P3; builder #5 finished P3, then the phase-2 open points.
 
 ## Goal
 An offline animation lab for Kenshi first-person viewmodels, built in 3 phases (all required):
@@ -36,20 +36,11 @@ regression tests run before every commit.
 - [x] P2 metrics lab: DONE (builder #4): `tools/animlab/metricslab.py`, adapter `kfpvm_drive.c` (`build.sh --drive`),
   example `components/KenshiFP/animlab/motions/dualwield-alternate.json`, tests `tests/animlab/test_metricslab.py`,
   USAGE.md "Phase 2", regress.sh steps 4-6. Tag `animlab-p2`.
-- [ ] P3 visual lab: in progress. Builder #4 (context limit) wrote, builder #5 commits/finishes:
-  - harness `tools/animlab/visual/__init__.py`, `visual/ogre.py` (Ogre .mesh v1.100 + .skeleton v1.80 reader; Ogre
-    skeleton bone chunk size excludes the name string, handled), `visual/render.py` (Rig posing from joints, numpy
-    z-buffer rasteriser, `still|frames|compare` CLI, frames -> MP4 via ffmpeg).
-  - workspace `components/KenshiFP/animlab/visual.json` (game_dir /mnt/d/Steam/steamapps/common/Kenshi, male_skeleton,
-    human_male.mesh (arms = triangles weighted >=0.5 to UA/FA/Hand), katana05.mesh, prop_axes, prop_local_q (g_vm_pldq),
-    prop_roll_deg {"0":60} (= g_vm_groll; without it hand X was 45 deg off), fov 1.245/0.70, near 0.5).
-  - Validation 1: `render.py compare e-flatA.txt e-flatA.png` (copies in /root/animlab-work/p3, from
-    C:\KenshiTestRuns\opt): hand X vs measured mh 0.3 deg; rendered katana outline (red) on the game's blade + guard,
-    arm outline (green) around the gauntlet. e-flatB/e-ready = same pose as e-flatA; e-h90 / e-h-90 differ (frames 2/3).
-  - Left: (1) validate e-h90 + e-h-90; (2) MP4s of a recording (/root/animlab-work/vmrec-q-sword-z0.txt) and the
-    dual-wield drive output (needs `--weapons R,L`); (3) tests/animlab/test_visual.py (synthetic mesh/skeleton binary,
-    raster, posing); (4) USAGE "Phase 3", STATUS, commit, tag animlab-p3 both repos; (5) reply to main.
-  - Gotcha: untracked harness *.obj / vc100.pdb are not ours; sword fixer also commits under tools/animlab.
+- [x] P3 visual lab: DONE (builders #4 + #5): harness `tools/animlab/visual/ogre.py` (Ogre .mesh v1.100 / .skeleton
+  v1.80 reader; skeleton bone chunk size excludes the name string), `visual/render.py` (`still|frames|compare`, MP4 via
+  ffmpeg, `--weapons R,L`), tests `tests/animlab/test_visual.py` (8, synthetic binaries), USAGE.md "Phase 3", regress.sh
+  steps 7-8; workspace `components/KenshiFP/animlab/visual.json` (prop_roll_deg 60 = g_vm_groll, prop_mirror L =
+  biped mirror quat x,y negated). Tag `animlab-p3`.
 
 ## Components
 - Adapter `kfpvm_replay <rec> <out> [--calib L1R,L2R,L1L,L2L,K] [--set k=v] [--set-at f:k=v] [--cold] [--quiet]`
@@ -81,6 +72,10 @@ P2 drive gate: crossbow-z0 345-1097 @6c9516b PASS (elbow95 0.07); sword-z0-a 83-
 @6c9516b (wrist95 1.1, elbow95 5.2) = open question, not investigated (that build's frozen-replay path vs sword wrist
 roll; current source fine). Dual-wield example PASS (R wb_max 13, L wb_max 24: L/R asymmetry in the windup/cut on a
 mirrored motion, worth a look by the FP fixer if dual wield goes ahead; ww_min 0.22 dm).
+P3 visual validation (game frames C:\KenshiTestRuns\opt e-flatA / e-h90 / e-h-90, copies in /root/animlab-work/p3): hand X
+err 0.3 / 0.5 / 0.4 deg, rendered blade outline on the game blade (curved tip matched in e-h-90), arm outline around the
+gauntlet. MP4s: /root/animlab-work/p3/sword-z0-replay.mp4 (702 fr, 34 s render), dualwield-alternate.mp4 (145 fr; L hand
+X err 0.0 deg with prop_mirror, 98 deg without). Frames 499+ of sword-z0 render black = holster (arms out of view).
 
 ## Key findings / gotchas
 - Camera numbers are a MIRRORED frame (rt = fw x up): recorded hand axes mh/hy/hz are left-handed
@@ -97,13 +92,7 @@ mirrored motion, worth a look by the FP fixer if dual wield goes ahead; ww_min 0
 - Useful for P3: /root/KenshiFP/client/kfp_meshray.h parses Ogre .mesh triangles (read-only reference).
 
 ## Next steps
-1. P3 visual lab (generic in harness `tools/animlab/visual/`, KenshiFP specifics in the workspace adapter):
-   (a) Ogre .mesh/.skeleton binary reader in python (reference /root/KenshiFP/client/kfp_meshray.h, read-only), reading
-   from the game install at runtime (never commit assets); (b) drive/replay adapter option to dump full bone world
-   transforms per frame (arms + Prop1/Prop2) so meshes can be skinned; (c) software rasteriser (numpy) of arm +
-   weapon meshes from the eye, frames -> MP4 (ffmpeg in WSL if present); (d) side-by-side vs a real game frame from an
-   existing recording (copy out of C:\KenshiTestRuns, never modify there); (e) tests, USAGE section, tag animlab-p3.
-2. Open: sword drive @6c9516b mismatch (see Results); L/R asymmetry in dualwield-alternate.
+1. Open (phase 2): sword drive @6c9516b mismatch (see Results); L/R asymmetry in dualwield-alternate (L wb_max 24 vs R 13).
 
 ## How to resume
 Read this file, `git log -- tools/animlab docs/animlab tests/animlab` in the harness repo and

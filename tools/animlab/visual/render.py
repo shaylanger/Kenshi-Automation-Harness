@@ -6,6 +6,7 @@ committed. Poses come from joint positions (camera numbers: x right, y up, z for
   render.py frames <pose> --config CFG -o DIR [--every N] [--from A] [--to B] [--mp4 out.mp4] [--size 800x450]
   render.py still  <pose> --config CFG -o out.png [--frame N] [--bg game.png] [--size 1600x900]
   render.py compare <state.txt> <game.png> --config CFG -o side.png     side by side + overlay vs a real game frame
+  --weapons R,L overrides the config weapon_sides (which hands draw a weapon mesh).
 <pose> = a game/replay recording (`fp_vm rec dump`), a phase-2 drive/merged pose file (metricslab pose.txt /
 solved_*.txt) or an `fp_vm state` dump (key=value line, one frame); the format is detected.
 
@@ -200,8 +201,12 @@ class Rig:
                 third = np.cross(fa_, ua_); Tv = np.cross(Fv, Uv)
                 Lm = np.column_stack([fa_, ua_, third]); Wm = np.column_stack([Fv, Uv, Tv])
                 Rp = Wm @ Lm.T
-                Rl = ogre.qmat(np.array(cfg['prop_local_q'][str(c)]))
-                roll = math.radians(float((cfg.get('prop_roll_deg') or {}).get(str(c), 0.0)))
+                q = np.array(cfg["prop_local_q"][str(c)], float)
+                roll = math.radians(float((cfg.get("prop_roll_deg") or {}).get(str(c), 0.0)))
+                mq = (cfg.get("prop_mirror") or {}).get(s)   # off side: biped mirror of the prop local
+                if mq:
+                    q = q * np.array(mq.get("q_sign", [1, 1, 1, 1]), float); roll *= float(mq.get("roll_sign", 1))
+                Rl = ogre.qmat(q)
                 if roll:   # grip roll about the blade axis, applied after the prop local (prop = hand * local * roll)
                     k = axis(ax[0]); Kx = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
                     Rl = Rl @ (np.eye(3) + math.sin(roll) * Kx + (1 - math.cos(roll)) * Kx @ Kx)
@@ -294,9 +299,11 @@ def raster(V, T, part, size, fov, near, colors, bg=None):
     return img, mask, (sx, sy)
 
 
-def load_cfg(path):
+def load_cfg(path, weapons=None):
     with open(path) as f:
         cfg = json.load(f)
+    if weapons:
+        cfg["weapon_sides"] = [s.strip().upper() for s in weapons.split(",") if s.strip()]
     gd = os.environ.get('ANIMLAB_GAME_DIR')
     if gd:
         cfg['game_dir'] = gd
@@ -327,7 +334,7 @@ def parse_size(s):
 
 def cmd_still(a):
     from PIL import Image
-    rig = Rig(load_cfg(a.config)); P = load_pose(a.pose)
+    rig = Rig(load_cfg(a.config, a.weapons)); P = load_pose(a.pose)
     f = P[min(a.frame, len(P) - 1)]
     size = parse_size(a.size)
     bg = np.asarray(Image.open(a.bg).convert('RGB').resize(size)) if a.bg else None
@@ -338,7 +345,7 @@ def cmd_still(a):
 
 
 def cmd_frames(a):
-    rig = Rig(load_cfg(a.config)); P = load_pose(a.pose)
+    rig = Rig(load_cfg(a.config, a.weapons)); P = load_pose(a.pose)
     os.makedirs(a.o, exist_ok=True)
     size = parse_size(a.size)
     sel = list(range(a.start, min(len(P), a.end if a.end is not None else len(P)), a.every))
@@ -358,7 +365,7 @@ def cmd_frames(a):
 def cmd_compare(a):
     """left: game frame, middle: render, right: game frame with the render's outlines (arm green, weapon red)."""
     from PIL import Image
-    rig = Rig(load_cfg(a.config)); f = load_pose(a.state)[0]
+    rig = Rig(load_cfg(a.config, a.weapons)); f = load_pose(a.state)[0]
     g = Image.open(a.game).convert('RGB'); size = g.size
     gnp = np.asarray(g, np.float32)
     img, mask, _ = render_frame(rig, f, size)
@@ -388,6 +395,8 @@ def main():
     p.add_argument('--size', default='800x450')
     p = sp.add_parser('compare'); p.add_argument('state'); p.add_argument('game'); p.add_argument('--config', required=True)
     p.add_argument('-o', required=True); p.add_argument('--scale', type=float, default=0.5)
+    for p in sp.choices.values():
+        p.add_argument("--weapons", help="override weapon_sides, e.g. R,L (dual wield)")
     a = ap.parse_args()
     return dict(still=cmd_still, frames=cmd_frames, compare=cmd_compare)[a.cmd](a)
 

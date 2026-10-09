@@ -164,3 +164,44 @@ recordings because X5 (xwalign) changed the crossbow elbow after they were made 
 
 Can't: native animation blending (swing/reload follow the native pose; the drive holds one body frame), target
 smoothing/springs (authored poses are applied directly), body motion while walking.
+
+# Phase 3: VISUAL LAB (render arms + weapon offline, frames / MP4 / side by side with a game frame)
+
+`tools/animlab/visual/render.py` poses the game's own skeleton and arm/weapon meshes from per-frame joint data and
+rasterises them (numpy z-buffer, flat shading) from the eye. Meshes and skeleton are Ogre binaries read from the game
+install at run time (`tools/animlab/visual/ogre.py`: .mesh v1.8-v1.100, .skeleton v1.8x); nothing is copied or
+committed. Needs python3 + numpy + Pillow; ffmpeg for MP4.
+
+```
+H=/mnt/c/KenshiModding/Kenshi-Automation-Harness/tools/animlab/visual
+C=/mnt/c/KenshiModding/components/KenshiFP/animlab/visual.json
+# MP4 of a game or replay recording (fp_vm rec dump), 800x450, fps from the recorded time stamps
+python3 $H/render.py frames vmrec-q-sword-z0.txt --config $C -o sw-frames --mp4 sword-z0.mp4
+# MP4 of an authored motion (phase-2 metricslab run output), both hands armed
+python3 $H/render.py frames /tmp/al-dw/pose.txt --config $C --weapons R,L -o dw-frames --mp4 dualwield.mp4
+# one frame (optionally over a background image)
+python3 $H/render.py still pose.txt --config $C --frame 30 -o f30.png [--bg game.png] [--size 1600x900]
+# validation: game screenshot + the `fp_vm state` dump of the same frame -> game | render | game with outlines
+python3 $H/render.py compare e-h90.txt e-h90.png --config $C -o cmp.png [--scale 0.5]
+```
+Inputs (auto-detected): `fp_vm rec dump` recordings, phase-2 `pose.txt` / `solved_*.txt`, `fp_vm state` dumps.
+Options: `--every N --from A --to B` (frame range), `--fps`, `--size WxH`, `--weapons R,L` (override weapon_sides),
+`ANIMLAB_GAME_DIR` (override the config's game_dir). Each run prints `hand_x_err` = angle between the posed hand X axis
+and the solver's measured one (convention check; 0-0.5 deg on all validated frames).
+
+Config (KenshiFP: `components/KenshiFP/animlab/visual.json`): skeleton, body mesh (arm = triangles weighted >= 0.5 to
+upper arm / forearm / hand), weapon meshes per hand, prop axes and prop-local rotation per weapon class
+(`g_vm_ax` / `g_vm_pldq`), `prop_roll_deg` (the grip roll `g_vm_groll`; without it the hand is 45 deg off),
+`prop_mirror` (off hand: quaternion x,y negated = the drive adapter's biped mirror), fov tangents, near plane, colours.
+
+Validation (game frames from `C:\KenshiTestRuns\opt`, copied): e-flatA, e-h90, e-h-90 (three different katana poses,
+1600x900): hand X error 0.3 / 0.5 / 0.4 deg; the rendered blade outline lies on the game's blade (incl. the curved tip
+in e-h-90) and the arm outline around the gauntlet. Speed ~0.1 s per 800x450 frame (702-frame recording: 34 s).
+
+Limits: arms are rigid per bone with fingers in the bind pose (no finger curl / grip), no textures, no clothing or
+armour meshes (the game shows gloves/gauntlets), no camera-space effects (Kenshi's FOV zoom uses the config fov).
+Frames where the solver has the arms out of view (holster, `w` -> 0) render black.
+
+## Regression
+`regress.sh` steps 7-8 run `tests/animlab/test_visual.py` (synthetic Ogre binaries: reader, rasteriser, posing, prop
+mirror, CLI) and, when the game install exists, a real-asset still of the dual-wield example (both hand X errors < 1 deg).
