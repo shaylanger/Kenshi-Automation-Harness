@@ -98,6 +98,7 @@ struct Protected {
   bool stuckLogged;  // "could not wake" logged for this knockout
   bool deathLogged;
   int feeds;
+  DWORD until;  // `wake` on a knockout: a temporary entry, dropped once she is up or at this tick (0 = protect on)
 };
 std::vector<Protected> g_protected;
 
@@ -120,6 +121,12 @@ void ProtectTick() {
     }
     if (!Valid(c))
       continue;
+    if (p.until && (GetTickCount() >= p.until || (p.wasDown && !c->isUnconcious()) || c->isDead())) {
+      Log("KAH: wake " + c->getName() + (c->isUnconcious() ? " still KO after 3 s" : " is up"));
+      g_protected.erase(g_protected.begin() + i);
+      --i;
+      continue;
+    }
     MedicalSystem &med = c->medical;
     if (c->isDead()) {
       if (!p.deathLogged) {
@@ -1552,7 +1559,7 @@ bool RunWorldCommand(GameWorld *world, const std::vector<std::string> &f, const 
         out = pc->getName() + " is dead (protect can't revive the dead)";
         return true;
       }
-      Protected p = {h, pc->getName(), false, 0, 0, false, false, 0};
+      Protected p = {h, pc->getName(), false, 0, 0, false, false, 0, 0};
       g_protected.push_back(p);
       ProtectTick();
     }
@@ -2321,6 +2328,25 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
     OrdersReceiver *orders = c->getOrdersReciever();
     if (!Valid(orders)) {
       out = c->getName() + " takes no orders";
+      return true;
+    }
+    if (cmd == "wake" && c->isUnconcious() && !c->isDead()) {
+      // knocked out (any cause: damage, blood loss, starving, recovery coma): one protect-style revive (all parts and
+      // blood to max, KO timer 0, "get up" flag, collapse re-checked) repeated every frame until she is up, at most 3 s
+      bool permanent = false;
+      for (size_t i = 0; i < g_protected.size(); ++i)
+        if (SameHandle(g_protected[i].h, c->getHandle()))
+          permanent = g_protected[i].until == 0;
+      if (!permanent) {
+        Protected p = {c->getHandle(), c->getName(), false, 0, 0, false, false, 0, GetTickCount() + 3000};
+        g_protected.push_back(p);
+      }
+      const std::string vit = ProtectVitals(c);
+      ProtectTick();
+      ok = true;
+      out = c->getName() + " was KO (" + vit + "): healed, KO cleared" +
+            (permanent ? " (protected)" : ", watched until up (max 3 s)");
+      Log("KAH: wake " + out);
       return true;
     }
     if (cmd == "wake") {
