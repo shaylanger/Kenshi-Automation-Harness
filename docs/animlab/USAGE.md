@@ -104,7 +104,63 @@ Cannot (yet):
   can pick another branch of a bistable choice (sword elbow), so long sword replays can diverge from the game.
 - Zoomed-out frames (zf < 0.99) show the native animation only: not compared.
 
-## Regression (run before every animlab commit)
+## Regression (run before every animlab commit; also covers phase 2)
 
 `bash components/KenshiFP/animlab/regress.sh` (WSL): offline unit tests, the gate above, and the native round trip.
 Unit tests only: `python3 tests/animlab/test_animlab.py`. Phase 1 is tagged `animlab-p1`.
+
+# Phase 2: METRICS LAB (author motions, measure them through the real solver)
+
+Write a motion as time-keyed weapon targets (JSON), solve it through the viewmodel solver on a real recorded body
+(skeleton, shoulders, arm lengths and prop calibration from a game recording), and get per-segment metrics plus reach
+limits and intersections. Phase-1 commands are unchanged; this is a separate CLI (`tools/animlab/metricslab.py`) and a
+separate adapter entry point (KenshiFP: `kfpvm_drive`, `build.sh --drive`).
+
+```
+A=/mnt/c/KenshiModding/components/KenshiFP/animlab; L=/mnt/c/KenshiModding/Kenshi-Automation-Harness/tools/animlab
+bash $A/build.sh --sync --drive --out /root/animlab-build/kfpvm_drive_cur            # drive adapter, current source
+python3 $L/metricslab.py run $A/motions/dualwield-alternate.json --adapter /root/animlab-build/kfpvm_drive_cur \
+        --body vmrec-q-sword-z0-a.txt --body-frame 100 --out ml-dw --args=--quiet    # table + RESULT line, exit 0 = PASS
+python3 $L/metricslab.py fromrec vmrec-q-sword-z0-a.txt 83 232 -o start.json        # start authoring from a recording
+python3 $L/metricslab.py sample motion.json -o dir                                  # interpolated frames only
+python3 $L/metricslab.py faithful vmrec-q-crossbow-z0.txt 345 1097 --adapter /root/animlab-build/kfpvm_drive_6c9516b
+```
+
+**Motion file** (camera numbers of the body frame: x right, y up, z forward, decimetres):
+`{"name", "fps": 60, "interp": "spline|linear|smooth", "preroll": 0.5, "hold": 0, "limits": {...}, "geom": {...},
+"body": {"rec", "frame"}, "hands": {"R": {"weapon": "sword|crossbow", "blade": 8.0, "keys": [{"t", "p": [x,y,z],
+"f": [..], "u": [..], "label", "ease"}], "off": "rest" | [{"t", "p"}]}, "L": {...}}}`.
+`p` = grip (prop bone), `f` = toward the tip, `u` = edge (sword) / up (crossbow); `u` is re-orthogonalised to `f`.
+Positions interpolate Catmull-Rom (`spline`), linear or smoothstep; directions slerp. A key's `label` names the segment
+that starts there (report rows). `preroll` seconds hold key 0 first (solver smoothing settles; not reported).
+Example: `components/KenshiFP/animlab/motions/dualwield-alternate.json` (guard, right cut, guard, left cut).
+
+**Dual wielding:** each armed side is its own run (`--side L` solves the left hand as the weapon hand with the prop
+local mirrored, `fp_vm set hand_m 0`); the other arm rests. `pose.txt` merges each side's own arm (input for phase 3).
+
+**Report columns** (per side and segment, `*all*` = whole motion): `wb` wrist fold deg (forearm vs hand X),
+`elb_h` elbow height over the shoulder, `st` stretch, `reach` shoulder-wrist / (L1+L2) (>1 = stretched arm),
+`terr` solved grip vs authored grip dm (target out of reach / clamped), `ferr` blade direction error deg, `edge`
+edge-to-camera cos, `jit` tip jitter the SOLVER adds (px, second difference of solved-minus-authored tip on screen, so
+fast authored arcs don't count), `ww` blade/blade clearance dm (<0 = intersect; blades are capsules of radius
+`geom.blade_r` 0.15), `warm` blade vs the other arm (capsule `arm_r` 0.35), `head` blade distance to the eye,
+`clip` frames with an on-screen blade part nearer than `geom.near` (3 dm), `ikfail`.
+Default limits (override per motion in `"limits"`): wb_max 30, terr_max 0.30, ferr_max 10, reach_max 1.5 (game ready
+max ~1.49), ww_min 0, warm_min 0, head_min 1.0, clip_frames 0, jit_p95 2.0. Last line:
+`RESULT <name> PASS|FAIL <side:key evidence> [fails=...]`; files in `--out`: frames_*.txt, solved_*.txt, pose.txt,
+report.txt/json.
+
+**Drive adapter contract:** `CMD <body_rec> <frames.txt> <out.txt> --body-frame N --side R|L [args]`, formats in the
+`metricslab.py` docstring. KenshiFP's `kfpvm_drive` feeds each frame through the plugin's own commanded-pose path
+(`fp_vm replay N t`: g_vm_rp), so vm_targets -> vm_apply (IK, elbow pick with look-ahead over the authored future,
+wrist roll, edge clamp, stretch) is the game's code. The weapon pose is taken as given (no target smoothing).
+
+**Drive gate** (`faithful`): the weapon pose the game rendered (record i+1) as the target on a still-body segment
+(eye within 0.3 dm, full viewmodel, no swing) must give the game's measured arm, p95 <= 0.25 dm. Results:
+crossbow-z0 345-1097 with its own source 6c9516b PASS (753 fr, elbow95 0.07, wrist95 0.003); sword-z0-a 83-232 PASS
+with the current source (elbow95 0.05) but FAILS with 6c9516b (wrist95 1.1, elbow95 5.2: that build's frozen-replay
+path did not reproduce the sword wrist roll; open in STATUS.md). Current-source crossbow fails against the old
+recordings because X5 (xwalign) changed the crossbow elbow after they were made (expected).
+
+Can't: native animation blending (swing/reload follow the native pose; the drive holds one body frame), target
+smoothing/springs (authored poses are applied directly), body motion while walking.

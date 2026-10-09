@@ -2,7 +2,7 @@
 
 Owner: animation-lab builder agent (ordered by Shay, 2026-10-09). This file + git are the
 ONLY state (no temp handoffs). Update, commit and push at every milestone.
-Builder #1 stopped at its context limit; builder #2 resumed 2026-10-09 evening.
+Builders #1-#3 stopped (context limit); builder #4 (2026-10-09 evening) finished P2, works on P3.
 
 ## Goal
 An offline animation lab for Kenshi first-person viewmodels, built in 3 phases (all required):
@@ -31,9 +31,12 @@ regression tests run before every commit.
   "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>".
 
 ## Phase plan / current phase
-- [ ] P1 replay: adapter + CLI work; gate fixes in progress (see Next steps)
-- [ ] P2 metrics lab
-- [ ] P3 visual lab
+- [x] P1 replay: DONE, frozen. Tag `animlab-p1` (harness 93b766e, workspace 36c162c). Later harness commit f0f0c4b
+  (another agent: aim label/moves gate) changed the crossbow gate frame count 1380 -> 1355, still PASS.
+- [x] P2 metrics lab: DONE (builder #4): `tools/animlab/metricslab.py`, adapter `kfpvm_drive.c` (`build.sh --drive`),
+  example `components/KenshiFP/animlab/motions/dualwield-alternate.json`, tests `tests/animlab/test_metricslab.py`,
+  USAGE.md "Phase 2", regress.sh steps 4-6. Tag `animlab-p2`.
+- [ ] P3 visual lab: in progress (see Next steps)
 
 ## Components
 - Adapter `kfpvm_replay <rec> <out> [--calib L1R,L2R,L1L,L2L,K] [--set k=v] [--set-at f:k=v] [--cold] [--quiet]`
@@ -50,19 +53,21 @@ regression tests run before every commit.
 - Rec format + vmcheck metrics reference: `components/KenshiFP/tests/ingame/fp-viewmodel.sh` lines
   53-230 (embedded vmcheck.py).
 
+- P2: `metricslab.py run|sample|fromrec|faithful|report` + drive adapter `kfpvm_drive <body_rec> <frames> <out> --body-frame N
+  [--side R|L] [--calib ..] [--set k=v] [--no-lookahead] [--quiet]` (`build.sh --drive`); usage in USAGE.md "Phase 2".
+
 ## WSL scratch (not git, may be lost; rebuildable)
 `/root/animlab-kfp-src` (rsync copy), `/root/animlab-src-archive/e80aa2a5` (source at DLL e80aa2a5),
 `/root/animlab-build/` (binaries), `/root/animlab-work/` (copied recordings + sims).
 
-## Results so far (gate)
-Gate pairing: recordings in `C:\KenshiTestRuns\vmq-f8c` (made right after workspace commit 6c9516b =
-DLL 419D164F) replayed with source 6c9516b.
-- sword-z0-a PASS (grip95 0.23 dm, elbow95 0.22, blade95 0.01 deg, edge95 1.8, wb95 0.4; game/replay
-  wb_p95 11.2/11.2, st_max 2.80/2.78).
-- crossbow-z0: ready/aim match (0.13-0.14 dm, blade 0.00); reload FAILS (elbow95 0.62, st_max 2.40 vs
-  2.70, elb_h_max 0.17 vs 1.55).
-- sword-z0 (swings): close but FAIL (swing elbow95 0.58, edge95 13.6, ready edge95 6.2, block jit 6.6 vs 3.4).
-- z25 recordings: viewmodel faded (zf<1 = native anim), not comparable yet.
+## Results
+P1 gate (recordings `C:\KenshiTestRunsmq-f8c`, made right after workspace commit 6c9516b = DLL 419D164F, replayed
+with source 6c9516b): sword-z0-a PASS 556 fr; crossbow-z0 PASS (ready+aim); sword-z0 swings/reload info only (native
+pose not recorded before the rec-native patch); X1 crossbow jitter NOT reproduced offline (replay jit ~0.4 vs game ~1.7).
+P2 drive gate: crossbow-z0 345-1097 @6c9516b PASS (elbow95 0.07); sword-z0-a 83-232 @current PASS (elbow95 0.05), FAILS
+@6c9516b (wrist95 1.1, elbow95 5.2) = open question, not investigated (that build's frozen-replay path vs sword wrist
+roll; current source fine). Dual-wield example PASS (R wb_max 13, L wb_max 24: L/R asymmetry in the windup/cut on a
+mirrored motion, worth a look by the FP fixer if dual wield goes ahead; ww_min 0.22 dm).
 
 ## Key findings / gotchas
 - Camera numbers are a MIRRORED frame (rt = fw x up): recorded hand axes mh/hy/hz are left-handed
@@ -79,65 +84,16 @@ DLL 419D164F) replayed with source 6c9516b.
 - Useful for P3: /root/KenshiFP/client/kfp_meshray.h parses Ogre .mesh triangles (read-only reference).
 
 ## Next steps
-1. P1 gate fixes: (a) apply only when napply increments; (b) native prop local transform from the
-   recording; (c) exclude frames with zf<0.99. Re-run gate (vmq-f8c sword-z0, sword-z0-a, crossbow-z0).
-2. Build against CURRENT /root/KenshiFP (rsync copy); check crossbow jitter X1 (p95 5-6 px in game) on
-   newest crossbow recording (C:\KenshiTestRuns\f13 or opt).
-3. Offline regression tests (tests/animlab), docs/animlab/USAGE.md, tag animlab-p1, SendMessage main.
-4. Rec metadata patch as pending-fixes script, send path to main.
-5. P2, then P3.
+1. P3 visual lab (generic in harness `tools/animlab/visual/`, KenshiFP specifics in the workspace adapter):
+   (a) Ogre .mesh/.skeleton binary reader in python (reference /root/KenshiFP/client/kfp_meshray.h, read-only), reading
+   from the game install at runtime (never commit assets); (b) drive/replay adapter option to dump full bone world
+   transforms per frame (arms + Prop1/Prop2) so meshes can be skinned; (c) software rasteriser (numpy) of arm +
+   weapon meshes from the eye, frames -> MP4 (ffmpeg in WSL if present); (d) side-by-side vs a real game frame from an
+   existing recording (copy out of C:\KenshiTestRuns, never modify there); (e) tests, USAGE section, tag animlab-p3.
+2. Open: sword drive @6c9516b mismatch (see Results); L/R asymmetry in dualwield-alternate.
 
 ## How to resume
 Read this file, `git log -- tools/animlab docs/animlab tests/animlab` in the harness repo and
-`git log -- components/KenshiFP/animlab` in C:\KenshiModding. Continue at "Next steps".
-
-## Builder #2 handoff (copied by coordinator 2026-10-09)
-# Animation lab handoff #2 (builder #2 stopped at the context limit, 2026-10-09 ~18:40)
-
-Task source: coordinator "main" brief (3 phases; see C:\KenshiModding\Kenshi-Automation-Harness\docs\animlab\STATUS.md
-"Goal"/"Rules" for the full order). Durable state = STATUS.md (committed 8519a42) + this file.
-
-## Git state
-- Harness repo (main), pushed: 8519a42 (tools/animlab/*.py + STATUS.md). UNCOMMITTED (all mine, commit them):
-  M tools/animlab/recfmt.py (napp, zf default, native group -> r['nat']), M tools/animlab/metrics.py ('native' state
-  zf<0.99, 'settle' in STATE_ORDER), M tools/animlab/animlab.py (NOCMP, gated states ready/block/aim, settle_s 0.3 +
-  frame-before-transition, mark_settle()), M docs/animlab/STATUS.md? (not edited since commit), NEW tests/animlab/test_animlab.py
-  (7 tests, pass), NEW docs/animlab/USAGE.md (done). Ignore untracked *.obj / vc100.pdb (not mine).
-- KenshiModding repo (main), pushed: de545db (adapter). UNCOMMITTED (mine): M components/KenshiFP/animlab/kfpvm_replay.c
-  (napply-aware apply, native group parse+use, # set lines applied, --set ordering, --no-native/--no-rec-sets/
-  --apply-all/--bw-lag, scene-node identity stubs, elb_cb warm start, silent set reply), M build.sh (AL_HAVE_ELB_CB),
-  M prelude.h (node-map stubs), NEW regress.sh (ALL PASS), NEW pending-fixes/kfp-rec-native-meta.py (the KenshiFP rec
-  metadata patch: build stamp, # set log, native pre-IK pose group; tested on a copy, compiles, round trip exact).
-  pending-fixes script must NOT be committed by me? -> it's a pending-fix for the coordinator; just SendMessage its path.
-
-## Done (P1)
-- (a) napply: implemented; finding: only 1 frame per recording lacks an apply with the viewmodel up (the 181/233
-  zero-delta frames are w=0 frames) -> not a deviation source.
-- (b) native prop local: only possible with the rec-native patch (plfix=3 default makes it irrelevant except rlnat
-  reload). Implemented in the adapter from the native group.
-- (c) zf<0.99 -> state 'native', not compared.
-- Gate (6c9516b, vmq-f8c): sword-z0-a PASS 556 fr, crossbow-z0 PASS 1380 fr (ready+aim); sword-z0 FAIL only block
-  jit 6.57 game vs 3.40 replay; reload/swing = info (native pose not recorded). Native round trip (current source +
-  patch) reproduces crossbow incl. reload exactly. Sword round trip diverges from frame 3 (bistable elbow, hidden
-  state) -> documented limitation.
-- X1: replay does NOT reproduce the game jitter: xv-f14base ready jit game 1.23 vs replay 0.01; rec-xb0 1.44/0.64;
-  crossbow-z0 1.74/0.42. Replay map world<->skeleton is exact; fixer's new mapnode (scene-node map) source compiles
-  with stubs. --bw-lag (full 1-frame lag of bone-world in apply) overshoots (7.2 vs 1.7) -> partial-lag/other source.
-  With stretch=1+elb=0 replay jitter stays ~0 too.
-
-## Left
-1. Run regress.sh (WSL: `bash /mnt/c/KenshiModding/components/KenshiFP/animlab/regress.sh`), commit harness files
-   (one commit: gate states/settle/native parsing + tests + USAGE.md) and KenshiModding animlab files; push; tag
-   `animlab-p1` in the harness repo (and KenshiModding). Update STATUS.md (results, P1 done) and commit.
-2. SendMessage "main": PHASE 1 READY + usage one-liner (see USAGE.md) + can/can't (jitter under-reported; swing/reload
-   need the rec-native patch) + X1: not reproduced + path C:\KenshiModding\pending-fixes\kfp-rec-native-meta.py
-   (apply to /root/KenshiFP, rebuild, re-record VMQUICK so swing/reload/jitter replays use the native pose).
-3. P2 metrics lab (separate module tools/animlab/author/, adapter --drive mode), P3 visual lab (Ogre mesh reader;
-   reference /root/KenshiFP/client/kfp_meshray.h). Not started.
-
-## Gotchas
-- Git Bash: use MSYS_NO_PATHCONV=1 + `wsl.exe ... --cd <path> -- python3 - <<'EOF'`; backslash-n inside heredoc python
-  strings gets collapsed: use chr(92) or the Edit tool. Never run Windows `python -` (hangs).
-- animlab.py `--args=--quiet` (with `=`).
-- /root/KenshiFP is being edited by the fixer (mapnode etc.); prelude may need new stubs when it changes.
-- Recordings copied to /root/animlab-work (vmrec-q-*.txt from vmq-f8c, xv-*.txt + rec-xb0.txt from opt).
+`git log -- components/KenshiFP/animlab` in C:\KenshiModding. Run regress.sh (must be ALL PASS). Continue at "Next steps".
+Gotchas: Git Bash: MSYS_NO_PATHCONV=1 + `wsl.exe ... -- bash -s <<'EOF'` heredocs (wsl.exe expands `$VAR` in -c args);
+never run Windows `python` (hangs). Other agents (sword fixer) commit to tools/animlab too: commit only your files.
