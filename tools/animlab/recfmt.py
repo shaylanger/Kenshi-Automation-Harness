@@ -7,6 +7,8 @@ Line format (groups separated by '|'):
   2  eye rt up fw (world)                                      from the unzoomed eye
   3  rootf roota napply phase wih stretch
   4  wb mh mfx zf head neck spine [hy hz]   (wrist bend deg, hand X axis, forearm X axis, zoom fade, head/neck/spine)
+  5  [nok natLsh natLel natLwr natRsh natRel natRwr nhxL nhyL nhxR nhyR nlpL nlqL nlpR nlqR]  native (pre-IK) pose of
+     this frame's apply, camera numbers of this record (KenshiFP builds with the rec-native patch); r['nat'] = joints
 Measured values in record n are what frame n-1 rendered (the camera callback runs before the next apply).
 Comment lines `# set <frame> <key> <value>` / `# build ...` (newer KenshiFP builds) are kept in Rec.meta.
 """
@@ -53,12 +55,12 @@ def parse(path):
                 r[name] = v[k]
             cam = [v3(x) for x in pa[2].split()] if len(pa) > 2 else []
             r['eye'], r['rt'], r['up'], r['fw'] = cam if len(cam) == 4 else (None,) * 4
-            r['phase'], r['wih'], r['stch'] = 0, 1, 1.0
+            r['phase'], r['wih'], r['stch'], r['napp'] = 0, 1, 1.0, None
             if len(pa) > 3:
                 x = pa[3].split()
                 if len(x) >= 6:
-                    r['phase'], r['wih'], r['stch'] = int(x[3]), int(x[4]), float(x[5])
-            r['wb'] = None
+                    r['phase'], r['wih'], r['stch'], r['napp'] = int(x[3]), int(x[4]), float(x[5]), int(x[2])
+            r['wb'], r['zf'] = None, 1.0
             if len(pa) > 4:
                 x = pa[4].split()
                 if len(x) >= 3:
@@ -67,6 +69,11 @@ def parse(path):
                     r['zf'], r['hd'], r['nk'], r['sp'] = float(x[3]), v3(x[4]), v3(x[5]), v3(x[6])
                 if len(x) >= 9:
                     r['hy'], r['hz'] = v3(x[7]), v3(x[8])
+            r['nat'] = None
+            if len(pa) > 5:
+                x = pa[5].split()
+                if len(x) >= 15 and x[0] == '1':
+                    r['nat'] = dict(zip(JOINTS, [v3(t) for t in x[1:7]]))
             frames.append(r)
     return Rec(frames, meta)
 

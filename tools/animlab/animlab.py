@@ -22,7 +22,32 @@ import metrics as M
 
 DEFAULT_TOL = dict(   # faithfulness gate (docs/animlab/USAGE.md "Faithfulness gate")
     grip_p95=0.25, elbow_p95=0.35, wrist_p95=0.25, blade_p95=3.0, edge_p95=4.0, wb_p95=4.0,
-    m_wb_p95=4.0, m_elb_h_max=0.4, m_st_max=0.08, m_edge_mean=0.06, m_jit_p95=2.0, min_frames=100)
+    m_wb_p95=4.0, m_elb_h_max=0.4, m_st_max=0.08, m_edge_mean=0.06, m_jit_p95=2.0, min_frames=100,
+    # gated states: the steady holds. Swing (sword) and reload (crossbow) follow the NATIVE animation (free swing
+    # tracks the native progress/prop, reload blends the native arms), and recordings made before the rec-native
+    # patch hold only the post-IK skeleton, so the replay cannot know the native pose there: those states and the
+    # first settle_s seconds after them are reported (info) but not gated. See docs/animlab/USAGE.md.
+    states=['ready', 'block', 'aim'], settle_s=0.3)
+SETTLE_AFTER = ('swing', 'reload', 'swing->block', 'draw', 'lower', 'native', 'off')
+
+
+def mark_settle(Pr, Ps, F, settle_s):
+    """relabel frames within settle_s seconds after a non-steady state (game labels) as 'settle' in both."""
+    t_last = None
+    lab = [p['state'] for p in Pr]
+    for i, p in enumerate(Pr):
+        if lab[i] in SETTLE_AFTER:
+            t_last = F[i]['t']
+            continue
+        if i + 1 < len(lab) and lab[i + 1] in SETTLE_AFTER:   # rendered pose of i = record i+1: already the next state
+            p['state'] = 'settle'
+            if i < len(Ps):
+                Ps[i]['state'] = 'settle'
+            continue
+        if t_last is not None and F[i]['t'] - t_last < settle_s:
+            p['state'] = 'settle'
+            if i < len(Ps):
+                Ps[i]['state'] = 'settle'
 
 
 def run_adapter(cmd, rec, out, args):
@@ -56,12 +81,15 @@ def cmd_metrics(a):
     print_table([[s] + [M.fmt(T[s][c]) for c in M.METRIC_COLS] for s in states_of(T)], ('state',) + M.METRIC_COLS)
 
 
+NOCMP = ('off', 'draw', 'lower', 'native', 'settle')   # not compared: blends + native animation (no solver output on screen)
+
+
 def frame_errors(Pr, Ps, Fr, skip):
     """per-frame errors replay vs game on frames where both show the full viewmodel."""
     E = {}
     for i in range(skip, min(len(Pr), len(Ps))):
         r, s = Pr[i], Ps[i]
-        if r['state'] in ('off', 'draw', 'lower') or s['state'] in ('off', 'draw', 'lower') or not r['wih']:
+        if r['state'] in NOCMP or s['state'] in NOCMP or not r['wih']:
             continue
         e = E.setdefault(r['state'], dict(grip=[], elbow=[], wrist=[], blade=[], edge=[], wb=[], match=0, n=0))
         e['n'] += 1
@@ -79,17 +107,20 @@ def frame_errors(Pr, Ps, Fr, skip):
 def compare(real, sim, skip=0, tol=None, quiet=False):
     Rr, Rs = recfmt.parse(real), recfmt.parse(sim)
     Pr, Ps = M.frame_metrics(Rr), M.frame_metrics(Rs)
+    tol = tol or DEFAULT_TOL
+    if tol.get('settle_s'):
+        mark_settle(Pr, Ps, Rr.frames, tol['settle_s'])
+    gated = tol.get('states') or M.STATE_ORDER
     E = frame_errors(Pr, Ps, Rr.frames, skip)
     Tr, Ts = M.state_table(Pr, skip), M.state_table(Ps, skip)
-    tol = tol or DEFAULT_TOL
     fails, rows = [], []
     for s in states_of(E):
         e = E[s]
-        row = [s, e['n'], '%.0f%%' % (100.0 * e['match'] / max(1, e['n']))]
+        row = [s if s in gated else s + '(info)', e['n'], '%.0f%%' % (100.0 * e['match'] / max(1, e['n']))]
         for k in ('grip', 'elbow', 'wrist', 'blade', 'edge', 'wb'):
             v = M.pct(e[k], .95)
             row.append(M.fmt(v))
-            if e['n'] >= 10 and v == v and v > tol[k + '_p95']:
+            if s in gated and e['n'] >= 10 and v == v and v > tol[k + '_p95']:
                 fails.append('%s %s_p95=%.2f>%.2f' % (s, k, v, tol[k + '_p95']))
         row.append(M.fmt(max(e['elbow'])) if e['elbow'] else '-')
         rows.append(row)
@@ -98,19 +129,21 @@ def compare(real, sim, skip=0, tol=None, quiet=False):
                     'per-frame replay error (dm / deg, p95) vs the game:')
     mrows = []
     for s in states_of(Tr, Ts):
+        if s in NOCMP:
+            continue
         r, m = Tr.get(s), Ts.get(s)
-        cells = [s]
+        cells = [s if s in gated else s + '(info)']
         for c in ('wb_p95', 'elb_h_max', 'st_max', 'edge_mean', 'jit_p95'):
             rv = r[c] if r else float('nan')
             sv = m[c] if m else float('nan')
             cells.append('%s/%s' % (M.fmt(rv), M.fmt(sv)))
             lim = tol.get('m_' + c)
-            if lim is not None and r and m and r['n'] >= 10 and rv == rv and sv == sv and abs(rv - sv) > lim:
+            if lim is not None and s in gated and r and m and r['n'] >= 10 and rv == rv and sv == sv and abs(rv - sv) > lim:
                 fails.append('%s %s game=%.2f replay=%.2f (|d|>%.2f)' % (s, c, rv, sv, lim))
         mrows.append(cells)
     if not quiet:
         print_table(mrows, ('state', 'wb_p95', 'elb_h_max', 'st_max', 'edge_mean', 'jit_p95'), 'metrics game/replay:')
-    nfull = sum(e['n'] for e in E.values())
+    nfull = sum(e['n'] for s, e in E.items() if s in gated)
     if nfull < tol['min_frames']:
         fails.append('only %d comparable frames (< %d)' % (nfull, tol['min_frames']))
     return fails, nfull

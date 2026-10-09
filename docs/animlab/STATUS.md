@@ -90,3 +90,54 @@ DLL 419D164F) replayed with source 6c9516b.
 ## How to resume
 Read this file, `git log -- tools/animlab docs/animlab tests/animlab` in the harness repo and
 `git log -- components/KenshiFP/animlab` in C:\KenshiModding. Continue at "Next steps".
+
+## Builder #2 handoff (copied by coordinator 2026-10-09)
+# Animation lab handoff #2 (builder #2 stopped at the context limit, 2026-10-09 ~18:40)
+
+Task source: coordinator "main" brief (3 phases; see C:\KenshiModding\Kenshi-Automation-Harness\docs\animlab\STATUS.md
+"Goal"/"Rules" for the full order). Durable state = STATUS.md (committed 8519a42) + this file.
+
+## Git state
+- Harness repo (main), pushed: 8519a42 (tools/animlab/*.py + STATUS.md). UNCOMMITTED (all mine, commit them):
+  M tools/animlab/recfmt.py (napp, zf default, native group -> r['nat']), M tools/animlab/metrics.py ('native' state
+  zf<0.99, 'settle' in STATE_ORDER), M tools/animlab/animlab.py (NOCMP, gated states ready/block/aim, settle_s 0.3 +
+  frame-before-transition, mark_settle()), M docs/animlab/STATUS.md? (not edited since commit), NEW tests/animlab/test_animlab.py
+  (7 tests, pass), NEW docs/animlab/USAGE.md (done). Ignore untracked *.obj / vc100.pdb (not mine).
+- KenshiModding repo (main), pushed: de545db (adapter). UNCOMMITTED (mine): M components/KenshiFP/animlab/kfpvm_replay.c
+  (napply-aware apply, native group parse+use, # set lines applied, --set ordering, --no-native/--no-rec-sets/
+  --apply-all/--bw-lag, scene-node identity stubs, elb_cb warm start, silent set reply), M build.sh (AL_HAVE_ELB_CB),
+  M prelude.h (node-map stubs), NEW regress.sh (ALL PASS), NEW pending-fixes/kfp-rec-native-meta.py (the KenshiFP rec
+  metadata patch: build stamp, # set log, native pre-IK pose group; tested on a copy, compiles, round trip exact).
+  pending-fixes script must NOT be committed by me? -> it's a pending-fix for the coordinator; just SendMessage its path.
+
+## Done (P1)
+- (a) napply: implemented; finding: only 1 frame per recording lacks an apply with the viewmodel up (the 181/233
+  zero-delta frames are w=0 frames) -> not a deviation source.
+- (b) native prop local: only possible with the rec-native patch (plfix=3 default makes it irrelevant except rlnat
+  reload). Implemented in the adapter from the native group.
+- (c) zf<0.99 -> state 'native', not compared.
+- Gate (6c9516b, vmq-f8c): sword-z0-a PASS 556 fr, crossbow-z0 PASS 1380 fr (ready+aim); sword-z0 FAIL only block
+  jit 6.57 game vs 3.40 replay; reload/swing = info (native pose not recorded). Native round trip (current source +
+  patch) reproduces crossbow incl. reload exactly. Sword round trip diverges from frame 3 (bistable elbow, hidden
+  state) -> documented limitation.
+- X1: replay does NOT reproduce the game jitter: xv-f14base ready jit game 1.23 vs replay 0.01; rec-xb0 1.44/0.64;
+  crossbow-z0 1.74/0.42. Replay map world<->skeleton is exact; fixer's new mapnode (scene-node map) source compiles
+  with stubs. --bw-lag (full 1-frame lag of bone-world in apply) overshoots (7.2 vs 1.7) -> partial-lag/other source.
+  With stretch=1+elb=0 replay jitter stays ~0 too.
+
+## Left
+1. Run regress.sh (WSL: `bash /mnt/c/KenshiModding/components/KenshiFP/animlab/regress.sh`), commit harness files
+   (one commit: gate states/settle/native parsing + tests + USAGE.md) and KenshiModding animlab files; push; tag
+   `animlab-p1` in the harness repo (and KenshiModding). Update STATUS.md (results, P1 done) and commit.
+2. SendMessage "main": PHASE 1 READY + usage one-liner (see USAGE.md) + can/can't (jitter under-reported; swing/reload
+   need the rec-native patch) + X1: not reproduced + path C:\KenshiModding\pending-fixes\kfp-rec-native-meta.py
+   (apply to /root/KenshiFP, rebuild, re-record VMQUICK so swing/reload/jitter replays use the native pose).
+3. P2 metrics lab (separate module tools/animlab/author/, adapter --drive mode), P3 visual lab (Ogre mesh reader;
+   reference /root/KenshiFP/client/kfp_meshray.h). Not started.
+
+## Gotchas
+- Git Bash: use MSYS_NO_PATHCONV=1 + `wsl.exe ... --cd <path> -- python3 - <<'EOF'`; backslash-n inside heredoc python
+  strings gets collapsed: use chr(92) or the Edit tool. Never run Windows `python -` (hangs).
+- animlab.py `--args=--quiet` (with `=`).
+- /root/KenshiFP is being edited by the fixer (mapnode etc.); prelude may need new stubs when it changes.
+- Recordings copied to /root/animlab-work (vmrec-q-*.txt from vmq-f8c, xv-*.txt + rec-xb0.txt from opt).

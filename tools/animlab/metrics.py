@@ -10,20 +10,23 @@ callback measures what the previous apply rendered). Per frame:
           neighbours puts it (time-weighted midpoint); motion at constant speed = 0
   step    tip screen step per frame, px
 States: ready, swing, block, swing->block (a block entered straight from a swing), aim, reload (crossbow),
-draw / lower (blends), off (no viewmodel). Hitch frames (dt > 0.07 s, or next to one) are left out of jit/step.
+draw / lower (blends), native (viewmodel faded out by zoom, zf < 0.99), off (no viewmodel). Hitch frames (dt > 0.07 s, or next to one) are left out of jit/step.
 """
 import math
 from recfmt import sub, add, mul, dot, ln, nz, ang, remap
 
 W_PX, H_PX, TX, TY = 1600.0, 900.0, 1.245, 0.70   # Kenshi FP view: tan half-angles (vmcheck onscr)
 BLADE = {0: 8.0, 1: 5.85}
-STATE_ORDER = ('ready', 'swing', 'block', 'swing->block', 'aim', 'reload', 'draw', 'lower')
+STATE_ORDER = ('ready', 'swing', 'block', 'swing->block', 'aim', 'reload', 'settle', 'draw', 'lower', 'native')
+NATIVE_ZF = 0.99   # zoom fade below this = the body plays the native animation (viewmodel faded, PT29)
 
 
 def label_states(F):
     lab, prev_sw, swb = [], False, False
     for r in F:
-        if not r['on'] or r['w'] < 0.99:
+        if r['on'] and r['w'] >= 0.99 and r.get('zf', 1.0) < NATIVE_ZF:
+            s = 'native'
+        elif not r['on'] or r['w'] < 0.99:
             s = 'draw' if r['phase'] == 1 else 'lower' if r['phase'] == 2 else 'off'
         elif r['cls'] == 0:
             if r['swing']:
