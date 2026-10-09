@@ -53,6 +53,7 @@ camera.
 | `edge_mean`, `edge_max` | cos(blade edge, eye->wrist); +1 = edge away from the camera |
 | `jit_p95` | weapon tip screen jitter, px at 1600x900 (distance from the time-weighted midpoint of its neighbours) |
 | `step_p95` | tip screen step per frame, px |
+| `move_dm`, `move_deg` | how far the state moves the weapon from the median ready pose: grip displacement (dm) and blade/stock axis angle (deg); held states (aim, block) by their median pose, paths (swing, reload) by their largest frame. `metrics` prints `moves PASS|FAIL`: each required state (`--require`, default aim,reload or block,swing by the states seen) must exist and move >= 1.0 dm or >= 15 deg. `aim` = ti 1 AND UI state aiming (a ti label alone let a never-shown aim pass, KenshiFP C1) |
 
 **Adding a metric:** compute it per frame in `metrics.frame_metrics()` (or `rendered()` for pose quantities), add
 the aggregate to `state_table()` and its name to `METRIC_COLS`; it then shows in `metrics` and can be picked in

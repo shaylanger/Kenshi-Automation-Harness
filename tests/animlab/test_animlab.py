@@ -120,5 +120,14 @@ class T(unittest.TestCase):
         self.assertIn('GATE PASS', p.stdout)
 
 
+    def test_moves_gate(self):   # C1: a state that never shows or does not move from ready fails
+        T = {'aim': dict(move_dm=3.8, move_deg=24.0), 'reload': dict(move_dm=0.2, move_deg=3.0)}
+        ok, txt = M.moves_ok(T, ('aim', 'reload'))
+        self.assertFalse(ok); self.assertIn('reload:0.2dm/3deg:STILL', txt)
+        ok, txt = M.moves_ok({'reload': dict(move_dm=7.7, move_deg=106.0)}, ('aim', 'reload'))
+        self.assertFalse(ok); self.assertIn('aim:MISSING', txt)
+        self.assertTrue(M.moves_ok(T, ('aim',))[0])
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=1)

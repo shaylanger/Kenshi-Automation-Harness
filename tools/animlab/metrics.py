@@ -38,7 +38,11 @@ def label_states(F):
             else:
                 s = 'ready'
         else:
+            # C1: aim only while the UI state says aiming (a reload that starts from the aim target is reload, the
+            # frames between are settle): a ti=1 label alone let a never-shown aim pass
             s = {1: 'aim', 2: 'reload'}.get(r['ti'], 'ready')
+            if s == 'aim' and r['st'] != 'aiming':
+                s = 'reload' if r['st'] == 'reloading' else 'settle'
         if s not in ('block', 'swing->block'):
             swb = False
         prev_sw = s == 'swing'
@@ -121,11 +125,64 @@ def state_table(P, skip=0):
                       st_max=max(p['st'] for p in ps), st_p95=pct([p['st'] for p in ps], .95),
                       edge_mean=sum(ed) / len(ed), edge_max=max(ed),
                       jit_p95=pct([p['jit'] for p in ps if p['jit'] is not None], .95),
-                      step_p95=pct([p['step'] for p in ps if p['step'] is not None], .95))
+                      step_p95=pct([p['step'] for p in ps if p['step'] is not None], .95),
+                      move_dm=float('nan'), move_deg=float('nan'))
+    # C1 (KenshiFP 2026-10-09: the crossbow aim stayed in the ready pose and passed): how far each state moves the weapon
+    # from the median ready pose. Held states (aim, block) by their median pose, paths (swing, reload, ...) by their
+    # largest frame. move_dm = grip displacement (dm), move_deg = blade/stock axis angle (deg). See moves_ok().
+    if T.get('ready'):
+        rp, rf = _mpose(T['ready'])
+        for s, ps in T.items():
+            if s == 'ready':
+                continue
+            if s in HELD_STATES:
+                mp, mf = _mpose(ps)
+                out[s]['move_dm'], out[s]['move_deg'] = ln(sub(mp, rp)), _ang(mf, rf)
+            else:
+                out[s]['move_dm'] = max(ln(sub(p['mp'], rp)) for p in ps)
+                out[s]['move_deg'] = max(_ang(p['mf'], rf) for p in ps)
     return out
 
 
-METRIC_COLS = ('n', 'wb_p95', 'wb_max', 'elb_h_max', 'elb_h_mean', 'st_max', 'edge_mean', 'edge_max', 'jit_p95', 'step_p95')
+HELD_STATES = ('aim', 'block')
+MOVE_DM, MOVE_DEG = 1.0, 15.0
+
+
+def _med(xs):
+    xs = sorted(xs)
+    return xs[len(xs) // 2]
+
+
+def _mpose(ps):
+    return (tuple(_med([p['mp'][k] for p in ps]) for k in range(3)), tuple(_med([p['mf'][k] for p in ps]) for k in range(3)))
+
+
+def _ang(a, b):
+    la, lb = ln(a), ln(b)
+    if la < 1e-6 or lb < 1e-6:
+        return 0.0
+    return math.degrees(math.acos(max(-1.0, min(1.0, dot(a, b) / la / lb))))
+
+
+def moves_ok(table, required):
+    """C1 gate: every required state (e.g. ('aim', 'reload') for the crossbow, ('block', 'swing') for the sword) must
+    exist and move the weapon visibly from ready (move_dm >= MOVE_DM or move_deg >= MOVE_DEG).
+    Returns (ok, [text per state])."""
+    ok, txt = True, []
+    for s in required:
+        m = table.get(s)
+        if not m or 'move_dm' not in m:
+            ok = False
+            txt.append(s + ':MISSING')
+            continue
+        still = m['move_dm'] < MOVE_DM and m['move_deg'] < MOVE_DEG
+        ok = ok and not still
+        txt.append('%s:%.1fdm/%.0fdeg%s' % (s, m['move_dm'], m['move_deg'], ':STILL' if still else ''))
+    return ok, txt
+
+
+METRIC_COLS = ('n', 'wb_p95', 'wb_max', 'elb_h_max', 'elb_h_mean', 'st_max', 'edge_mean', 'edge_max', 'jit_p95', 'step_p95',
+               'move_dm', 'move_deg')
 
 
 def fmt(v):

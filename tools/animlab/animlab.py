@@ -79,6 +79,14 @@ def states_of(*tables):
 def cmd_metrics(a):
     T = M.state_table(M.frame_metrics(recfmt.parse(a.rec)), a.skip)
     print_table([[s] + [M.fmt(T[s][c]) for c in M.METRIC_COLS] for s in states_of(T)], ('state',) + M.METRIC_COLS)
+    req = getattr(a, 'require', None)
+    if req is None:   # weapon from the states seen: crossbow aim + reload, sword block + swing
+        req = ('aim', 'reload') if ('aim' in T or 'reload' in T) else ('block', 'swing') if ('block' in T or 'swing' in T) else ()
+    else:
+        req = tuple(x for x in req.split(',') if x)
+    if req:
+        ok, txt = M.moves_ok(T, req)
+        print('moves %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
 
 
 NOCMP = ('off', 'draw', 'lower', 'native', 'settle')   # not compared: blends + native animation (no solver output on screen)
@@ -221,6 +229,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest='cmd')
     p = sp.add_parser('metrics'); p.add_argument('rec'); p.add_argument('--skip', type=int, default=0)
+    p.add_argument('--require', help='states that must move visibly from ready, comma list (default: aim,reload or block,swing by the states seen)')
     p = sp.add_parser('compare'); p.add_argument('real'); p.add_argument('sim'); p.add_argument('--skip', type=int, default=0)
     for name in ('replay', 'sweep', 'gate'):
         p = sp.add_parser(name)
