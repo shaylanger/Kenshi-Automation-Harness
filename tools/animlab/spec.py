@@ -667,12 +667,16 @@ def cmd_unarmed(a):
         name = os.path.basename(d) or pose
         strikers = None
         kj = os.path.join(d, 'keys.json')
+        cc = U
         if os.path.isfile(kj):
             try:
-                strikers = json.load(open(kj)).get('strikers')
+                kd = json.load(open(kj))
+                strikers = kd.get('strikers')
+                if kd.get('near'):   # the candidate's camera near clip (KenshiFP fist mode lowers it, as the crossbow)
+                    cc = dict(U, near=float(kd['near']))
             except ValueError:
                 pass
-        res = unarmed_checks(read_pose(pose), strikers, name=name)
+        res = unarmed_checks(read_pose(pose), strikers, c=cc, name=name)
         fails = {}
         for rid, v, txt in res:
             own = owners.get(rid, '?')

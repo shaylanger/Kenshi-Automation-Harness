@@ -1004,8 +1004,11 @@ def vp(p, f, u):
 
 
 # ---------------- fists: per-technique FP key tables from native unarmed clips ----------------
-FIST_DEFAULTS = dict(guard={'R': [1.9, -2.3, 4.2], 'L': [-1.9, -2.3, 4.2]},     # FP guard wrists (camera numbers, dm)
-                     strike={'R': [0.6, -0.9, 5.5], 'L': [-0.6, -0.9, 5.5]},    # where a full punch puts the wrist
+# Geometry for the game's unarmed FP body (vmrec-fist-z0-a.txt frame 100, 4080 2026-10-10: the unarmed stance turns the
+# torso, R shoulder 2.4 dm / L 1.4 dm behind the eye; arm reach 7.1 dm): strikes at <= 6.8 dm from the shoulder, guards
+# on screen (y/z >= -.62) and bent (~5.1-5.7 dm). The sword-ready proxy used guard z 4.2 / strike z 5.5 (out of reach here).
+FIST_DEFAULTS = dict(guard={'R': [1.7, -2.0, 3.3], 'L': [-1.7, -2.1, 3.7]},     # FP guard wrists (camera numbers, dm)
+                     strike={'R': [0.5, -1.1, 4.1], 'L': [-0.5, -1.0, 4.8]},    # where a full punch puts the wrist
                      chamber={'R': [0.3, -0.7, -0.3], 'L': [-0.3, -0.7, -0.3]},  # full wind-up offset from the guard (down, back)
                      chamber_e=0.25,   # native extension (fraction of the strike, negative = pulled back) that maps to the full chamber
                      res_scale=0.35, res_max=0.5,   # native off-line wrist motion kept (scale, clamp dm), turned onto the FP strike line
@@ -1023,11 +1026,13 @@ FIST_DEFAULTS = dict(guard={'R': [1.9, -2.3, 4.2], 'L': [-1.9, -2.3, 4.2]},     
                      # curling toward the camera = a palm-up reach. A small flex puts the knuckles in front (fist read).
                      flex_guard=18.0, flex_strike=22.0,
                      strikers={'badpunch': ['L']},   # per technique striking hands (native: badpunch strikes with L only)
-                     strike_min=1.5, stab='pelvis', guard_anim='ma idle1', guard_t=0.0, near=3.0,
+                     strike_min=1.5, stab='pelvis', guard_anim='ma idle1', guard_t=0.0,
+                     nearclip=1.5,   # the game's FP near plane in fist mode (sheets render with it)
+                     near=2.0,   # KenshiFP fist mode lowers the camera near clip to 1.5 while the fists are shown (as the crossbow, X2 g_vm_nc); 0.5 margin
                      nkeys=[4, 12],
                      sets=['wroll=0', 'edgeclamp=0', 'wfix=0', 'hroll=0', 'e1inl=0', 'hinge=0', 'elb=0'],
                      center=[0.30, 0.35], wb_max=30.0, wr_err_max=0.35, path_err_max=0.5, eye_min=2.5, above_max=0.5,
-                     y_max=0.0, z_min=3.4)   # path clamps: wrist never above y_max (eye level), never nearer than z_min
+                     y_max=0.0, z_min=3.0)   # path clamps: wrist never above y_max (eye level), never nearer than z_min
 
 
 def fist_cfg(cfg):
@@ -1223,6 +1228,7 @@ def fist_render(a, cfg, N, an, pose_path, fc, ku, t_end, out, tag, n=12, orbit=6
     arm motion is not hidden behind the body)."""
     import render as VR
     vcfg = VR.load_cfg(a.visual, 'none')
+    vcfg['near'] = float(fc.get('nearclip', vcfg.get('near', 0.5)))
     rig = VR.Rig(vcfg)
     Pf = VR.load_pose(pose_path)
     T = np.array([f['t'] for f in Pf])
@@ -1392,7 +1398,7 @@ def cmd_fists(a):
             json.dump(dict(anim=an.name, length=an.length, ku=ku, guard={s: [list(map(float, x)) for x in gpose[s]] for s in 'RL'},
                            keys={s: [[list(map(float, x)) for x in k] for k in kp[s]] for s in 'RL'},
                            info={s: {k: v for k, v in info[s].items() if k != 'ew'} for s in 'RL'},
-                           strikers=strikers, grip={s: grip[s].tolist() for s in 'RL'}, sets=fc['sets'], result=line), f, indent=1)
+                           strikers=strikers, near=fc['near'], grip={s: grip[s].tolist() for s in 'RL'}, sets=fc['sets'], result=line), f, indent=1)
         if not a.no_video:
             s0, s25 = fist_render(a, cfg, N, an, os.path.join(od, 'pose.txt'), fc, ku, dur, od, 'candidate %s' % ('PASS' if not bad else 'FAIL'))
             print('  sheets %s %s' % (s0, s25))
