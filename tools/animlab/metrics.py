@@ -923,3 +923,49 @@ def guard_check(S, elev_min=GUARD_ELEV, min_n=5):
     ok = med >= elev_min
     return ok, ['elev_med=%.0f/%.0f%s' % (med, elev_min, '' if ok else ':BAD'), 'elev_min=%.0f@frame%d' % (lo[1], lo[0]),
                 'hilt_head_med=%.1fdm(info)' % (hh[len(hh) // 2] if hh else float('nan')), 'block_frames=%d' % len(S)]
+
+
+# ---- zoom band body check (Miss 2026-10-10 zoom-sweep.mp4, Z1 crossfade 2-8 dm: own headless torso/shoulders, a floating
+# hand and an oversized hand on the stock in frame). The zoom camera sits `zoom` dm behind the eye along the view axis
+# (KenshiFP fp_view_apply, orbit 0) and the head stays hidden below head_show dm: anything of the own torso the camera
+# sees in that band is a headless body part. Judged from the recorded neck/spine/shoulder/elbow positions.
+ZB_EYE, ZB_HEAD_SHOW, ZB_NEAR = 0.05, 16.0, 0.3   # dm: eye limit, KenshiFP g_cfg_head_show_dm, camera near plane
+ZB_PARTS = ('nk', 'sp', 'Lsh', 'Rsh', 'Lel', 'Rel', 'Lwr', 'Rwr', 'chest')   # wrists: the floating hand
+
+
+def zoomband_series(F, head_show=ZB_HEAD_SHOW, eye=ZB_EYE, near=ZB_NEAR):
+    """[(frame, zoom, [(part, x_ndc, y_ndc, depth)])] for frames whose camera distance is in (eye, head_show): own body
+    parts inside the zoomed camera's view (|x| <= 1, |y| <= 1 in screen units, depth > near)."""
+    out = []
+    for i, r in enumerate(F):
+        d = r.get('zoom', 0.0)
+        if not (eye < d < head_show) or r.get('nk') is None:
+            continue
+        pts = dict(nk=r['nk'], sp=r['sp'], Lsh=r['Lsh'], Rsh=r['Rsh'], Lel=r['Lel'], Rel=r['Rel'], Lwr=r['Lwr'], Rwr=r['Rwr'])
+        pts['chest'] = mul(add(add(r['Lsh'], r['Rsh']), r['sp']), 1.0 / 3.0)
+        seen = []
+        for k in ZB_PARTS:
+            if k[1:] in ('el', 'wr') and r.get('zf', 1.0) >= NATIVE_ZF:
+                continue   # full viewmodel (zf 1, below zf0): the FP arms in view are the intended first-person hands
+            p = pts[k]; z = p[2] + d
+            if z > near:
+                x, y = p[0] / z / TX, p[1] / z / TY
+                if abs(x) <= 1.0 and abs(y) <= 1.0:
+                    seen.append((k, x, y, z))
+        out.append((i, d, seen))
+    return out
+
+
+def zoomband_check(S, max_frames=0):
+    """FAIL when more than max_frames band frames show an own body part. Prints the band frames, the zoom range seen and
+    the worst frame (most parts, nearest)."""
+    bad = [s for s in S if s[2]]
+    txt = ['band_frames=%d' % len(S)]
+    if S:
+        txt.append('zoom=%.1f..%.1f' % (min(s[1] for s in S), max(s[1] for s in S)))
+    ok = len(bad) <= max_frames
+    txt.append('body_in_frame=%d/%d%s' % (len(bad), max_frames, '' if ok else ':BAD'))
+    if bad:
+        w = max(bad, key=lambda s: (len(s[2]), -min(p[3] for p in s[2])))
+        txt.append('worst=frame%d,zoom=%.1f,%s' % (w[0], w[1], '+'.join('%s(z%.1f)' % (p[0], p[3]) for p in w[2])))
+    return ok, txt

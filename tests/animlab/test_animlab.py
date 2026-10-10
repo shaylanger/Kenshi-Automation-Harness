@@ -279,6 +279,16 @@ class T(unittest.TestCase):
         ok, t = M.guard_check(take((0.1, -1.0, 0.05))); self.assertFalse(ok, t); self.assertIn(':BAD', t[0])
         ok, t = M.guard_check(take((0.2, 0.6, 0.8))); self.assertTrue(ok, t)
         ok, t = M.guard_check([]); self.assertFalse(ok)
+    def test_zoomband_check(self):
+        # miss 2026-10-10 zoom-sweep Z1 crossfade: own headless torso / floating hand in frame between eye and head-show distance
+        def fr(d):
+            return dict(zoom=d, zf=0.5, nk=(0, -2.7, -1.7), sp=(0, -8.6, -0.9), Lsh=(-1.8, -3.4, -1.8), Rsh=(1.8, -3.4, -1.8),
+                        Lel=(-2.2, -6.2, -1.8), Rel=(2.2, -6.2, -1.8), Lwr=(-2.8, -9.1, -0.8), Rwr=(2.8, -9.1, -0.8))
+        ok, t = M.zoomband_check(M.zoomband_series([fr(0.0)] * 5 + [fr(25.0)] * 5)); self.assertTrue(ok, t)   # eye / far: not the band
+        ok, t = M.zoomband_check(M.zoomband_series([fr(0.0)] * 5 + [fr(8.0)] * 3)); self.assertFalse(ok, t)
+        self.assertIn('body_in_frame=3/0:BAD', ' '.join(t)); self.assertIn('nk(', t[-1])
+        far = dict(fr(1.0), nk=(0, -50, 1), sp=(0, -50, 1), Lsh=(0, -50, 1), Rsh=(0, -50, 1), Lel=(0, -50, 1), Rel=(0, -50, 1), Lwr=(0, -50, 1), Rwr=(0, -50, 1))
+        ok, t = M.zoomband_check(M.zoomband_series([far] * 4)); self.assertTrue(ok, t)   # band frames with nothing in view pass
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)

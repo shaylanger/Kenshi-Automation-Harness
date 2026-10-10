@@ -70,6 +70,9 @@ KenshiFP adapter: sampler `components/KenshiFP/animlab/take-sample.sh` (source i
 `take_sample_start <ev> "$T0" <fp char> ["<allowed>|..."]` ... `take_sample_stop`) + rules `take-rules.txt`.
 `animlab.py guard <rec>`: block guard readability, median blade elevation above the horizontal over block frames
 >= -60 deg (`--elev`; a hanging guard, blade straight down with the hilt at the face, is ~-80..-90); hilt-head distance info.
+`animlab.py zoomband <rec> [--head-show 16]`: no own body in frame while the zoom camera is between the eye and the
+head-show distance (head hidden there): neck/spine/shoulders projected from the camera `zoom` dm behind the eye (orbit 0),
+elbows/wrists too once the viewmodel fades (zf < 0.99). Catches the Z1 crossfade's headless torso / floating hand.
 Frames of the video itself: `tools/animlab/frames.py openground <mp4> [--from s --to s]` = judgeable open ground on the
 RECORDED frames (sky share of the scene band between the title label and the UI panel >= 0.08 on >= 90% of frames at
 2 fps; prints the closed spans); a setup check before recording is not enough (sword-z25-block: slope for 17 s). Night/fog fails.

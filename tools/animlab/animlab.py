@@ -224,6 +224,14 @@ def cmd_guard(a):
     return 0 if ok else 1
 
 
+def cmd_zoomband(a):
+    """own body parts in frame while the camera is between the eye and the head-show distance (metrics.zoomband_check)."""
+    rec = recfmt.parse(a.rec)
+    ok, txt = M.zoomband_check(M.zoomband_series(rec.frames, a.head_show), a.max_frames)
+    print('zoomband %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
+    return 0 if ok else 1
+
+
 def cmd_branch(a):
     """Sword ready elbow branch: every ready run on the reference branch (--ref recording's first ready run, else this
     recording's first run): edge roll about the blade <= --roll deg, elbow <= --elb dm (see metrics.ready_branch)."""
@@ -346,6 +354,8 @@ def main():
     p.add_argument('--overhead', help='scripted stroke ids that must descend vertically, comma list (E6: 2)')
     p.add_argument('--tilt', type=float, default=M.STK_OH_TILT); p.add_argument('--path', type=float, default=M.STK_OH_PATH)
     p = sp.add_parser('guard'); p.add_argument('rec'); p.add_argument('--elev', type=float, default=M.GUARD_ELEV, help='min median blade elevation (deg) over block frames')
+    p = sp.add_parser('zoomband'); p.add_argument('rec'); p.add_argument('--head-show', type=float, default=M.ZB_HEAD_SHOW, help='dm: head hidden below this camera distance (KenshiFP head_show_dm)')
+    p.add_argument('--max-frames', type=int, default=0)
     p = sp.add_parser('stock'); p.add_argument('rec'); p.add_argument('--ref', help='known-good recording for the orientation check')
     p.add_argument('--max', type=float, default=M.STOCK_MAX); p.add_argument('--ori', type=float, default=M.ORI_MAX)
     p.add_argument('--h', type=float, default=M.STOCK_H, help='stock top above the bolt axis (dm)')
@@ -370,7 +380,7 @@ def main():
         M.STROKE_ONLY = a.only_stroke
     if not a.cmd:
         ap.print_help(); return 2
-    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
+    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':
