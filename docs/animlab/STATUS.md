@@ -244,6 +244,10 @@ Format: date | point | what the game showed | recording path | build | status
       frames.py, tests/animlab/test_takecheck.py, test_frames.py; workspace components/KenshiFP/animlab/take-sample.sh,
       take-rules.txt. Phase-4 builder (a0bf79e3fd0cce93a) owns native.py/ogre.py/render.py and appends its regress step at the
       end; it will clean up STATUS/USAGE later (Misses rows unchanged). Scratch: %TEMP%\claude\C--KenshiModding\al12.
+      Sampler v2 (workspace 7c396ed, harness 06de228 kah.send_many): v1 (5 stobe-auto calls/sample) gave in-game gaps up to
+      3.1 s and near ALWAYS 0 (one-line chars reply); v2 = take_sample.py, one inbox write per sample every 0.6 s, mock
+      (take_sample_mock.py: fake harness on /mnt/c + concurrent take script) max gap 0.63 s, no take slowdown. zoomband skips
+      band_hidden frames (rec H 5th token, KenshiFP 3AFB09A4+; harness c7aa9a8).
 
 ## How to resume
 Read this file, `git log -- tools/animlab docs/animlab tests/animlab` in the harness repo and
