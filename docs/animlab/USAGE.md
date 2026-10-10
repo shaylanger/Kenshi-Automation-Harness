@@ -86,7 +86,7 @@ check that applies (metrics.check_suite: moves, branch, stock, guard, and per sc
 hinge, plus the per-frame `gate`; zoomed-out recs without viewmodel frames get no gate row) runs on the game rec and on the
 replay; a pass/fail difference is a disagreement = a lab bug with an open Misses row. `--status` rewrites the "Lab
 agreement" section (summary + disagreements) and writes the full table to `<manifest>-table.md`. Corpus manifest:
-`C:\KenshiTestRuns\corpusgreegree.list`.
+`C:\KenshiTestRuns\corpus\agree\agree.list`.
 **Native variant pools** (`animlab.py pool`): the game picks a native variant per occurrence (attack variant per swing,
 free-block technique per press), so a check on one recording cannot predict a take. `pool @list --adapter A --stroke N
 [--overhead 2] [--checks arc,blade,stroke]` replays every recording of the list with the stroke forced (`--stroke-args`,
@@ -378,3 +378,25 @@ ready/block), `stilljit` (X1: aim jit_p95 <= 1.5 px), `wrist` (holds <= 30, swin
 confusion per rule (TP rejected+FAIL, TN accepted+PASS, FN lab missed, FP false alarm), `DISAGREE` lines and
 `RESULT taste PASS|FAIL items= agree=(weighted)`. File formats in the script headers. KenshiFP data + one-command rerun:
 `components/KenshiFP/animlab/taste/run.sh` (workspace). Unit tests `tests/animlab/test_spec.py`.
+
+## Feedback loop: corpus, per-build gate, mutations, backfill, ledger, take preflight (animlab-loop)
+Scripts live in KenshiModding `components/KenshiFP/animlab/` (run in WSL); each has a usage header.
+- **Corpus** `corpus.sh add|row|verify|sync|stats|files`: the protected evidence corpus `C:\KenshiTestRuns\corpus`
+  (never cleaned; MANIFEST.tsv = name kind check expect build source status notes, SHA256SUMS). Every check keeps a FAIL
+  and a PASS recording ("pair"); `pending` rows name material still to record. Before deleting a run dir, `corpus.sh add`
+  any recording a check or Misses row uses. `regress.sh` syncs its work dir from the corpus.
+- **Gate** `gate.sh [--update-baseline] [--no-mutate]` (~3 min, offline): corpus verify + regress on an empty work dir
+  + E6 swing pool + mutation tests + flips vs `corpus/gate-baseline.tsv`; one `RESULT ANIMLAB-REGRESS PASS|FAIL ...` line,
+  cached per source/lab/manifest hash in `/root/animlab-gate/`. Runs on every KenshiFP viewmodel build before VMQUICK
+  (fp-viewmodel.sh `vmq_gate`). After a lab-check commit: run it, read the flips, then `--update-baseline`.
+- **Mutations** `mutate.py --work <gate work dir>`: synthetic corruptions of known-good corpus material (recording edits,
+  video overlays); each check must FAIL its own kind. Known gaps (no check yet) in `corpus/mutations-known.tsv`; a gap is a
+  Misses row for the maintainer, not a gate FAIL.
+- **Backfill** `backfill.sh <rec|video> <name> '<cmd with {}>'`: a new/changed check run once over all corpus material;
+  SKIP when the check does not apply (BF_NA: n/a, no swing, no block, band_frames=0 ...); `new=` lists FAILs on material
+  with no expected-FAIL manifest row for that check = lab finds on old material (check by eye, then Misses row or manifest row).
+- **Ledger** `ledger.py`: rewrites the "Catch-rate ledger" table in STATUS.md (who found each flaw first per build and class).
+- **Setup misses** `SETUP_MISSES.md`: take/setup failures; each maps to a check in the shared take preflight
+  `components/KenshiFP/tests/ingame/take-preflight.sh` (pf_begin RESULT guard, pf_outdir, pf_rig incl. the 4080
+  rig_preflight, pf_display, pf_day, pf_clean, pf_area, pf_weapon, pf_open with cursor + min luma; `pf_all` = all in order).
+- **Review verdicts**: `tools/automation/review-verdict.ps1 ... FAIL|REJECT-SHEET` appends a PENDING Misses row automatically.
