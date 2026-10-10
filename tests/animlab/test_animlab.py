@@ -279,6 +279,12 @@ class T(unittest.TestCase):
         ok, t = M.guard_check(take((0.1, -1.0, 0.05))); self.assertFalse(ok, t); self.assertIn(':BAD', t[0])
         ok, t = M.guard_check(take((0.2, 0.6, 0.8))); self.assertTrue(ok, t)
         ok, t = M.guard_check([]); self.assertFalse(ok)
+        # miss 2026-10-10 blk-survey: 2 raised presses + 1 hanging press = FAIL (the whole-take median was raised)
+        S = [(i, 40.0, 3.0) for i in range(0, 12)] + [(i, -78.0, 3.0) for i in range(30, 40)] + [(i, 55.0, 3.0) for i in range(60, 72)]
+        ok, t = M.guard_check(S); self.assertFalse(ok, t); self.assertIn('presses=3 hanging=1:BAD', t[0]); self.assertIn('press1@frame30', ' '.join(t))
+        ok, t = M.guard_check([x for x in S if not 30 <= x[0] < 40]); self.assertTrue(ok, t)
+        ok, t = M.guard_table_check([('a', 59.6, '228c60'), ('b', -74.6, '226e50')]); self.assertFalse(ok, t)
+        ok, t = M.guard_table_check([('a', 59.6, '228c60'), ('b', 45.7, '223cc0')]); self.assertTrue(ok, t)
     def test_zoomband_check(self):
         # miss 2026-10-10 zoom-sweep Z1 crossfade: own headless torso / floating hand in frame between eye and head-show distance
         def fr(d):

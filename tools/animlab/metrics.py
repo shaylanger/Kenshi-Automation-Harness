@@ -915,14 +915,51 @@ def guard_series(F, P):
     return out
 
 
-def guard_check(S, elev_min=GUARD_ELEV, min_n=5):
+GUARD_GAP, GUARD_SETTLE = 3, 0.3   # frames between presses; share of each press skipped while the guard rises
+
+
+def guard_presses(S, gap=GUARD_GAP):
+    """block presses = runs of block frames (frame numbers at most `gap` apart) -> [[(frame, elev, hilt_head)], ...]."""
+    out = []
+    for x in S:
+        if out and x[0] - out[-1][-1][0] <= gap:
+            out[-1].append(x)
+        else:
+            out.append([x])
+    return out
+
+
+def guard_check(S, elev_min=GUARD_ELEV, min_n=5, settle=GUARD_SETTLE):
+    """EVERY block press must hold a readable guard (Miss 2026-10-10 blk-survey: the free block picks a native block
+    technique per press, 2 raise the blade and 3 hang it, so a median over the whole recording passed a take with
+    hanging presses): per press, median elevation over its settled frames (after the first `settle` share) >= elev_min."""
     if len(S) < min_n:
         return False, ['block frames=%d < %d:BAD' % (len(S), min_n)]
-    es = sorted(s[1] for s in S); med = es[len(es) // 2]; lo = min(S, key=lambda s: s[1])
+    pr = guard_presses(S)
+    bad, meds = [], []
+    for k, p in enumerate(pr):
+        q = p[int(len(p) * settle):] or p
+        es = sorted(x[1] for x in q); med = es[len(es) // 2]
+        meds.append(med)
+        if med < elev_min:
+            bad.append('press%d@frame%d:elev%.0f' % (k, p[0][0], med))
+    lo = min(S, key=lambda s: s[1])
     hh = sorted(s[2] for s in S if s[2] == s[2])
-    ok = med >= elev_min
-    return ok, ['elev_med=%.0f/%.0f%s' % (med, elev_min, '' if ok else ':BAD'), 'elev_min=%.0f@frame%d' % (lo[1], lo[0]),
-                'hilt_head_med=%.1fdm(info)' % (hh[len(hh) // 2] if hh else float('nan')), 'block_frames=%d' % len(S)]
+    ok = not bad
+    return ok, ['presses=%d hanging=%d%s' % (len(pr), len(bad), '' if ok else ':BAD'), 'elev_press_min=%.0f/%.0f' % (min(meds), elev_min),
+                'elev_min=%.0f@frame%d' % (lo[1], lo[0]), 'hilt_head_med=%.1fdm(info)' % (hh[len(hh) // 2] if hh else float('nan')),
+                'block_frames=%d' % len(S)] + (bad[:8] if bad else [])
+
+
+def guard_table_check(rows, elev_min=GUARD_ELEV):
+    """per-press survey rows [(label, elev_deg, tech)] (blk-survey blk-table.tsv: one `fp_vm state` sample per press)."""
+    bad = ['%s:%s:elev%.0f' % (lb, tech, e) for lb, e, tech in rows if e < elev_min]
+    techs = {}
+    for lb, e, tech in rows:
+        techs.setdefault(tech, []).append(e)
+    ok = bool(rows) and not bad
+    return ok, ['presses=%d hanging=%d%s' % (len(rows), len(bad), '' if ok else ':BAD'),
+                'per_tech=' + ','.join('%s:%.0f' % (t, sorted(v)[len(v) // 2]) for t, v in sorted(techs.items()))] + bad[:6]
 
 
 # ---- zoom band body check (Miss 2026-10-10 zoom-sweep.mp4, Z1 crossfade 2-8 dm: own headless torso/shoulders, a floating

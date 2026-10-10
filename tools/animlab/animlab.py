@@ -217,7 +217,21 @@ def cmd_stroke(a):
 
 
 def cmd_guard(a):
-    """block guard readability: blade not hanging straight down (metrics.guard_check)."""
+    """block guard readability: blade not hanging straight down in ANY block press (metrics.guard_check); a .tsv with a
+    blade_elev_deg column (blk-survey per-press table) is judged per row (metrics.guard_table_check)."""
+    if a.rec.endswith('.tsv'):
+        import re
+        rows = []
+        with open(a.rec) as f:
+            hdr = f.readline().rstrip('\n').split('\t')
+            for line in f:
+                c = dict(zip(hdr, line.rstrip('\n').split('\t')))
+                m = re.search(r'tech=0*([0-9a-fA-F]+)', c.get('evidence', ''))
+                rows.append(('%s/%s/%s' % (c.get('view', ''), c.get('dir', ''), c.get('org', '')), float(c['blade_elev_deg']),
+                             m.group(1)[-6:] if m else '?'))
+        ok, txt = M.guard_table_check(rows, a.elev)
+        print('guard %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
+        return 0 if ok else 1
     rec = recfmt.parse(a.rec); P = M.frame_metrics(rec)
     ok, txt = M.guard_check(M.guard_series(rec.frames, P), a.elev)
     print('guard %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
