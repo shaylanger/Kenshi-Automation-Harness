@@ -514,16 +514,83 @@ int CountAllSections(Inventory *inv, GameData *data) {
   return total;
 }
 
-// Creates one item. The game's factory returns nothing for weapons (with or
-// without a maker and quality grade, tried 2026-10-02), so they are refused
-// with a clear message instead of a silent "0/1".
-Item *MakeItem(GameWorld *world, GameData *data, const std::vector<std::string> &, size_t,
-               GameData *defaultMaker, std::string &error) {
-  if (data->type == WEAPON) {
-    error = "weapons can't be created by the harness (the game's item factory refuses them): " +
-            data->name;
+// Weapons (weapon-matrix, 2026-10-10): the factory needs a manufacturer (WEAPON_MANUFACTURER whose "weapon types"
+// list the weapon) AND a model grade (MATERIAL_SPECS_WEAPON from the maker's "weapon models"); with no grade it returns
+// nothing (the 2026-10-02 refusal passed a maker only). Optional args after the count: `maker <name|sid>`,
+// `model <name|sid>`; default maker: the player's (Homemade) if it makes this weapon, else the first maker that does.
+bool RefListHas(GameData *d, const char *list, const std::string &sid) {
+  const Ogre::vector<GameDataReference>::type *l = Valid(d) ? d->getReferenceListIfExists(list) : nullptr;
+  if (!l)
+    return false;
+  for (size_t i = 0; i < l->size(); ++i)
+    if ((*l)[i].sid == sid)
+      return true;
+  return false;
+}
+
+GameData *DataBySid(GameWorld *world, itemType type, const std::string &sid) {
+  const auto cat = world->gamedata.gamedataCatSID.find((int)type);
+  if (cat == world->gamedata.gamedataCatSID.end())
+    return nullptr;
+  for (auto it = cat->second.begin(); it != cat->second.end(); ++it)
+    if (Valid(it->second) && it->second->stringID == sid)
+      return it->second;
+  return nullptr;
+}
+
+Item *MakeWeapon(GameWorld *world, GameData *data, const std::vector<std::string> &f, size_t from,
+                 GameData *defaultMaker, std::string &error) {
+  GameData *maker = nullptr, *model = nullptr;
+  for (size_t i = from; i + 1 < f.size(); ++i) {
+    if (Lower(f[i]) == "maker" && !(maker = FindData(world, WEAPON_MANUFACTURER, f[i + 1], error)))
+      return nullptr;
+    if (Lower(f[i]) == "model" && !(model = FindData(world, MATERIAL_SPECS_WEAPON, f[i + 1], error)))
+      return nullptr;
+  }
+  if (!maker && Valid(defaultMaker) && RefListHas(defaultMaker, "weapon types", data->stringID))
+    maker = defaultMaker;
+  if (!maker) {
+    const auto cat = world->gamedata.gamedataCatSID.find((int)WEAPON_MANUFACTURER);
+    if (cat != world->gamedata.gamedataCatSID.end()) {
+      for (auto it = cat->second.begin(); it != cat->second.end() && !maker; ++it)
+        if (Valid(it->second) && it->second->stringID == "PLAYER_WEAPONS" &&
+            RefListHas(it->second, "weapon types", data->stringID))
+          maker = it->second;
+      for (auto it = cat->second.begin(); it != cat->second.end() && !maker; ++it)
+        if (Valid(it->second) && RefListHas(it->second, "weapon types", data->stringID) &&
+            it->second->getReferenceListIfExists("weapon models") &&
+            !it->second->getReferenceListIfExists("weapon models")->empty())
+          maker = it->second;
+    }
+  }
+  if (!maker) {
+    error = "no weapon manufacturer makes " + data->name + " (" + data->stringID + "): give `maker <name>`";
     return nullptr;
   }
+  if (!model) {
+    const Ogre::vector<GameDataReference>::type *l = maker->getReferenceListIfExists("weapon models");
+    for (size_t i = 0; l && i < l->size() && !model; ++i)
+      model = DataBySid(world, MATERIAL_SPECS_WEAPON, (*l)[i].sid);
+  }
+  if (!model) {
+    error = "manufacturer " + maker->name + " has no weapon model grade: give `model <name>`";
+    return nullptr;
+  }
+  Item *item = world->theFactory->createItem(data, hand(), maker, model, -1, nullptr);
+  if (!Valid(item))   // the SDK names the 3rd argument weaponMesh: try the other order once
+    item = world->theFactory->createItem(data, hand(), model, maker, -1, nullptr);
+  if (!Valid(item))
+    error = "the game could not create " + data->name + " (maker " + maker->name + ", model " + model->name + ")";
+  else
+    Log("KAH: weapon " + data->name + " sid=" + data->stringID + " maker=" + maker->name + " model=" + model->name);
+  return Valid(item) ? item : nullptr;
+}
+
+// Creates one item (weapons through MakeWeapon).
+Item *MakeItem(GameWorld *world, GameData *data, const std::vector<std::string> &f, size_t from,
+               GameData *defaultMaker, std::string &error) {
+  if (data->type == WEAPON)
+    return MakeWeapon(world, data, f, from, Valid(defaultMaker) ? defaultMaker : CraftingBuilding::playerManufacturerData(), error);
   Item *item = world->theFactory->createItem(data, hand(), defaultMaker, nullptr, -1, nullptr);
   if (!Valid(item))
     error = "the game could not create " + data->name;
@@ -601,7 +668,7 @@ int CountArg(const std::vector<std::string> &f, size_t at) {
   if (f.size() <= at)
     return 1;
   const std::string v = Lower(f[at]);
-  if (v == "at" || v == "near" || v == "section" || v == "radius")
+  if (v == "at" || v == "near" || v == "section" || v == "radius" || v == "maker" || v == "model")
     return 1;
   return atoi(f[at].c_str());
 }

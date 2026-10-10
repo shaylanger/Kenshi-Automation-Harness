@@ -507,6 +507,11 @@ def cmd_gate(a):
     return 0 if allok else 1
 
 
+def cmd_weapons(a):
+    import weapons
+    return weapons.cmd(a)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest='cmd')
@@ -572,13 +577,22 @@ def main():
     p = sp.add_parser('agree'); p.add_argument('manifest', help='lines `<game rec> <adapter of its build> [adapter args]`')
     p.add_argument('--status', help='STATUS.md to write the summary into'); p.add_argument('--keep'); p.add_argument('-j', type=int, default=os.cpu_count() or 4)
     ap.add_argument('--only-stroke', dest='only_stroke', type=int, help='E6: judge only swings of this scripted stroke (others -> swing_x)')
+    p = sp.add_parser('weapons', help='weapon catalogue (base + mods) / per-weapon check matrix (weapons.py)')
+    p.add_argument('--config', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'components', 'KenshiFP', 'animlab', 'native.json'))
+    p.add_argument('--catalog', action='store_true'); p.add_argument('--run', action='store_true')
+    p.add_argument('-o', default='weapons-out', help='output dir (catalog: weapons.csv/json/md)')
+    p.add_argument('--weapons-json', help='catalog weapons.json for --run (default: build it now)')
+    p.add_argument('--recs', nargs='*', default=[], help='recordings / candidates to replay per weapon (or @listfile)')
+    p.add_argument('--adapter', help='metricslab adapter command for replays (default: plain recordings only)')
+    p.add_argument('--all', action='store_true', help='every catalog weapon, not only the representatives')
+    p.add_argument('--only', help='comma list of sids / names'); p.add_argument('--sheet', action='store_true', help='--run: render one sheet per weapon')
     a = ap.parse_args()
     if a.only_stroke is not None:
         M.STROKE_ONLY = a.only_stroke
     if not a.cmd:
         ap.print_help(); return 2
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))   # SIGTERM -> SystemExit: atexit removes the temp dirs
-    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'reload': cmd_reload, 'spike': cmd_spike, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool, 'agree': cmd_agree}[a.cmd](a) or 0
+    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'reload': cmd_reload, 'spike': cmd_spike, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool, 'agree': cmd_agree, 'weapons': cmd_weapons}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':

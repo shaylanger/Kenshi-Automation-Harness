@@ -13,7 +13,7 @@ solved_*.txt) or an `fp_vm state` dump (key=value line, one frame); the format i
 CFG (JSON, solver/game specific; KenshiFP's is components/KenshiFP/animlab/visual.json):
   game_dir, skeleton, body_mesh, weapon_mesh {"R": path, "L": path}, weapon_sides ["R"], prop_axes [[f,u] per class]
   (prop-local axis codes 1..3 = X,Y,Z, negative = flipped), prop_local_q {"0": [w,x,y,z], "1": [...]} (hand -> prop
-  rotation per weapon class), prop_roll_deg {"0": deg} (extra roll about the blade axis), prop_mirror {"L": {q_sign, roll_sign, roll_add}} (off hand: prop local q * q_sign, roll -> roll * roll_sign + roll_add), weapon_offset {"R": [x,y,z]}
+  rotation per weapon class), prop_roll_deg {"0": deg} (extra roll about the blade axis), prop_mirror {"L": {q_sign, roll_sign, roll_add}} (off hand: prop local q * q_sign, roll -> roll * roll_sign + roll_add), weapon_offset {"R": [x,y,z]}, weapon_scale {"R": [sx,sy,sz]} (mesh-axis scale: item scale fields)
   (weapon mesh origin in prop-local dm), bones {"L": [clavicle, upperarm, forearm, hand, prop], "R": [...]}, fov [tan_x, tan_y],
   near (dm), colors.
 Posing: upper arm / forearm X along the solved bone, roll from the elbow hinge (sign from the bind pose: flexion
@@ -146,7 +146,11 @@ class Rig:
             wp, wt = [], []
             for pos, _, tris, _ in m.triangles():
                 wt.append(tris + sum(len(x) for x in wp)); wp.append(pos)
-            self.weap[s] = (np.vstack(wp), np.vstack(wt))
+            wv = np.vstack(wp)
+            sc = (cfg.get('weapon_scale') or {}).get(s)   # per mesh axis [X, Y, Z]: item scale fields (weapons.py catalog)
+            if sc:
+                wv = wv * np.array(sc, float)
+            self.weap[s] = (wv, np.vstack(wt))
         # hinge sign: flexion turns the forearm toward the toes (bind facing)
         b = self.sk.by_name
         toe = [n for n in b if n.endswith('Toe0')]

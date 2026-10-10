@@ -206,7 +206,7 @@ maxrunspeed, currentrunspeed, encumbrance.
 
 ## Notes
 
-- Weapons can't be created directly (`give`, `stash`, `buy`, `packput`, `craftfinish`): the game's
+- Weapons: `give <npc> <weapon name|sid> [n] [maker <manufacturer>] [model <grade>]` creates them (weapon-matrix 2026-10-10: the factory needs a WEAPON_MANUFACTURER that lists the weapon + a MATERIAL_SPECS_WEAPON grade; default the player maker, else the first maker that makes it; not yet confirmed in game). Older note: the game.s
   item factory refuses them. Make them the real way: `research` + `craft` (see above). `find` shows exact names;
   items can be named by game-data string ID too (`find` prints `sid=`).
 - Same-faction NPCs ignore `attack` orders against each other.

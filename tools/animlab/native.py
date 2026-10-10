@@ -1477,10 +1477,11 @@ def fcs_read(path):
             s(); p[0] += 16
         r['strings'] = {s(): s() for _ in range(i())}
         r['files'] = {s(): s() for _ in range(i())}
+        r['refs'] = {}   # reference lists: name -> [sid] (weapons.py: crossbow ammo, reload anim)
         for _ in range(i()):
-            s()
+            rl = r['refs'].setdefault(s(), [])
             for _ in range(i()):
-                s(); p[0] += 12
+                rl.append(s()); p[0] += 12
         for _ in range(i()):
             s(); s(); p[0] += 28
             for _ in range(i()):
