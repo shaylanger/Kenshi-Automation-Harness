@@ -1009,7 +1009,11 @@ def vp(p, f, u):
 # on screen (y/z >= -.62) and bent (~5.1-5.7 dm). The sword-ready proxy used guard z 4.2 / strike z 5.5 (out of reach here).
 FIST_DEFAULTS = dict(guard={'R': [1.7, -2.0, 3.3], 'L': [-1.7, -2.1, 3.7]},     # FP guard wrists (camera numbers, dm)
                      strike={'R': [0.5, -1.1, 4.1], 'L': [-0.5, -1.0, 4.8]},    # where a full punch puts the wrist
-                     chamber={'R': [0.3, -0.7, -0.3], 'L': [-0.3, -0.7, -0.3]},  # full wind-up offset from the guard (down, back)
+                     # full wind-up offset from the guard. R: back only (v3 pulled it down + back = below the screen edge for
+                     # u.07-.41 of ma 2strike: the R guard sits at y/z -.61 at z 3.3, the edge is -.70; review 2026-10-10).
+                     # L: down + back stays on screen (L guard z 3.7) and keeps the jab's on-screen travel (an L chamber
+                     # level with the guard made the ma chudan jab fail spec U9 churn: fist ~240 px, forearm 450-560 px)
+                     chamber={'R': [0.1, 0.0, -0.3], 'L': [-0.3, -0.7, -0.3]},
                      chamber_e=0.25,   # native extension (fraction of the strike, negative = pulled back) that maps to the full chamber
                      res_scale=0.35, res_max=0.5,   # native off-line wrist motion kept (scale, clamp dm), turned onto the FP strike line
                      off_scale=0.4, off_max=0.6,   # non-striking hand: its native motion scaled + clamped (dm) about its guard
@@ -1031,6 +1035,7 @@ FIST_DEFAULTS = dict(guard={'R': [1.7, -2.0, 3.3], 'L': [-1.7, -2.1, 3.7]},     
                      near=2.0,   # KenshiFP fist mode lowers the camera near clip to 1.5 while the fists are shown (as the crossbow, X2 g_vm_nc); 0.5 margin
                      nkeys=[4, 12],
                      sets=['wroll=0', 'edgeclamp=0', 'wfix=0', 'hroll=0', 'e1inl=0', 'hinge=0', 'elb=0'],
+                     offrun=0.05, offshare=0.08,   # each fist on screen: longest off-screen stretch / total share of the clip (spec U22)
                      center=[0.30, 0.35], wb_max=30.0, wr_err_max=0.35, path_err_max=0.5, eye_min=2.5, above_max=0.5,
                      y_max=0.0, z_min=3.0)   # path clamps: wrist never above y_max (eye level), never nearer than z_min
 
@@ -1139,6 +1144,25 @@ def fist_checks(fc, solved, frames, n0, key_wr, dense_err, ku, strikers, mvrows,
            if not (_onscr(np.asarray(rows[s][k][s]['wr']), near) and _onscr(np.asarray(rows[s][k][s]['pp']), near))]
     res.append(('guard_view', 'PASS' if gk and not bad else 'FAIL', 'both fists on screen at u<=.02/>=.98: %d frames%s' % (
         len(gk), (' off=' + ','.join('%s@%.2f' % b for b in bad[:6])) if bad else '')))
+    # every fist on screen through the technique (spec U22, class hand visibility per state; review 2026-10-10: the R fist
+    # sat below the screen in its chamber u.07-.41 of ma 2strike)
+    vt = []
+    okv = True
+    for s in sides:
+        offu = [float(U[k]) for k in range(n) if not _onscr(np.asarray(rows[s][k][s]['pp']), near, 1.0)]
+        runs, a0, pv = [], None, None
+        for x in offu:
+            if a0 is None or x - pv > 1.5 / max(n - 1, 1):
+                if a0 is not None:
+                    runs.append((a0, pv))
+                a0 = x
+            pv = x
+        if a0 is not None:
+            runs.append((a0, pv))
+        lr = max([b - a for a, b in runs] or [0.0]); sh = len(offu) / float(max(n, 1))
+        okv = okv and lr <= fc['offrun'] and sh <= fc['offshare']
+        vt.append('%s longest %.2f share %.2f%s' % (s, lr, sh, (' [' + ','.join('u%.2f-%.2f' % r for r in runs[:4]) + ']') if runs else ''))
+    res.append(('view', 'PASS' if okv else 'FAIL', 'fists on screen: %s (<= %.2f / %.2f)' % (' '.join(vt), fc['offrun'], fc['offshare'])))
     # striking fist crosses the view centre
     cx, cy = fc['center']
     for s in strikers:
