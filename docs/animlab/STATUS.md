@@ -114,6 +114,23 @@ Format: date | point | what the game showed | recording path | build | status
 ## Next steps
 1. Standing lab maintainer (coordinator order 2026-10-09): work through "Misses" (a failing check per miss or a reason),
    report one line per closed miss to main. Both P2 open points are solved (see Results).
+   Order (maintainer #6 resume list, from builder #5 handoff):
+   a. E1: metrics.py has per-frame `arc` (edge_arc = cos(mu, mid-blade velocity perp. to blade), melee, speed > 8 dm/s)
+      and per-state arc_ok (share >= 0.7), arc_p05, arc_n. `animlab.py metrics f14-e0.txt` (copy
+      /root/animlab-work/f14-e0.txt of C:\KenshiTestRuns\f14\e0.txt): swing arc_ok 0.42 arc_p05 -1.00 = reproduces E1.
+      Add a gate that FAILS on it, then variant build with pending-fixes/kfp-e1-swlead.py:
+      `build.sh --src /root/animlab-kfp-src/client --patch /mnt/c/KenshiModding/pending-fixes/kfp-e1-swlead.py --out /root/animlab-build/kfpvm_e1`,
+      replay e0 with both adapters; base replay should reproduce the game's arc; patched should pass.
+   b. C1: check exists (metrics moves_ok, `moves PASS` line); needs a recording where aim stayed in ready, else
+      "reproduced by check moves (no recording)".
+   c. X1 jitter: optional quantised bone-world map mode in kfpvm_replay (floating-origin grid) vs game 5-6 px on
+      vmq-f8c crossbow-z0; same for general jitter under-report.
+   d. C2/C3 bolt: lab skeleton has no bolt node; check whether recordings now carry vm_bolt_measure (g_vm_bolt) data.
+   e. Sword elbow drift on long replays.
+   Not yet sent to main: "P2 open points solved: L/R mirror exact (adapter groll 180-g + patches/left-hand-mirror.py),
+   sword drive @6c9516b PASS via elbow seed".
+   Gotchas: /root/animlab-kfp-src may be re-synced by others (new globals -> stubs in prelude.h); stdin readers in WSL
+   heredocs (ffmpeg needs -nostdin); untracked *.obj/vc100.pdb are not ours.
 
 ## How to resume
 Read this file, `git log -- tools/animlab docs/animlab tests/animlab` in the harness repo and

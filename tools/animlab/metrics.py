@@ -9,6 +9,9 @@ callback measures what the previous apply rendered). Per frame:
   jit     weapon tip screen jitter, px at 1600x900: distance of the tip from where uniform motion between its
           neighbours puts it (time-weighted midpoint); motion at constant speed = 0
   step    tip screen step per frame, px
+  arc     edge_arc (E1, melee): cos(blade edge mu, mid-blade velocity perpendicular to the blade), frames where that speed
+          > 8 dm/s; +1 = the edge leads the arc, -1 = the back of the blade leads. Per state: arc_ok = share of fast frames
+          with arc >= 0.7, arc_p05 = 5th percentile
 States: ready, swing, block, swing->block (a block entered straight from a swing), aim, reload (crossbow),
 draw / lower (blends), native (viewmodel faded out by zoom, zf < 0.99), off (no viewmodel). Hitch frames (dt > 0.07 s, or next to one) are left out of jit/step.
 """
@@ -17,6 +20,7 @@ from recfmt import sub, add, mul, dot, ln, nz, ang, remap
 
 W_PX, H_PX, TX, TY = 1600.0, 900.0, 1.245, 0.70   # Kenshi FP view: tan half-angles (vmcheck onscr)
 BLADE = {0: 8.0, 1: 5.85}
+ARC_MID, ARC_SPEED = 4.0, 8.0   # edge_arc: point on the blade (dm from the grip), minimum perpendicular speed (dm/s)
 STATE_ORDER = ('ready', 'swing', 'block', 'swing->block', 'aim', 'reload', 'settle', 'draw', 'lower', 'native')
 NATIVE_ZF = 0.99   # zoom fade below this = the body plays the native animation (viewmodel faded, PT29)
 
@@ -93,8 +97,15 @@ def frame_metrics(rec):
     for i in range(N):
         P[i]['state'] = lab[i]
         P[i]['jit'] = P[i]['step'] = None
+        P[i]["arc"] = None
     for i in range(1, N - 1):
         a, b, c = P[i - 1], P[i], P[i + 1]
+        if F[i]["cls"] == 0 and max(F[i - 1]["dt"], F[i]["dt"], F[i + 1]["dt"]) <= 0.07:   # E1 edge_arc (melee)
+            mid = lambda q: add(q["mp"], mul(q["mf"], ARC_MID))
+            vel = mul(sub(mid(c), mid(a)), 1.0 / max(F[i]["dt"] + F[i + 1]["dt"], 1e-4))
+            vp = sub(vel, mul(b["mf"], dot(vel, b["mf"])))
+            if ln(vp) > ARC_SPEED:
+                b["arc"] = dot(b["mu"], nz(vp))
         if not (a['tpx'] and b['tpx'] and c['tpx']) or max(F[i - 1]['dt'], F[i]['dt'], F[i + 1]['dt']) > 0.07:
             continue
         if lab[i - 1] != lab[i] or lab[i + 1] != lab[i]:
@@ -118,6 +129,7 @@ def state_table(P, skip=0):
     for s, ps in T.items():
         wb = [p['wb'] for p in ps if p['wb'] is not None]
         ed = [p['edge'] for p in ps]
+        ar = [p["arc"] for p in ps if p.get("arc") is not None]
         out[s] = dict(n=len(ps), wb_p95=pct(wb, .95), wb_max=max(wb) if wb else float('nan'),
                       elb_h_max=max(p['elb_h'] for p in ps), elb_h_mean=sum(p['elb_h'] for p in ps) / len(ps),
                       elb_x=sum(p['elb'][0] for p in ps) / len(ps), elb_y=sum(p['elb'][1] for p in ps) / len(ps),
@@ -126,6 +138,7 @@ def state_table(P, skip=0):
                       edge_mean=sum(ed) / len(ed), edge_max=max(ed),
                       jit_p95=pct([p['jit'] for p in ps if p['jit'] is not None], .95),
                       step_p95=pct([p['step'] for p in ps if p['step'] is not None], .95),
+                      arc_ok=sum(1 for x in ar if x >= 0.7) / len(ar) if ar else float("nan"), arc_p05=pct(ar, .05), arc_n=len(ar),
                       move_dm=float('nan'), move_deg=float('nan'))
     # C1 (KenshiFP 2026-10-09: the crossbow aim stayed in the ready pose and passed): how far each state moves the weapon
     # from the median ready pose. Held states (aim, block) by their median pose, paths (swing, reload, ...) by their
@@ -182,7 +195,7 @@ def moves_ok(table, required):
 
 
 METRIC_COLS = ('n', 'wb_p95', 'wb_max', 'elb_h_max', 'elb_h_mean', 'st_max', 'edge_mean', 'edge_max', 'jit_p95', 'step_p95',
-               'move_dm', 'move_deg')
+               'move_dm', 'move_deg', "arc_ok", "arc_p05")
 
 
 def fmt(v):
