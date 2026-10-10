@@ -41,6 +41,9 @@
 #include <mygui/MyGUI_Gui.h>
 #include <mygui/MyGUI_TextBox.h>
 #include <mygui/MyGUI_Widget.h>
+#include <mygui/MyGUI_Delegate.h>
+#include <mygui/MyGUI_LayerManager.h>
+#include <mygui/MyGUI_RenderManager.h>
 #include <kenshi/gui/ForgottenGUI.h>      // character editor (newgame)
 #include <kenshi/gui/MessageBoxManager.h> // its "are you sure" box
 #include <kenshi/gui/DialogueWindow.h>    // dialog (the open conversation window)
@@ -756,7 +759,7 @@ const char *const kBuiltins[] = {
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
     "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "hit", "newgame", "import", "stealth", "crime",
-    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode", "dialog", "input_isolation", "key_inject", "mouse_inject", "chatter"};
+    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode", "dialog", "input_isolation", "key_inject", "mouse_inject", "chatter", "sync_flash"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | chatter off|on|status | "
@@ -782,7 +785,7 @@ const char *const kHelp =
     "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [+x|-x|+z|-z] [walk|run] | acceltime <npc> <dist> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt] [follow] | camfollow <npc> [on|off] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
-    "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | fps [reset] | input_isolation on|off|status | key_inject <key> [down|up|tap] [ms] | mouse_inject <button> [down|up|click] [ms] | mouse_inject move <dx> <dy> | at <x> <y> | wheel <d> | "
+    "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | sync_flash [ms] [n] | fps [reset] | input_isolation on|off|status | key_inject <key> [down|up|tap] [ms] | mouse_inject <button> [down|up|click] [ms] | mouse_inject move <dx> <dy> | at <x> <y> | wheel <d> | "
     "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "
     "packweight <npc|building|ground> <pack> | craftfinish <npc> <item> [at <bench>]. "
     "<npc> = name (exact match nearest the player wins, else nearest substring), "
@@ -1338,6 +1341,71 @@ std::string TeleportMoved(Character *c, const Ogre::Vector3 &to, const std::stri
   return std::string(" moved=") + (off < 10.0f ? "1" : "0") + " off_target=" + Num(off) + " method=" + method;
 }
 
+// ---- sync_flash: video sync marker (animlab T6, 2026-10-10) -----------------------------------------------
+// A take's labels file is written by the script's clock, the video by ffmpeg: the burned labels led the screen by
+// 0.4-1.3 s, not constant (turret-fp). sync_flash covers the whole game view with one flat magenta panel (top layer,
+// no mouse/key focus) for >= ms AND >= 2 rendered frames, then hides it; take-sample.sh's take_mark sends it with every
+// label and frames.py syncmarks finds the flashes in the video, so takecheck can measure each label's real lag.
+MyGUI::Widget *g_syncFlash = nullptr;
+DWORD g_syncFlashOn = 0;
+unsigned g_syncFlashMs = 0;
+int g_syncFlashFrames = -1; // frames rendered since shown; -1 = hidden
+int g_syncFlashN = 0;
+bool g_syncFlashHooked = false;
+
+void SyncFlashFrame(float) {
+  if (g_syncFlashFrames < 0 || !g_syncFlash)
+    return;
+  ++g_syncFlashFrames;
+  if (g_syncFlashFrames >= 3 && GetTickCount() - g_syncFlashOn >= g_syncFlashMs) {
+    try {
+      g_syncFlash->setVisible(false);
+    } catch (...) {
+    }
+    Log("KAH: sync flash n=" + Int(g_syncFlashN) + " off after " + Int(GetTickCount() - g_syncFlashOn) + " ms " +
+        Int(g_syncFlashFrames - 1) + " frames");
+    g_syncFlashFrames = -1;
+  }
+}
+
+std::string SyncFlash(const std::vector<std::string> &f, bool &ok) {
+  const int ms = f.size() >= 3 ? atoi(f[2].c_str()) : 150;
+  const int n = f.size() >= 4 ? atoi(f[3].c_str()) : 0;
+  if (ms < 30 || ms > 2000)
+    return "usage: sync_flash [ms 30..2000, default 150] [n]";
+  MyGUI::Gui *g = MyGUI::Gui::getInstancePtr();
+  if (!g)
+    return "no MyGUI";
+  try {
+    const MyGUI::IntSize vs = MyGUI::RenderManager::getInstance().getViewSize();
+    if (!g_syncFlash) {
+      const char *layer = MyGUI::LayerManager::getInstance().isExist("Top") ? "Top" : "Popup";
+      g_syncFlash = g->createWidgetT("Widget", "WhiteSkin", MyGUI::IntCoord(0, 0, vs.width, vs.height),
+                                     MyGUI::Align::Default, layer, "KAH_SyncFlash");
+      g_syncFlash->setNeedMouseFocus(false);
+      g_syncFlash->setNeedKeyFocus(false);
+      g_syncFlash->setColour(MyGUI::Colour(1.0f, 0.0f, 1.0f));
+      g_syncFlash->setAlpha(1.0f);
+    }
+    if (!g_syncFlashHooked) {
+      g->eventFrameStart += MyGUI::newDelegate(&SyncFlashFrame);
+      g_syncFlashHooked = true;
+    }
+    g_syncFlash->setCoord(0, 0, vs.width, vs.height);
+    g_syncFlash->setVisible(true);
+    MyGUI::LayerManager::getInstance().upLayerItem(g_syncFlash);
+    g_syncFlashOn = GetTickCount();
+    g_syncFlashMs = (unsigned)ms;
+    g_syncFlashFrames = 0;
+    g_syncFlashN = n;
+    Log("KAH: sync flash n=" + Int(n) + " on ms=" + Int(ms) + " view=" + Int(vs.width) + "x" + Int(vs.height));
+    ok = true;
+    return "sync_flash n=" + Int(n) + " ms=" + Int(ms) + " view=" + Int(vs.width) + "x" + Int(vs.height);
+  } catch (...) {
+    return "sync_flash failed (MyGUI exception)";
+  }
+}
+
 std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool &ok,
                        bool &pending) {
   ok = false;
@@ -1354,6 +1422,9 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     if (RunAnyPhaseCommand(f, ok, reply))
       return reply;
   }
+
+  if (cmd == "sync_flash") // sync_flash [ms] [n]: full-view magenta marker for video sync (any phase)
+    return SyncFlash(f, ok);
 
   if (cmd == "help") {
     ok = true;
