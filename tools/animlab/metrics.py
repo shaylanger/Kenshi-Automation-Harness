@@ -28,6 +28,14 @@ ARC_U1 = 0.58                   # edge_arc: swing u where the stroke ends (key 4
 STATE_ORDER = ('ready', 'swing', 'block', 'swing->block', 'aim', 'reload', 'settle', 'draw', 'lower', 'native')
 STROKE_ONLY = None   # E6: set (animlab --stroke n) -> swings of other strokes are labelled 'swing_x' (out of every swing gate)
 NATIVE_ZF = 0.99   # zoom fade below this = the body plays the native animation (viewmodel faded, PT29)
+# Frames that play the NATIVE animation (no solver pose on screen): zoom-faded (`native`), viewmodel off (`off`) and the
+# draw/lower blends. Shay 2026-10-10: the wrist-bend limit applies to solver-posed frames only; native frames are exempt.
+NATIVE_STATES = ('native', 'off', 'draw', 'lower')
+
+
+def is_native(r):
+    """record r plays the native animation: viewmodel off / not fully weighted, or faded by the zoom."""
+    return (not r['on']) or r['w'] < 0.99 or r.get('zf', 1.0) < NATIVE_ZF
 
 
 def label_states(F):

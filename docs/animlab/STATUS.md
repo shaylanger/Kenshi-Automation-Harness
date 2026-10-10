@@ -179,7 +179,7 @@ new recording; `run.sh unarmed <candidate dir>` runs the unarmed spec on fist ca
 | R5 same swing input -> same forearm roll (no forearm flip mid-stroke) | sword | E5 (Shay review anim-sword-z0 swing 3) | shay | hinge | covered: needs >= 3 swings from ready |
 | R6 ready pose stable: no sudden ~90 deg roll mid-walk, one ready branch | sword | E3 | shay | branch | covered: --ref a known-good recording of the same build |
 | R7 sharp edge never faces the camera at rest (ready/walk/block) | sword | S1 | shay | restedge | covered: new (spec.py restedge, p05 of edge cos >= 0) |
-| R8 wrist bend: holds <= 30 deg (PT30), swings <= 50 (Shay accepted wb36) | all | PT17-W, PT30, X3, X5, c6a1eda | shay | wrist,arc.wb,vmcheck.wrist | partial: vmcheck.wrist gates swings at 30 too (FAILs Shay-accepted f28); spec.py wrist splits holds/swings |
+| R8 wrist bend: holds <= 30 deg (PT30), swings <= 50 (Shay accepted wb36); solver-posed frames only, native-animation frames exempt (Shay 2026-10-10) | all | PT17-W, PT30, X3, X5, c6a1eda, Shay 2026-10-10 | shay | wrist,arc.wb,vmcheck.wrist | partial: vmcheck.wrist gates swings at 30 too (FAILs Shay-accepted f28); spec.py wrist splits holds/swings and skips metrics.NATIVE_STATES (native/off/draw/lower = metrics.is_native); arc.wb judges swing frames only (solver-posed); vmcheck PT29 zo native exemption: kfp-fixer (fp-viewmodel.sh) |
 | R9 every state visibly plays: pose moves vs ready (aim, block, reload, swing) | all | memory state-must-visibly-play; C1 | shay | moves | covered: unarmed U3 |
 | R10 stock low (<= 25% from the bottom in ready), crossbow orientation unchanged | crossbow | C2, C2b accepted (13bca46) | shay | stock | covered: --ref f14-xb0 (d40b6ad-era orientation) |
 | R11 bolt and strings rigid on the crossbow | crossbow | C3 | shay | bolt | covered: needs the .bolt sidecar |
@@ -201,7 +201,7 @@ new recording; `run.sh unarmed <candidate dir>` runs the unarmed spec on fist ca
 | U5 no hand at / above / behind the eye (forearm/fist >= 2.5 dm from the eye, <= eye level +0.5 dm) | unarmed | PT29 hands at the head (Shay), NA1 row | shay | spec:U5 | covered: thresholds 2.5 / +0.5 dm are the lab's (native.py fists) |
 | U6 wind-up stays below eye level | unarmed | NA1 brief (coordinator) | inferred | spec:U6 | covered |
 | U7 no near-plane cut of forearm/fist | unarmed | PT17 (Shay) | shay | spec:U7 | covered |
-| U8 wrist bend <= 30 deg | unarmed | PT17-W / PT30 (Shay) | shay | spec:U8 | covered |
+| U8 wrist bend <= 30 deg | unarmed | PT17-W / PT30 (Shay) | shay | spec:U8 | covered: fist candidates are solver-posed on every frame (the native clip only feeds the path model), so the limit applies; the zoom-25 native animation (U13) is exempt (Shay 2026-10-10) |
 | U9 no arm churn | unarmed | memory no-arm-churn | shay | spec:U9 | covered: same limits as the sword churn (450 px within 0.4 s, fist <= 250 px) |
 | U10 punch driven by shoulder/elbow, not the wrist (wrist share of fist motion <= 0.6) | unarmed | sword-inline-with-forearm (sword rule, Shay) carried over | inferred | spec:U10 | covered |
 | U11 no sudden fist roll (<= 30 deg per 33 ms) | unarmed | sword roll rules (Shay) carried over; threshold inferred | inferred | spec:U11 | covered |

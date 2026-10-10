@@ -8,6 +8,7 @@
   spec.py restedge <rec>                                     sword edge never toward the camera in the rest states
   spec.py stilljit <rec> [--states aim --max 1.5]            still-state weapon jitter (px at 1600x900)
   spec.py wrist    <rec> [--hold 30 --swing 50]              wrist bend limit per state (holds vs swings)
+                                                            on solver-posed frames only (native frames exempt, Shay 2026-10-10)
 
 Rules file (TSV, '#' comments): id, class (comma list: sword,crossbow,unarmed,take,all), rule, source, owner
 (shay | coord | inferred), checks (comma list of check ids; '-' none), status (covered | partial | missing | out-of-reach),
@@ -159,7 +160,7 @@ def wrist(rec, hold=WB_HOLD, swing=WB_SWING):
     M, by = _states(rec)
     ok, parts = True, []
     for s, ps in by.items():
-        if s in ('draw', 'lower', 'native', 'settle'):
+        if s in M.NATIVE_STATES or s == 'settle':   # Shay 2026-10-10: native-animation frames are exempt from the limit
             continue
         wb = [p['wb'] for p in ps if p['wb'] is not None]
         if not wb:

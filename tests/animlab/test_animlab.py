@@ -93,6 +93,20 @@ class T(unittest.TestCase):
         self.assertEqual(Pr[21]['state'], 'settle')          # 0.3 s = 21 frames after the swing
         self.assertEqual(Pr[45]['state'], 'ready')
 
+    def test_wrist_native_frames_exempt(self):   # Shay 2026-10-10: native-animation frames are exempt from the wrist limit
+        import spec as S
+        base = [rec_line(i, mp=smooth(i), wb=10.0) for i in range(60)]
+        # measured values in record n are what frame n-1 rendered: the first native record still measures the ready pose
+        write_rec(self.p('wn.txt'), base + [rec_line(i, mp=smooth(i), zf=0.5, wb=10.0 if i == 60 else 90.0) for i in range(60, 80)]
+                  + [rec_line(i, mp=smooth(i), w=0.0, wb=90.0) for i in range(80, 90)])
+        ok, txt = S.wrist(self.p('wn.txt'))
+        self.assertTrue(ok, txt)
+        write_rec(self.p('ws.txt'), base + [rec_line(i, mp=smooth(i), wb=45.0) for i in range(60, 80)])
+        ok, txt = S.wrist(self.p('ws.txt'))   # solver-posed ready frames keep the 30 deg hold limit
+        self.assertFalse(ok, txt)
+        R = recfmt.parse(self.p('wn.txt'))
+        self.assertEqual([M.is_native(r) for r in (R.frames[5], R.frames[70], R.frames[85])], [False, True, True])
+
     def test_jitter_metric(self):
         write_rec(self.p('j0.txt'), [rec_line(i, mp=smooth(i)) for i in range(60)])
         noisy = [rec_line(i, mp=(2.6 + 0.002 * i + (0.01 if i % 2 else -0.01), -1.5, 4.4)) for i in range(60)]
