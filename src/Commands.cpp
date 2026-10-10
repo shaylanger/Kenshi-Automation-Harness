@@ -19,6 +19,7 @@
 #include "CrimeArgs.h"
 #include "RaceFilter.h"
 #include "HoldSpeed.h"
+#include "Chatter.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -688,10 +689,10 @@ const char *const kBuiltins[] = {
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
     "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "hit", "newgame", "import", "stealth", "crime",
-    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode", "dialog", "input_isolation", "key_inject", "mouse_inject"};
+    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode", "dialog", "input_isolation", "key_inject", "mouse_inject", "chatter"};
 
 const char *const kHelp =
-    "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | "
+    "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | chatter off|on|status | "
     "chars [radius] [filter] | traders [radius] | benches [radius] [crafts] | research <name> | research start|stop <name> | research status | "
     "blueprint <item> | craft <npc> <item> [at <bench>] [count n] | find <character|squad|item|weapon|armour|container> <text> | "
     "spawn <template> <faction> [near <npc> | at x y z] [count n] [dist m] [target <npc>] [race <a|b|!c>] "
@@ -776,6 +777,30 @@ void SampleProduction(GameWorld *world) {
   }
 }
 
+// chatter off: no NPC speech bubbles (barks) over video takes. Every world tick zeroes both speech timers on
+// every character in the update list (as Stobe's ClearCharacterSpeechBubble); a bubble whose timer was still
+// running counts as one muted bubble.
+bool g_chatterOff = false;
+unsigned long g_chatterMuted = 0;
+
+void ChatterTick(GameWorld *world) {
+  if (!g_chatterOff || !Valid(world) || Phase(world) != "world")
+    return;
+  const ogre_unordered_set<Character *>::type &chars = world->getCharacterUpdateList();
+  for (ogre_unordered_set<Character *>::type::const_iterator it = chars.begin(); it != chars.end(); ++it) {
+    Character *c = *it;
+    try {
+      if (!Valid(c) || !Valid(c->dialogue))
+        continue;
+      if (ChatterBubbleShowing(c->dialogue->speechTextTimer, c->dialogue->speechTextTimer_forced))
+        ++g_chatterMuted;
+      c->dialogue->speechTextTimer = 0.0f;
+      c->dialogue->speechTextTimer_forced = 0.0f;
+    } catch (...) {
+    }
+  }
+}
+
 void ImportMenuTick();
 
 void KeepWalkTimers() {
@@ -801,6 +826,10 @@ void KeepWalkTimers() {
   }
   try {
     HoldSpeedTick(ou);
+  } catch (...) {
+  }
+  try {
+    ChatterTick(ou);
   } catch (...) {
   }
   try {
@@ -1463,6 +1492,21 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     return "no game loaded (phase=" + Phase(world) + ")";
   Character *player = FirstPlayerCharacter(world);
   Ogre::Vector3 origin = player->getPosition();
+
+  if (cmd == "chatter") { // chatter off|on|status: mute NPC speech bubbles (video takes)
+    const ChatterArg a = ChatterParse(f.size() >= 3 ? f[2] : std::string());
+    if (a == CHATTER_BAD)
+      return "usage: chatter off|on|status";
+    if (a != CHATTER_STATUS && (a == CHATTER_OFF) != g_chatterOff) {
+      g_chatterOff = a == CHATTER_OFF;
+      Log(std::string("KAH: chatter ") + (g_chatterOff ? "off" : "on"));
+    }
+    ok = true;
+    if (a == CHATTER_STATUS)
+      return std::string("status: chatter=") + (g_chatterOff ? "off" : "on") + " muted=" + Int((int)g_chatterMuted);
+    return std::string("chatter ") + (g_chatterOff ? "off" : "on") + " (muted " + Int((int)g_chatterMuted) +
+           " bubbles so far)";
+  }
 
   if (cmd == "speed") { // speed <0|0.5..50> [hold]: 0 pauses; hold = resume after the game's own pauses
     float v = f.size() >= 3 ? (float)atof(f[2].c_str()) : -1.0f;
