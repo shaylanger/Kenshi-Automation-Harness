@@ -354,3 +354,14 @@ directly (no target springs).
 `regress.sh` step P4: `tests/animlab/test_native.py` (synthetic skeleton + animation chunks: reader, interpolation, pose
 sampling, pelvis stabilisation, left mirror, grip offset, keyed path, key fit, FCS v17) and, with the game install, list /
 catalog / run / fists complete. Phase 4 is tagged `animlab-p4`.
+
+## Spec and taste (spec-first rules, scoring the lab against Shay's decisions)
+`tools/animlab/spec.py`: `map <rules.tsv> [--md]` (rule -> check map), `run <rules.tsv> --checks <checks.json> --class C <rec>...`
+(every rule of a class on a recording), `unarmed <candidate dir>... [--rules]` (NA1 unarmed spec on fist candidates' pose.txt:
+guard view, return to guard, moves, strike to centre, eye clear, wind-up below eye, near-plane cut, wrist <= 30, churn, arm-driven,
+fist roll, ikfail, palm-heel = straight-wrist punch), and new recording checks `restedge` (S1: sword edge cos p05 >= 0 in
+ready/block), `stilljit` (X1: aim jit_p95 <= 1.5 px), `wrist` (holds <= 30, swings <= 50).
+`tools/animlab/taste.py score <taste.tsv> --rules --checks --root <corpus>`: runs each labelled item's rule checks and prints the
+confusion per rule (TP rejected+FAIL, TN accepted+PASS, FN lab missed, FP false alarm), `DISAGREE` lines and
+`RESULT taste PASS|FAIL items= agree=(weighted)`. File formats in the script headers. KenshiFP data + one-command rerun:
+`components/KenshiFP/animlab/taste/run.sh` (workspace). Unit tests `tests/animlab/test_spec.py`.
