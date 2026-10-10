@@ -263,7 +263,8 @@ def cmd_guard(a):
 def cmd_zoomband(a):
     """own body parts in frame while the camera is between the eye and the head-show distance (metrics.zoomband_check)."""
     rec = recfmt.parse(a.rec)
-    ok, txt = M.zoomband_check(M.zoomband_series(rec.frames, a.head_show), a.max_frames)
+    F = rec.frames
+    ok, txt = M.zoomband_check(M.zoomband_series(F, a.head_show), a.max_frames, M.flag_lag(F, "band_hidden", M.band_expect(F, a.head_show)))
     print('zoomband %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
     return 0 if ok else 1
 

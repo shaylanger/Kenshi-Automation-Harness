@@ -1070,15 +1070,44 @@ def zoomband_series(F, head_show=ZB_HEAD_SHOW, eye=ZB_EYE, near=ZB_NEAR):
     return out
 
 
-def zoomband_check(S, max_frames=0):
-    """FAIL when more than max_frames band frames show an own body part. Prints the band frames, the zoom range seen and
-    the worst frame (most parts, nearest)."""
+ZB_HIDE_EYE = 0.65   # dm: KenshiFP KFP_VIEW_EYE_LIMIT (fp_view_band: band hide on for eye limit <= applied zoom < head_show)
+
+
+def flag_lag(F, flag, expect):
+    """CLASS recorded state label vs rendered state (Misses 2026-10-10 Z1 zoomband: the rec wrote band_hidden before the
+    hide it describes, so the first band frame of every wheel-out was labelled unhidden and the lab judged a stale label).
+    A recorded flag whose rule is known from the same frame's other fields must agree with it on that frame: frames where
+    flag != expect(frame) but == expect(previous frame) = the label lags the state change by a frame.
+    Returns [(frame, recorded, expected)]."""
+    out = []
+    for i in range(1, len(F)):
+        v, e, ep = F[i].get(flag), expect(F[i]), expect(F[i - 1])
+        if v is None or e is None:
+            continue
+        if bool(v) != e and bool(v) == ep:
+            out.append((i, int(bool(v)), int(e)))
+    return out
+
+
+def band_expect(F, head_show=ZB_HEAD_SHOW, eye=ZB_HIDE_EYE):
+    """expect(frame) for band_hidden (None when the rec never hides: band_hide off / older build)."""
+    if not any(r.get('band_hidden') for r in F):
+        return lambda r: None
+    return lambda r: eye <= r.get('zoom', 0.0) < head_show
+
+
+def zoomband_check(S, max_frames=0, lag=None):
+    """FAIL when more than max_frames band frames show an own body part, or (lag = flag_lag result) the band_hidden label
+    lags the zoom. Prints the band frames, the zoom range seen and the worst frame (most parts, nearest)."""
     bad = [s for s in S if s[2]]
     txt = ['band_frames=%d' % len(S)]
     if S:
         txt.append('zoom=%.1f..%.1f' % (min(s[1] for s in S), max(s[1] for s in S)))
     ok = len(bad) <= max_frames
     txt.append('body_in_frame=%d/%d%s' % (len(bad), max_frames, '' if ok else ':BAD'))
+    if lag is not None:
+        txt.append('label_lag=%d%s' % (len(lag), (':BAD@' + ','.join('%d(bh%d,want%d)' % x for x in lag[:6])) if lag else ''))
+        ok = ok and not lag
     if bad:
         w = max(bad, key=lambda s: (len(s[2]), -min(p[3] for p in s[2])))
         txt.append('worst=frame%d,zoom=%.1f,%s' % (w[0], w[1], '+'.join('%s(z%.1f)' % (p[0], p[3]) for p in w[2])))

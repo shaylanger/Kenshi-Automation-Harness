@@ -360,6 +360,16 @@ class T(unittest.TestCase):
         ok, t = M.zoomband_check(M.zoomband_series([far] * 4)); self.assertTrue(ok, t)   # band frames with nothing in view pass
         ok, t = M.zoomband_check(M.zoomband_series([dict(fr(8.0), band_hidden=1)] * 3)); self.assertTrue(ok, t)   # hidden body: nothing drawn
 
+    def test_flag_lag(self):   # Misses 2026-10-10 Z1 zoomband: band_hidden recorded a frame after the hide (stale label)
+        z = lambda d, bh: dict(zoom=d, band_hidden=bh)
+        good = [z(0.0, 0), z(4.8, 1), z(8.0, 1), z(16.0, 0), z(0.0, 0)]
+        self.assertEqual(M.flag_lag(good, 'band_hidden', M.band_expect(good)), [])
+        late = [z(0.0, 0), z(4.8, 0), z(8.0, 1), z(16.0, 1), z(17.0, 0), z(3.0, 0), z(3.5, 1), z(0.0, 1), z(0.0, 0)]
+        self.assertEqual(M.flag_lag(late, 'band_hidden', M.band_expect(late)), [(1, 0, 1), (3, 1, 0), (5, 0, 1), (7, 1, 0)])
+        never = [z(0.0, 0), z(4.8, 0), z(8.0, 0)]   # band hide off / older build: no rule, no lag
+        self.assertEqual(M.flag_lag(never, 'band_hidden', M.band_expect(never)), [])
+        ok, t = M.zoomband_check([], 0, [(1, 0, 1)]); self.assertFalse(ok); self.assertIn('label_lag=1:BAD@1(bh0,want1)', ' '.join(t))
+
     def test_spike_check(self):
         # Misses 2026-10-10 PT30 follow-through edge roll spike + mutations rec-one-frame-snap / -jump
         import math as _m
