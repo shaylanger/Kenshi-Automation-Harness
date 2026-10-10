@@ -14,13 +14,32 @@ An adapter is any command `CMD <rec.txt> <out.txt> [args]` that replays the reco
 its own recording in the same format; it may print `calib ...` (passed on to the variants as --calib so all
 variants share one skeleton calibration).
 """
-import argparse, json, os, shlex, subprocess, sys, tempfile
+import argparse, atexit, json, os, shlex, shutil, signal, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import recfmt
 from recfmt import sub, ln, ang
 import metrics as M
+
+_TMP = []   # temp dirs made without --keep: removed at exit, also on error / SIGTERM (cleanup-audit 2026-10-10: 2104 leaked
+            # /tmp/animlab-pool-* dirs = 31 GB in one day)
+
+
+def tmpdir(prefix):
+    d = tempfile.mkdtemp(prefix=prefix); _TMP.append(d); return d
+
+
+def _cleanup():
+    while _TMP:
+        shutil.rmtree(_TMP.pop(), ignore_errors=True)
+
+
+atexit.register(_cleanup)
+
+
+def kept(a, d, what='replays'):
+    return '%s in %s' % (what, d) if a.keep else '%s removed at exit, --keep DIR keeps them' % what
 
 DEFAULT_TOL = dict(   # faithfulness gate (docs/animlab/USAGE.md "Faithfulness gate")
     grip_p95=0.25, elbow_p95=0.35, wrist_p95=0.25, blade_p95=3.0, edge_p95=4.0, wb_p95=4.0,
@@ -295,7 +314,7 @@ def adapter_args(a):
 
 
 def cmd_replay(a):
-    out = a.o or os.path.join(tempfile.mkdtemp(prefix='animlab-'), 'replay.txt')
+    out = a.o or os.path.join(tmpdir('animlab-'), 'replay.txt')
     calib = run_adapter(a.adapter, a.rec, out, adapter_args(a) + shlex.split(a.args or ''))
     print('replay -> %s (calib %s)' % (out, calib))
     fails, n = compare(a.rec, out, a.skip)
@@ -312,7 +331,7 @@ def cmd_pool(a):
             recs += [os.path.join(d, l.strip()) for l in open(r[1:]) if l.strip() and not l.startswith('#')]
         else:
             recs.append(r)
-    keep = a.keep or tempfile.mkdtemp(prefix='animlab-pool-')
+    keep = a.keep or tmpdir('animlab-pool-')
     os.makedirs(keep, exist_ok=True)
     if a.motion == 'swing' and (a.stroke is None or not a.adapter) or a.replay and not a.adapter:
         raise SystemExit('pool: --motion swing needs --stroke N and --adapter; --replay needs --adapter')
@@ -337,7 +356,7 @@ def cmd_pool(a):
                 if a.verbose:
                     print('  %s@%d full=%d elev=%.0f guard=%d' % (v['rec'], v['frame'], v['full'], v['elev'], v['ok']['guard']))
         ok, txt = M.pool_predict(V, ('guard',), a.take, a.rate)
-        print('pool block %s %s (replays in %s)' % ('PASS' if ok else 'FAIL', ' '.join(txt), keep))
+        print('pool block %s %s (%s)' % ('PASS' if ok else 'FAIL', ' '.join(txt), kept(a, keep)))
         return 0 if ok else 1
     oh = tuple(int(x) for x in a.overhead.split(',') if x.strip()) if a.overhead else ()
     V = []
@@ -352,7 +371,7 @@ def cmd_pool(a):
             print('  %s@%d full=%d arc=%d/%d wb=%.1f blade=%d stroke=%d %s' % (v['rec'], v['frame'], v['full'], v['arc_good'], v['arc_n'],
                   v['wb_max'], v['ok']['blade'], v['ok']['stroke'], ' '.join(v['btxt'])))
     ok, txt = M.pool_predict(V, tuple(c for c in a.checks.split(',') if c), a.take, a.rate)
-    print('pool stroke %d %s %s (replays in %s)' % (a.stroke, 'PASS' if ok else 'FAIL', ' '.join(txt), keep))
+    print('pool stroke %d %s %s (%s)' % (a.stroke, 'PASS' if ok else 'FAIL', ' '.join(txt), kept(a, keep)))
     return 0 if ok else 1
 
 
@@ -368,7 +387,7 @@ def cmd_agree(a):
         t = shlex.split(line)
         rec = t[0] if os.path.isabs(t[0]) else os.path.join(base, t[0])
         jobs.append((rec, t[1], t[2:]))
-    keep = a.keep or tempfile.mkdtemp(prefix='animlab-agree-')
+    keep = a.keep or tmpdir('animlab-agree-')
     os.makedirs(keep, exist_ok=True)
 
     def one(j):
@@ -441,7 +460,7 @@ def parse_variant(v, default_cmd):
 
 
 def cmd_sweep(a):
-    keep = a.keep or tempfile.mkdtemp(prefix='animlab-sweep-')
+    keep = a.keep or tmpdir('animlab-sweep-')
     os.makedirs(keep, exist_ok=True)
     base_out = os.path.join(keep, 'base.txt')
     calib = run_adapter(a.adapter, a.rec, base_out, shlex.split(a.args or ''))
@@ -462,7 +481,7 @@ def cmd_sweep(a):
     for s in states_of(*tabs):
         for c in cols:
             rows.append(['%s %s' % (s, c)] + [M.fmt(t[s][c]) if s in t else '-' for t in tabs])
-    print_table(rows, ['state metric'] + names, 'sweep %s (outputs in %s):' % (os.path.basename(a.rec), keep))
+    print_table(rows, ['state metric'] + names, 'sweep %s (%s):' % (os.path.basename(a.rec), kept(a, keep, 'outputs')))
 
 
 def cmd_gate(a):
@@ -471,7 +490,7 @@ def cmd_gate(a):
         tol.update(json.load(open(a.tol)))
     allok = True
     for rec in a.rec:
-        out = os.path.join(tempfile.mkdtemp(prefix='animlab-gate-'), 'replay.txt')
+        out = os.path.join(tmpdir('animlab-gate-'), 'replay.txt')
         run_adapter(a.adapter, rec, out, shlex.split(a.args or ''))
         print('== %s' % rec)
         fails, n = compare(rec, out, a.skip, tol, quiet=a.quiet)
@@ -548,6 +567,7 @@ def main():
         M.STROKE_ONLY = a.only_stroke
     if not a.cmd:
         ap.print_help(); return 2
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))   # SIGTERM -> SystemExit: atexit removes the temp dirs
     return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'reload': cmd_reload, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool, 'agree': cmd_agree}[a.cmd](a) or 0
 
 

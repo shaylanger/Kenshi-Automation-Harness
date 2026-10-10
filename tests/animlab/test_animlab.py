@@ -2,7 +2,7 @@
 """Offline regression tests for tools/animlab (phase 1, REPLAY): rec parser, metrics, gate logic.
 No game, no recordings, no solver: synthetic recordings + a copy-through fake adapter.
 Run: python3 tests/animlab/test_animlab.py   (exit 0 = all pass). Run before every animlab commit."""
-import math, os, subprocess, sys, tempfile, unittest
+import math, os, shutil, subprocess, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.join(HERE, '..', '..', 'tools', 'animlab')
@@ -45,6 +45,9 @@ def smooth(i):   # weapon grip moving at constant speed: zero jitter
 class T(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp(prefix='animlab-test-')
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
 
     def p(self, name):
         return os.path.join(self.d, name)
