@@ -199,6 +199,14 @@ def cmd_inline(a):
     print('inline %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
 
 
+def cmd_blade(a):
+    """E6 blade visibility per swing: one-video-frame snap at the wind-up top and per-frame end-on blade (metrics.blade_check)."""
+    rec = recfmt.parse(a.rec); P = M.frame_metrics(rec)
+    ok, txt = M.blade_check(rec.frames, P, a.snap, a.seen)
+    print('blade %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
+    return 0 if ok else 1
+
+
 def cmd_branch(a):
     """Sword ready elbow branch: every ready run on the reference branch (--ref recording's first ready run, else this
     recording's first run): edge roll about the blade <= --roll deg, elbow <= --elb dm (see metrics.ready_branch)."""
@@ -314,6 +322,8 @@ def main():
     p.add_argument('--sc-max', type=float, default=M.INL_SC_MAX); p.add_argument('--wr', type=float, default=M.INL_WR)
     p = sp.add_parser('branch'); p.add_argument('rec'); p.add_argument('--ref', help='known-good recording (e.g. the game recording of a replay)')
     p.add_argument('--roll', type=float, default=M.BR_ROLL); p.add_argument('--elb', type=float, default=M.BR_ELB)
+    p = sp.add_parser('blade'); p.add_argument('rec'); p.add_argument('--snap', type=float, default=M.SNAP_MAX, help='max sword rotation (deg) in one 30 fps video frame after the wind-up top')
+    p.add_argument('--seen', type=float, default=M.SEE_MIN, help='min visible blade (screen length x flat facing) per frame, u .45-.95')
     p = sp.add_parser('stock'); p.add_argument('rec'); p.add_argument('--ref', help='known-good recording for the orientation check')
     p.add_argument('--max', type=float, default=M.STOCK_MAX); p.add_argument('--ori', type=float, default=M.ORI_MAX)
     p.add_argument('--h', type=float, default=M.STOCK_H, help='stock top above the bolt axis (dm)')
@@ -338,7 +348,7 @@ def main():
         M.STROKE_ONLY = a.only_stroke
     if not a.cmd:
         ap.print_help(); return 2
-    return {'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
+    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':

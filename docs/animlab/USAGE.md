@@ -49,6 +49,9 @@ per-frame bone-roll faithfulness gate (forearm median <= 5 deg, `--faith`).
 
 E6 swing variety: `animlab.py --only-stroke N <cmd> <rec>` judges only swings of scripted stroke N (rec group H 4th token;
 other strokes are labelled `swing_x` and skip every swing gate); `hinge` compares swings of the same stroke only.
+`animlab.py [--only-stroke N] blade <rec>` judges what a 30 fps video shows, per frame instead of per window: `snap` = sword
+rotation over one video frame (33 ms) right after the wind-up top (<= 22 deg, `--snap`), `seen` = per-frame visible blade
+(screen length of 7 dm of blade x |flat normal . view ray|; an edge-on katana is a hairline) over u .45-.95 (>= 0.05, `--seen`).
 
 ## Metrics (per state)
 
