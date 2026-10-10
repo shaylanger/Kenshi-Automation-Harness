@@ -169,7 +169,8 @@ report.txt/json.
 wrist roll, edge clamp, stretch) is the game's code. The weapon pose is taken as given (no target smoothing).
 
 **Drive gate** (`faithful`): the weapon pose the game rendered (record i+1) as the target on a still-body segment
-(eye within 0.3 dm, full viewmodel, no swing) must give the game's measured arm, p95 <= 0.25 dm. Results:
+(eye within 0.3 dm, full viewmodel, no swing) must give the game's measured arm, p95 <= 0.25 dm. `--commanded` drives the
+commanded pose (out) instead: use it across swings (rendered targets flip the elbow branch at every swing tail, regress 16). Results:
 crossbow-z0 345-1097 with its own source 6c9516b PASS (753 fr, elbow95 0.07, wrist95 0.003); sword-z0-a 83-232 PASS
 with the current source (elbow95 0.05) but FAILS with 6c9516b (wrist95 1.1, elbow95 5.2: that build's frozen-replay
 path did not reproduce the sword wrist roll; open in STATUS.md). Current-source crossbow fails against the old

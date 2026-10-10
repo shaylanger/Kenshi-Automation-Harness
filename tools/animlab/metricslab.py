@@ -7,7 +7,8 @@ weapon/weapon, weapon/arm and weapon/camera intersections per segment. Docs: doc
   metricslab.py run    <motion.json> --adapter CMD [--body REC] [--body-frame N] [--out DIR] [--args='...'] [--quiet]
   metricslab.py report <motion.json> <solved_R.txt> [<solved_L.txt>]   metrics of already solved output
   metricslab.py fromrec <rec> <from> <to> [-o motion.json]   a motion from a recorded segment (start authoring from it)
-  metricslab.py faithful <rec> <from> <to> --adapter CMD [--tol 0.25]   drive the recorded commanded poses of a steady
+  metricslab.py faithful <rec> <from> <to> --adapter CMD [--tol 0.25] [--commanded]   drive the rendered (default) or, with
+                         --commanded, the commanded poses of a steady
                          segment (fixed camera) and compare the solved arm with the game's measured arm (drive gate)
 
 Drive adapter contract (phase-1 adapters are untouched; this is a separate entry point):
@@ -446,7 +447,7 @@ def cmd_faithful(a):
     solved arm vs the game's measured arm, on frames with a still body (eye within 0.3 dm of record a, full viewmodel)."""
     import recfmt
     F = recfmt.parse(a.rec).frames
-    m = motion_from_rec(F, a.a, a.b, 'faithful', measured=True)
+    m = motion_from_rec(F, a.a, a.b, 'faithful', measured=not a.commanded)
     m['times'] = [F[i]['t'] - F[a.a]['t'] for i in range(a.a, a.b + 1)]
     out = a.out or '/tmp/ml-faithful'
     solved, frames = run_motion(m, a.adapter, a.rec, a.a, out, shlex.split(a.args or ''))
@@ -484,6 +485,7 @@ def main():
     p.add_argument('-o', default='motion.json'); p.add_argument('--name')
     p = sp.add_parser('faithful'); p.add_argument('rec'); p.add_argument('a', type=int); p.add_argument('b', type=int)
     p.add_argument('--adapter', required=True); p.add_argument('--tol', type=float, default=0.25)
+    p.add_argument('--commanded', action='store_true', help='target = the commanded pose (out) the game solver got, not the rendered pose: no branch drift after swings')
     p.add_argument('--args', default=''); p.add_argument('--out')
     a = ap.parse_args()
     return dict(sample=cmd_sample, run=cmd_run, report=cmd_report, fromrec=cmd_fromrec, faithful=cmd_faithful)[a.cmd](a)
