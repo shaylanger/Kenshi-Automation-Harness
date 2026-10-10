@@ -14,9 +14,15 @@ recorded prop pose (mp, mf, mu):
                  cylinder cut by the near clip'). Gate: <= NEAR_SHARE of each state's frames.
   vis    (all)   ready / block / aim at zoom 0: >= VIS_PART of the striking part (mesh Y > 0.6 x tip; crossbow: whole bow)
                  on screen in >= VIS_SHARE of the frames (weapon visible, Shay 2026-10-09).
-  twohand(3, 8)  INFERRED from the native animations (heavy weapons / polearm techniques hold the weapon with both hands:
-                 native.json hands RL): the off-hand wrist within TWO_D dm of the shaft (pommel end .. grip + 0.6 tip) on
-                 >= TWO_SHARE of ready / block / swing frames. Not a Shay rule yet: reported, listed as inferred.
+  twohand(3, 8)  R2H-1 (Shay 2026-10-10: two-handed weapons are held two-handed in FP): item skill category 3 heavy weapons /
+                 8 polearm: the off-hand wrist within TWO_D dm of the shaft (pommel end .. grip + 0.6 tip) on >= TWO_SHARE of
+                 ready / block / swing frames.
+  twosp  (3, 8)  R2H-2 (inferred from the native stances, animlab native.py 2026-10-10: heavy guard6 off wrist 2.3 dm BEHIND
+                 the weapon wrist toward the pommel, polearm guard pole 7.1 dm AHEAD toward the head): wrist-to-wrist distance
+                 along the shaft (off - weapon, + = toward the tip) inside TWO_SP[class] on >= TWO_SHARE of the frames the off
+                 hand is on the shaft.
+  With --adapter, a 2H weapon's recordings are replayed with `--set wcat=<skill category>` (what the game reads per
+  weapon, kfp-two-hand), so the matrix judges the source's two-hand path; one-handed weapons use the plain replay.
   arc    (flat edged weapons)  E1 edge-leads-the-arc gate (metrics.arc_gate) with the mid-blade point at 0.5 x tip.
   seen   (flat edged weapons)  E6 blade visibility (metrics.blade_check) with the seen length scaled to the blade
                  (katana: SEE_L 7 dm of 10.4 dm tip -> 0.67 x tip).
@@ -41,6 +47,8 @@ NEAR, EYE_MIN, NEAR_SHARE = 3.0, 1.2, 0.02
 NEARC = {0: NEAR, 1: 1.5}   # KenshiFP near plane: g_cfg_nearclip 3.0 (melee), g_vm_nc 1.5 while the ranged viewmodel shows (X2)
 VIS_PART, VIS_SHARE = 0.50, 0.90
 TWO_D, TWO_SHARE = 1.5, 0.80
+TWO_CLS = (3, 8)                # item skill categories held two-handed (R2H-1)
+TWO_SP = {3: (-3.5, -0.5), 8: (3.0, 7.5)}   # R2H-2 wrist-to-wrist along the shaft, dm (heavy: down to hands together on short handles)
 FLAT_MIN = 1.8                  # width/thickness ratio: a flat (edged) weapon
 SEE_RATIO = M.SEE_L / 10.42     # katana05 tip 10.42 dm
 from weapons import REF   # noqa: E402  (reference weapons: the ones the fixture takes use)
@@ -106,7 +114,7 @@ def judge(w, path):
     V = mesh_points(w); tip = max(float(V[:, 1].max()), 1e-3); pom = max(float(-V[:, 1].min()), 0.0)
     strike = V[:, 1] > (0.0 if cls == 0 else -1e9)   # blade / shaft past the grip (crossbow: whole bow)
     out = {}
-    near = {}; vis = {}; two = [0, 0]
+    near = {}; vis = {}; two = [0, 0]; sp = [0, 0]
     for i, p in enumerate(P):
         st = p['state']; r = F[i]
         if r['cls'] != cls or not p.get('wih'):
@@ -126,10 +134,14 @@ def judge(w, path):
             if st in ('ready', 'block', 'aim'):
                 s = vis.setdefault(st, [0, 0]); s[0] += 1
                 s[1] += onscreen(C[strike], NEARC[cls]).mean() >= VIS_PART
-        if cls == 0 and w['anim_cls'] in (3, 8) and st in MELEE_STATES:
+        if cls == 0 and w['cls'] in TWO_CLS and st in MELEE_STATES:
             wr = np.asarray(p['J'][2])   # weapon hand R (KenshiFP g_vm_whand default): off hand = L wrist
             a = np.asarray(p['mp']) - nz(p['mf']) * pom; b = np.asarray(p['mp']) + nz(p['mf']) * 0.6 * tip
-            two[0] += 1; two[1] += seg_dist(wr, a, b) <= TWO_D
+            on = seg_dist(wr, a, b) <= TWO_D
+            two[0] += 1; two[1] += on
+            if on:
+                d = float(np.dot(wr - np.asarray(p['J'][5]), nz(p['mf']))); lo, hi = TWO_SP[w['cls']]
+                sp[0] += 1; sp[1] += lo <= d <= hi
     if near:
         bad = {s: v for s, v in near.items() if v[1] > NEAR_SHARE * v[0]}
         worst = max(near.items(), key=lambda kv: kv[1][1] / kv[1][0])
@@ -140,7 +152,8 @@ def judge(w, path):
         worst = min(vis.items(), key=lambda kv: kv[1][1] / kv[1][0])
         out['vis'] = (not bad, '%s %d/%d' % (worst[0], worst[1][1], worst[1][0]), -sum(v[1] for v in vis.values()))
     if two[0]:
-        out['twohand'] = (two[1] >= TWO_SHARE * two[0], '%d/%d(inferred)' % (two[1], two[0]), two[0] - two[1])
+        out['twohand'] = (two[1] >= TWO_SHARE * two[0], '%d/%d' % (two[1], two[0]), two[0] - two[1])
+        out['twosp'] = (sp[0] > 0 and sp[1] >= TWO_SHARE * sp[0], '%d/%d(inferred)' % (sp[1], sp[0]), sp[0] - sp[1])
     if cls == 0 and w.get('flat', 0) >= FLAT_MIN and any(p['state'] == 'swing' for p in P):
         old = M.ARC_MID
         try:
@@ -158,6 +171,13 @@ def judge(w, path):
         finally:
             M.blade_seen = orig
     return out
+
+
+def two_dims(w):
+    """handle end behind / tip ahead of the grip along the blade axis, unscaled mesh units (dm) = what KenshiFP's 2H path
+    reads in game (Mesh::getBounds; item scale fields not applied)"""
+    V = mesh_points(w) / np.array([w['scale_thickness'], w['scale_length'], w['scale_width']])
+    return max(float(-V[:, 1].min()), 0.0), float(V[:, 1].max())
 
 
 def load_weapons(a, cfg):
@@ -217,6 +237,7 @@ def run(a, cfg):
             k = rec_class(r)
             if k in recs:
                 recs[k].append(r)
+    rawrecs = {c: list(recs[c]) for c in recs}; rd = None; vrecs = {}
     if a.adapter:   # replay every recording through the current solver first (judge the current source)
         rd = tempfile.mkdtemp(prefix='animlab-wm-replay-')
         for c in recs:
@@ -227,6 +248,23 @@ def run(a, cfg):
                 if os.path.exists(o):
                     L.append(o)
             recs[c] = L
+
+    def recs_of(w, c):
+        """a 2H weapon's recordings replayed as the game would solve it (the source reads the skill category per weapon)"""
+        if not a.adapter or c != 0 or w['cls'] not in TWO_CLS:
+            return recs[c]
+        pom, tip = two_dims(w)   # what the game reads per weapon (kfp-two-hand: mesh bounds, unscaled)
+        k = (w['cls'], round(pom, 2), round(tip, 2))
+        if k not in vrecs:
+            L = []
+            for r in rawrecs[c]:
+                o = os.path.join(rd, 'wcat%d-%.2f-%.2f-%s' % (k + (os.path.basename(r),)))
+                subprocess.run(shlex.split(a.adapter) + [r, o, '--set', 'wcat=%d' % k[0], '--set', 'wpom=%.3f' % pom, '--set', 'wtip=%.3f' % tip],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if os.path.exists(o):
+                    L.append(o)
+            vrecs[k] = L or recs[c]   # a source without the two-hand path rejects wcat: judge its plain replay
+        return vrecs[k]
     refs = {}
     for c, key in ((0, getattr(a, 'ref', None) or REF[0]), (1, getattr(a, 'ref_ranged', None) or REF[1])):
         m = [x for x in rows if x['sid'] == key or x['name'] == key]
@@ -252,12 +290,12 @@ def run(a, cfg):
     for w in sel:
         c = 1 if w['type'] == 'crossbow' else 0
         res = {}
-        for r in recs[c]:
+        for r in recs_of(w, c):
             try:
                 J = judge(w, r)
             except Exception as e:   # noqa: BLE001
                 J = {'error': (False, str(e)[:60], 1)}
-            R0 = ref_result(c, r)
+            R0 = {} if (c == 0 and w["cls"] in TWO_CLS) else ref_result(c, r)   # 2H: a new pose, judged strictly (no reference leniency)
             for k, (ok, txt, bad) in J.items():
                 # reference-relative: a check the reference weapon (the one the recording was made with) also fails is a
                 # recording / pose problem, judged by the normal gate: the weapon fails it only when clearly worse
@@ -280,8 +318,8 @@ def run(a, cfg):
         print('WEAPON %s %s %s/%s %s [%s] %s' % (w['sid'].replace(' ', '_'), 'PASS' if ok else 'FAIL', w['cls_name'].replace(' ', '_'),
                                                  w['anim_cls_name'].replace(' ', '_'), w['name'], w['source'], txt))
         sys.stdout.flush()
-        if getattr(a, 'sheet', False) and recs[c]:
-            z0 = [r for r in recs[c] if 'z25' not in r] or recs[c]
+        if getattr(a, 'sheet', False) and recs_of(w, c):
+            z0 = [r for r in recs_of(w, c) if 'z25' not in r] or recs_of(w, c)
             sheet(w, z0[0], os.path.join(a.o, 'sheets', '%s.png' % w['sid'].replace(' ', '_').replace('/', '_')), vcfg)
     tsv.close()
     print('RESULT WEAPON-MATRIX %s weapons=%d fail=%d (base %d/%d, mod %d/%d fail) recs=%d+%d out=%s' % (
