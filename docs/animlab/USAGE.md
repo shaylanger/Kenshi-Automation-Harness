@@ -76,6 +76,8 @@ elbows/wrists too once the viewmodel fades (zf < 0.99). Catches the Z1 crossfade
 Frames of the video itself: `tools/animlab/frames.py openground <mp4> [--from s --to s]` = judgeable open ground on the
 RECORDED frames (sky share of the scene band between the title label and the UI panel >= 0.08 on >= 90% of frames at
 2 fps; prints the closed spans); a setup check before recording is not enough (sword-z25-block: slope for 17 s). Night/fog fails.
+`frames.py cursor <mp4>`: no Windows mouse cursor in any frame (arrow shape, any cursor size, full-res frames at 5 fps;
+prints the spans). `takecheck.py --video` runs it on every take (`--no-cursor` skips).
 
 ## Metrics (per state)
 

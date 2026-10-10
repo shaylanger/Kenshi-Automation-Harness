@@ -20,9 +20,10 @@ A take = a video (optional), a labels file and one or more evidence files:
     set grace|maxgap|endslack|offset <value>
   cond = <key><op><value>, op one of = != ~ !~ >= <= > < ; `=`/`!=` take `a|b` alternatives; `~` is a regex
   search; numbers compare numerically.
-Video: the take must end at the `end` label: video length - (end + offset) within [-0.2, endslack] s.
+Video: the take must end at the `end` label: video length - (end + offset) within [-0.2, endslack] s, and no
+frame may show the Windows mouse cursor (frames.py cursor at 5 fps; `--no-cursor` skips it).
 
-Usage: takecheck.py --labels L --ev E [--ev E2 ...] --rules R [--video V | --video-len S] [--name take]
+Usage: takecheck.py --labels L --ev E [--ev E2 ...] --rules R [--video V [--no-cursor] | --video-len S] [--name take]
 Exit 0 = PASS. Prints one line per check, then `RESULT <name> PASS|FAIL <failed checks>`.
 """
 import argparse, re, shlex, subprocess, sys
@@ -223,6 +224,7 @@ def main():
     ap.add_argument('--labels', required=True); ap.add_argument('--ev', action='append', default=[])
     ap.add_argument('--rules', required=True); ap.add_argument('--video'); ap.add_argument('--video-len', type=float, help='known video length (s) instead of --video (archived takes)'); ap.add_argument('--name', default='take')
     ap.add_argument('--set', action='append', default=[], help='name=value, overrides a rules-file `set`')
+    ap.add_argument('--no-cursor', action='store_true', help='skip the mouse-cursor frame check on --video')
     a = ap.parse_args()
     L = read_labels(a.labels); S = read_ev(a.ev); R, cfg = read_rules(a.rules)
     for x in a.set:
@@ -231,6 +233,14 @@ def main():
     if a.video and vlen is None:
         print('video FAIL cannot read the length of %s' % a.video); return 1
     ok, lines, fails = check(L, S, R, cfg, vlen)
+    if a.video and not a.no_cursor:   # Shay 2026-10-10 ticket A: the mouse cursor must never show in a take
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import frames
+        cok, ctxt = frames.cursor_check(a.video)
+        lines.append('cursor %s %s' % ('PASS' if cok else 'FAIL', ctxt))
+        if not cok:
+            ok = False; fails.append('cursor')
     for x in lines:
         print(x)
     print('RESULT %s %s %s' % (a.name, 'PASS' if ok else 'FAIL', ' '.join(fails) if fails else '%d checks' % len(lines)))
