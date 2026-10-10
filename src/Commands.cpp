@@ -517,10 +517,13 @@ int CountAllSections(Inventory *inv, GameData *data) {
   return total;
 }
 
-// Weapons (weapon-matrix, 2026-10-10): the factory needs a manufacturer (WEAPON_MANUFACTURER whose "weapon types"
-// list the weapon) AND a model grade (MATERIAL_SPECS_WEAPON from the maker's "weapon models"); with no grade it returns
-// nothing (the 2026-10-02 refusal passed a maker only). Optional args after the count: `maker <name|sid>`,
-// `model <name|sid>`; default maker: the player's (Homemade) if it makes this weapon, else the first maker that does.
+// Weapons (weapon-matrix, 2026-10-10): RootObjectFactory::createItem returns null for a WEAPON GameData (its first
+// check: type WEAPON or VENDOR_LIST -> null). The game builds a weapon from its MANUFACTURER: gd = the
+// WEAPON_MANUFACTURER, 3rd arg ("weaponMesh") = the WEAPON type, 4th = the MATERIAL_SPECS_WEAPON model grade (null =
+// the game picks from the maker's "weapon models"); reverse-engineered from kenshi_x64 Steam 1.0.65 createItem
+// (RVA 0x57FCC0, GOG 0x57FFD0), branch type 0x33 = WEAPON_MANUFACTURER. Optional args after the count:
+// `maker <name|sid>`, `model <name|sid>`; default maker: the player's (Homemade) if it makes this weapon, else the
+// first maker that does, else Homemade / any maker (the game falls back to a default level for unlisted weapons).
 bool RefListHas(GameData *d, const char *list, const std::string &sid) {
   const Ogre::vector<GameDataReference>::type *l = Valid(d) ? d->getReferenceListIfExists(list) : nullptr;
   if (!l)
@@ -566,8 +569,18 @@ Item *MakeWeapon(GameWorld *world, GameData *data, const std::vector<std::string
           maker = it->second;
     }
   }
+  if (!maker && Valid(defaultMaker))
+    maker = defaultMaker;   // modded weapons no maker lists: the game still builds them
   if (!maker) {
-    error = "no weapon manufacturer makes " + data->name + " (" + data->stringID + "): give `maker <name>`";
+    const auto cat = world->gamedata.gamedataCatSID.find((int)WEAPON_MANUFACTURER);
+    if (cat != world->gamedata.gamedataCatSID.end())
+      for (auto it = cat->second.begin(); it != cat->second.end() && !maker; ++it)
+        if (Valid(it->second) && it->second->getReferenceListIfExists("weapon models") &&
+            !it->second->getReferenceListIfExists("weapon models")->empty())
+          maker = it->second;
+  }
+  if (!maker) {
+    error = "no weapon manufacturer found for " + data->name + " (" + data->stringID + "): give `maker <name>`";
     return nullptr;
   }
   if (!model) {
@@ -579,9 +592,9 @@ Item *MakeWeapon(GameWorld *world, GameData *data, const std::vector<std::string
     error = "manufacturer " + maker->name + " has no weapon model grade: give `model <name>`";
     return nullptr;
   }
-  Item *item = world->theFactory->createItem(data, hand(), maker, model, -1, nullptr);
-  if (!Valid(item))   // the SDK names the 3rd argument weaponMesh: try the other order once
-    item = world->theFactory->createItem(data, hand(), model, maker, -1, nullptr);
+  Item *item = world->theFactory->createItem(maker, hand(), data, model, -1, nullptr);
+  if (!Valid(item))   // let the game pick the grade from the maker's list
+    item = world->theFactory->createItem(maker, hand(), data, nullptr, -1, nullptr);
   if (!Valid(item))
     error = "the game could not create " + data->name + " (maker " + maker->name + ", model " + model->name + ")";
   else
@@ -3283,13 +3296,83 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     }
     if (added == 0 && !error.empty())
       return error;
+    // giveprobe4080 (2026-10-10): weapons are created now but most don't fit the main inventory, so a character with
+    // both weapon slots taken refuses every weapon. Free one slot the way `equip` does (the worn weapon goes to the main
+    // inventory, else on the ground next to him), then add again; the reply names it (`replaced=`).
+    std::string replaced, room;
+    // Any type: one more try with a fresh item, so a refusal reports the item size and every section's room.
+    const bool weapon = data->type == WEAPON || data->type == CROSSBOW;
+    if (added < count && error.empty()) {
+      Item *probe = MakeItem(world, data, f, 4, nullptr, error);
+      if (Valid(probe)) {
+        room = " item=" + Int(probe->itemWidth) + "x" + Int(probe->itemHeight) + " slot=" + Int((int)probe->slotType);
+        lektor<InventorySection *> &sections = inv->sectionsInSearchOrder;
+        for (uint32_t s = 0; s < sections.size(); ++s) {
+          InventorySection *section = sections[s];
+          if (Valid(section))
+            room += " " + section->name + ":" + Int(section->width) + "x" + Int(section->height) +
+                    ",lim=" + Int((int)section->limitedSlot) + ",n=" + Int((int)section->getItems().size()) +
+                    ",room=" + (section->hasRoomForItem(data, 1) ? "1" : "0");
+        }
+        // the worn weapon to move out: one of another kind first (giveprobe5090: swapping a worn Chisa Katana for a
+        // new one left the count unchanged), else the same kind
+        Item *worn = nullptr, *same = nullptr;
+        for (uint32_t s = 0; weapon && s < sections.size() && !worn; ++s) {
+          InventorySection *section = sections[s];
+          if (!Valid(section) || !section->isAnEquippedItemSection)
+            continue;
+          const Ogre::vector<InventorySection::SectionItem>::type &items = section->getItems();
+          for (uint32_t i = 0; i < items.size() && !worn; ++i)
+            if (Valid(items[i].item) && items[i].item->isEquipped && items[i].item->slotType == probe->slotType) {
+              if (items[i].item->data != data)
+                worn = items[i].item;
+              else if (!same)
+                same = items[i].item;
+            }
+        }
+        if (!worn)
+          worn = same;
+        if (worn) {
+          const std::string name = worn->getName();
+          const int qty = worn->quantity > 0 ? worn->quantity : 1;
+          Item *moved = inv->removeItemDontDestroy_returnsItem(worn, qty, false);
+          if (Valid(moved)) {
+            InventorySection *main = inv->getSection("main");
+            std::string where = "main";
+            if (!(Valid(main) && main->addItem(moved, qty))) {
+              inv->dropItem(moved);
+              where = "ground";
+              g_dropped.push_back(moved->getHandle());
+              if (g_dropped.size() > 64)
+                g_dropped.erase(g_dropped.begin());
+            }
+            replaced = name + "(" + where + ")";
+          }
+        }
+        if (inv->addItem(probe, 1, false, true)) {
+          ++added;
+          for (int i = added; i < count; ++i) {   // a second weapon may take the other slot
+            Item *item = MakeItem(world, data, f, 4, nullptr, error);
+            if (!Valid(item) || !inv->addItem(item, 1, false, true))
+              break;
+            ++added;
+          }
+        }
+      }
+    }
+    if (added == 0 && !error.empty())
+      return error;
+    if (added == 0)   // addItem(destroyOnFail) refused it: no room (full inventory / no fitting slot)
+      return "ERROR: no room for " + data->name + " in " + c->getName() + "'s inventory (" +
+             Int(CountAllSections(inv, data)) + " already there)" + (replaced.empty() ? "" : " replaced=" + replaced) +
+             room;
     // addItem can report success for items that don't stay: report what really arrived.
     int real = CountAllSections(inv, data) - countBefore;
     Log("KAH: give " + c->getName() + " item=" + data->name + " added=" + Int(added) +
         " real=" + Int(real) + " now=" + Int(countBefore + real));
     ok = real > 0;
     return c->getName() + " got " + Int(real) + "/" + Int(count) + " " + data->name +
-           " (now " + Int(countBefore + real) + ")";
+           " (now " + Int(countBefore + real) + ")" + (replaced.empty() ? "" : " replaced=" + replaced);
   }
 
   if (cmd == "relation") { // relation <npc> <value -100..100>: npc's faction <-> player faction
