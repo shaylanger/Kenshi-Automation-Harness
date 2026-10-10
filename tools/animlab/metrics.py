@@ -1006,3 +1006,75 @@ def zoomband_check(S, max_frames=0):
         w = max(bad, key=lambda s: (len(s[2]), -min(p[3] for p in s[2])))
         txt.append('worst=frame%d,zoom=%.1f,%s' % (w[0], w[1], '+'.join('%s(z%.1f)' % (p[0], p[3]) for p in w[2])))
     return ok, txt
+
+
+# ---- native swing pool (Misses 2026-10-10 E6 kfx-b2 e6fix, KenshiFP F0595751): the game plays a native attack variant per
+# swing and the solver's rendered stroke depends on it (same commanded keys: stroke 1 arc_ok 0.83 in one swing, 0.42 in the
+# next). The offline "prediction" replayed ONE old recording with one swing per stroke (arc 1.00) and the game failed.
+# Predict a take instead from every native swing in a pool of recordings (each replayed with the stroke forced).
+# CLASS: any check on a motion the game plays with a random native variant (swing strokes, free-block techniques, ...)
+# predicts over the variant pool (pool_predict), never from one recording.
+POOL_RATE, POOL_TAKE, POOL_MIN_ARC_N = 0.95, 2, 6   # min predicted take pass rate, swings per take, arc frames of a full swing
+
+
+def swing_verdicts(F, P, overhead=()):
+    """per swing of a recording: arc counts, wrist bend, blade + stroke checks judged on that swing alone."""
+    out = []
+    for k, idx in enumerate(swings(F, P)):
+        keep = set(idx)
+        Pm = [p if p['state'] != 'swing' or i in keep else dict(p, state='swing_x') for i, p in enumerate(P)]
+        ar = [P[i]['arc'] for i in idx if P[i].get('arc') is not None]
+        wb = [P[i]['wb'] for i in idx if P[i]['wb'] is not None]
+        bok, btxt = blade_check(F, Pm)
+        sok, stxt = stroke_check(F, Pm, overhead)
+        us = [F[i]['swu'] for i in idx]
+        out.append(dict(k=k, frame=idx[0], stroke=F[idx[0]].get('stroke'), arc_good=sum(1 for x in ar if x >= 0.7), arc_n=len(ar),
+                        wb_max=max(wb) if wb else 0.0, ok=dict(blade=bok, stroke=sok), btxt=btxt, stxt=stxt,
+                        full=us[0] <= 0.1 and us[-1] >= 0.9 and len(ar) >= POOL_MIN_ARC_N))
+    return out
+
+
+def pool_predict(V, checks=('arc', 'blade', 'stroke'), take=POOL_TAKE, rate=POOL_RATE, share=0.85, wb_lim=None):
+    """V = swing_verdicts rows (+ 'rec'). A take of `take` swings draws native variants at random: predicted take pass rate =
+    share of all `take`-combinations of full pool swings that pass (arc pooled over the take like the game's arc gate,
+    blade/stroke = every swing passes). PASS when every check's rate >= `rate`."""
+    import itertools
+    wb_lim = ARC_WB if wb_lim is None else wb_lim
+    full = [v for v in V if v['full']]
+    if len(full) < take:
+        return False, ['swings=%d full=%d < %d:BAD' % (len(V), len(full), take)]
+    def one(v, c):
+        if c == 'arc':
+            return v['arc_good'] >= share * v['arc_n'] and v['wb_max'] <= wb_lim
+        return v['ok'][c]
+    def comb(cs, c):
+        if c == 'arc':
+            return sum(v['arc_good'] for v in cs) >= share * sum(v['arc_n'] for v in cs) and max(v['wb_max'] for v in cs) <= wb_lim
+        return all(one(v, c) for v in cs)
+    combos = list(itertools.combinations(full, take))
+    ok, txt = True, ['swings=%d full=%d recs=%d takes=%d' % (len(V), len(full), len({v.get('rec') for v in full}), len(combos))]
+    allpass = [True] * len(combos)
+    for c in checks:
+        r = [comb(cs, c) for cs in combos]
+        allpass = [x and y for x, y in zip(allpass, r)]
+        tr = sum(r) / float(len(r)); sw = sum(1 for v in full if one(v, c)) / float(len(full))
+        good = tr >= rate; ok = ok and good
+        bad = [v for v in full if not one(v, c)]
+        if c == 'arc':
+            bad.sort(key=lambda v: v['arc_good'] / float(v['arc_n']))
+            worst = ','.join('%s@%d:%.2f' % (v.get('rec', '?'), v['frame'], v['arc_good'] / float(v['arc_n'])) for v in bad[:3])
+        else:
+            worst = ','.join('%s@%d' % (v.get('rec', '?'), v['frame']) for v in bad[:3])
+        txt.append('%s:take=%.2f/%.2f,swing=%.2f%s%s' % (c, tr, rate, sw, '' if good else ':BAD', (',worst=' + worst) if bad else ''))
+    txt.insert(1, 'take_all=%.2f' % (sum(allpass) / float(len(allpass))))
+    return ok, txt
+
+
+def guard_press_verdicts(S, elev_min=GUARD_ELEV, settle=GUARD_SETTLE, min_n=3):
+    """per block press (guard_presses): settled median elevation; rows for pool_predict (check 'guard')."""
+    out = []
+    for k, p in enumerate(guard_presses(S)):
+        q = p[int(len(p) * settle):] or p
+        es = sorted(x[1] for x in q); med = es[len(es) // 2]
+        out.append(dict(k=k, frame=p[0][0], elev=med, full=len(p) >= min_n, ok=dict(guard=med >= elev_min)))
+    return out

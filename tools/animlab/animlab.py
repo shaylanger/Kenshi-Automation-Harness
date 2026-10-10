@@ -291,6 +291,60 @@ def cmd_replay(a):
     print('GATE %s frames=%d %s' % ('PASS' if not fails else 'FAIL', n, '; '.join(fails[:8])))
 
 
+def cmd_pool(a):
+    """Prediction over native variants (CLASS: random native variant per swing / block press). swing: E6 stroke prediction: replay every recording with the stroke forced, judge every swing
+    on its own and predict the take pass rate (metrics.swing_verdicts / pool_predict). Recordings: paths or @listfile."""
+    recs = []
+    for r in a.rec:
+        if r.startswith('@'):   # list file: one rec per line, relative paths from the list's directory
+            d = os.path.dirname(os.path.abspath(r[1:]))
+            recs += [os.path.join(d, l.strip()) for l in open(r[1:]) if l.strip() and not l.startswith('#')]
+        else:
+            recs.append(r)
+    keep = a.keep or tempfile.mkdtemp(prefix='animlab-pool-')
+    os.makedirs(keep, exist_ok=True)
+    if a.motion == 'swing' and (a.stroke is None or not a.adapter) or a.replay and not a.adapter:
+        raise SystemExit('pool: --motion swing needs --stroke N and --adapter; --replay needs --adapter')
+    extra = (shlex.split(a.stroke_args.format(stroke=a.stroke)) if a.motion == 'swing' else []) + shlex.split(a.args or '')
+    def one(rec):
+        out = os.path.join(keep, '%s%s-%s' % (a.motion, '' if a.stroke is None else a.stroke, os.path.basename(rec)))
+        run_adapter(a.adapter, rec, out, extra)
+        return rec, out
+    if a.motion == 'block' and not a.replay:
+        # the zoomed-out block is the native technique pose: the replay re-solves it (f059 z25 press 0: game -75 deg,
+        # replay +44), so the recordings are judged as recorded unless --replay
+        res = [(r, r) for r in recs]; keep = '-'
+    else:
+        with ThreadPoolExecutor(max_workers=a.j) as ex:
+            res = list(ex.map(one, recs))
+    if a.motion == 'block':   # free block: the native technique per press (chooseBlock) -> per-press guard verdicts
+        V = []
+        for rec, out in res:
+            r = recfmt.parse(out)
+            for v in M.guard_press_verdicts(M.guard_series(r.frames, M.frame_metrics(r))):
+                v['rec'] = os.path.splitext(os.path.basename(rec))[0]; V.append(v)
+                if a.verbose:
+                    print('  %s@%d full=%d elev=%.0f guard=%d' % (v['rec'], v['frame'], v['full'], v['elev'], v['ok']['guard']))
+        ok, txt = M.pool_predict(V, ('guard',), a.take, a.rate)
+        print('pool block %s %s (replays in %s)' % ('PASS' if ok else 'FAIL', ' '.join(txt), keep))
+        return 0 if ok else 1
+    oh = tuple(int(x) for x in a.overhead.split(',') if x.strip()) if a.overhead else ()
+    V = []
+    for rec, out in res:
+        r = recfmt.parse(out)
+        for v in M.swing_verdicts(r.frames, M.frame_metrics(r), oh):
+            v['rec'] = os.path.splitext(os.path.basename(rec))[0]
+            if v['stroke'] in (None, -1, a.stroke):
+                V.append(v)
+    if a.verbose:
+        for v in V:
+            print('  %s@%d full=%d arc=%d/%d wb=%.1f blade=%d stroke=%d %s' % (v['rec'], v['frame'], v['full'], v['arc_good'], v['arc_n'],
+                  v['wb_max'], v['ok']['blade'], v['ok']['stroke'], ' '.join(v['btxt'])))
+    ok, txt = M.pool_predict(V, tuple(c for c in a.checks.split(',') if c), a.take, a.rate)
+    print('pool stroke %d %s %s (replays in %s)' % (a.stroke, 'PASS' if ok else 'FAIL', ' '.join(txt), keep))
+    return 0 if ok else 1
+
+
 def parse_variant(v, default_cmd):
     name, _, rest = v.partition(':')
     cmd = default_cmd
@@ -388,13 +442,22 @@ def main():
             p.add_argument('-j', type=int, default=os.cpu_count() or 4); p.add_argument('--keep')
         if name == 'gate':
             p.add_argument('--tol'); p.add_argument('--quiet', action='store_true')
+    p = sp.add_parser('pool'); p.add_argument('rec', nargs='+', help='recordings with native swings (or @listfile)')
+    p.add_argument('--adapter', help='replay adapter (required for swing and block --replay)'); p.add_argument('--stroke', type=int, help='swing: scripted stroke forced on every native swing')
+    p.add_argument('--motion', choices=('swing', 'block'), default='swing', help='block = per-press guard over the native block techniques')
+    p.add_argument('--replay', action='store_true', help='block: replay the recordings (default: judge them as recorded)')
+    p.add_argument('--stroke-args', default='--no-rec-sets --set stroke={stroke}', help='adapter args forcing the stroke (KenshiFP kfpvm_replay default)')
+    p.add_argument('--args', help='extra adapter args'); p.add_argument('--overhead', help='overhead stroke ids (stroke check)')
+    p.add_argument('--checks', default='arc,blade,stroke'); p.add_argument('--take', type=int, default=M.POOL_TAKE)
+    p.add_argument('--rate', type=float, default=M.POOL_RATE, help='min predicted take pass rate')
+    p.add_argument('-j', type=int, default=os.cpu_count() or 4); p.add_argument('--keep'); p.add_argument('-v', dest='verbose', action='store_true')
     ap.add_argument('--only-stroke', dest='only_stroke', type=int, help='E6: judge only swings of this scripted stroke (others -> swing_x)')
     a = ap.parse_args()
     if a.only_stroke is not None:
         M.STROKE_ONLY = a.only_stroke
     if not a.cmd:
         ap.print_help(); return 2
-    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
+    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':

@@ -73,8 +73,18 @@ bystanders, KO), `cover` = keys sampled across the whole take, and the video mus
 Prints one line per check and `RESULT <name> PASS|FAIL <failed checks>`. A take without sampled evidence fails (unproven).
 KenshiFP adapter: sampler `components/KenshiFP/animlab/take-sample.sh` (source it in the take script:
 `take_sample_start <ev> "$T0" <fp char> ["<allowed>|..."]` ... `take_sample_stop`) + rules `take-rules.txt`.
-`animlab.py guard <rec>`: block guard readability, median blade elevation above the horizontal over block frames
->= -60 deg (`--elev`; a hanging guard, blade straight down with the hilt at the face, is ~-80..-90); hilt-head distance info.
+`animlab.py guard <rec>`: block guard readability judged per press (runs of block frames): the median blade elevation
+above the horizontal over each press's settled 70% must be >= -60 deg (`--elev`; a hanging guard, blade straight down with
+the hilt at the face, is ~-80..-90); any hanging press fails; hilt-head distance info. `guard <survey>.tsv` judges a
+per-press survey table (`blade_elev_deg` column, `tech=` in `evidence`) per row with a per-technique median.
+**Native variant pools** (`animlab.py pool`): the game picks a native variant per occurrence (attack variant per swing,
+free-block technique per press), so a check on one recording cannot predict a take. `pool @list --adapter A --stroke N
+[--overhead 2] [--checks arc,blade,stroke]` replays every recording of the list with the stroke forced (`--stroke-args`,
+KenshiFP default `--no-rec-sets --set stroke={stroke}`), judges every full swing on its own and prints the predicted take
+pass rate (all `--take` 2-swing combinations; arc pooled over the take like the game gate, blade/stroke = every swing):
+PASS when each check's rate >= `--rate` 0.95. `pool @list --motion block` judges every press of the recordings as recorded
+(the zoomed-out block is the native pose; `--replay` re-solves it). List paths are relative to the list file; pools live in
+the protected corpus `C:\KenshiTestRuns\corpus\pools\{sword-swing,block-guard}` (README there). `-v` prints every swing.
 `animlab.py zoomband <rec> [--head-show 16]`: no own body in frame while the zoom camera is between the eye and the
 head-show distance (head hidden there): neck/spine/shoulders projected from the camera `zoom` dm behind the eye (orbit 0),
 elbows/wrists too once the viewmodel fades (zf < 0.99). Catches the Z1 crossfade's headless torso / floating hand.

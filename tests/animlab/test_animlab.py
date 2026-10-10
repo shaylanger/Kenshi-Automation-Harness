@@ -285,6 +285,18 @@ class T(unittest.TestCase):
         ok, t = M.guard_check([x for x in S if not 30 <= x[0] < 40]); self.assertTrue(ok, t)
         ok, t = M.guard_table_check([('a', 59.6, '228c60'), ('b', -74.6, '226e50')]); self.assertFalse(ok, t)
         ok, t = M.guard_table_check([('a', 59.6, '228c60'), ('b', 45.7, '223cc0')]); self.assertTrue(ok, t)
+    def test_pool_predict(self):
+        # miss 2026-10-10 E6 kfx-b2: one swing per stroke predicted PASS; the game's random native variants failed the take
+        def sw(g, n=12, wb=40.0, blade=True): return dict(frame=0, arc_good=g, arc_n=n, wb_max=wb, full=True, ok=dict(blade=blade, stroke=True))
+        good = [sw(12) for _ in range(9)]
+        ok, t = M.pool_predict(good); self.assertTrue(ok, t)
+        ok, t = M.pool_predict([sw(12)] + [sw(5)] * 3); self.assertFalse(ok, t); self.assertIn('arc:take=0.00', ' '.join(t))
+        ok, t = M.pool_predict(good + [sw(12, blade=False)]); self.assertFalse(ok, t)   # 9/45 takes hold the bad swing
+        ok, t = M.pool_predict([sw(12)]); self.assertFalse(ok, t)                       # fewer full swings than a take
+        # free block: per-press guard over the native techniques (f059 z25: press 0 hanging -75)
+        S = [(i, 40.0, 3.0) for i in range(0, 12)] + [(i, -78.0, 3.0) for i in range(30, 40)]
+        V = M.guard_press_verdicts(S); self.assertEqual([v['ok']['guard'] for v in V], [True, False])
+        ok, t = M.pool_predict(V + M.guard_press_verdicts([(i, 50.0, 3.0) for i in range(12)]), ('guard',)); self.assertFalse(ok, t)
     def test_zoomband_check(self):
         # miss 2026-10-10 zoom-sweep Z1 crossfade: own headless torso / floating hand in frame between eye and head-show distance
         def fr(d):
