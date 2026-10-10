@@ -315,6 +315,20 @@ def _px(c):
     return (W / 2 + W / 2 * (c[0] / c[2]) / TX, H / 2 - H / 2 * (c[1] / c[2]) / TY)
 
 
+# Kenshi's bottom HUD at the take resolution (1600x900, 1.0.65; measured on the op-b6 fist take, 2026-10-10): squad /
+# stats panel left, portrait bar + FAMILY tab centre, speed buttons / jobs panel right. Pixel rects (x0, y0, x1, y1).
+# The FP sheets render no HUD, so a fist the sheet shows clearly can sit half under it in the game (FIST-shoteiL op-b6).
+HUD_RECTS = ((0, 630, 465, 900), (465, 738, 1110, 900), (1110, 685, 1600, 900))
+
+
+def _hud(c, near=3.0):
+    """point hidden in the game: behind the near plane, off screen, or under the bottom HUD"""
+    if not _onscr(c, near, 1.0):
+        return True
+    x, y = _px(c)
+    return any(x0 <= x <= x1 and y >= y0 for x0, y0, x1, y1 in HUD_RECTS)
+
+
 def _d2(a, b):
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
@@ -630,6 +644,27 @@ def unarmed_checks(F, strikers=None, c=U, name=''):
     res.append(('U22', 'PASS' if okv else 'FAIL', 'fists on screen: ' + ' '.join('%s longest off %.2f share %.2f%s' % (
         s, lr, sh, (' [' + ','.join('u%.2f-%.2f' % r for r in runs[:4]) + ']') if runs else '') for s, lr, sh, runs in vis) +
         ' (<= %.2f / %.2f of the clip)' % (c['offrun'], c['offshare'])))
+    # U23 (FIST-shoteiL game take op-b6, 2026-10-10: both fists at the bottom edge half under the HUD in the guard, the
+    # off hand under it through the strike, while the HUD-less sheets and U22 passed): every WRIST (the whole fist then
+    # shows) clear of the game HUD (HUD_RECTS) in the guard, and through the technique each hand's hidden stretch <= offrun
+    # and share <= offshare (class: hand visibility per state, with the game's occluders)
+    gh = ['%s@u%.2f' % (s, u[k]) for k in gk for s in sides if _hud(F[k][s]['wr'], c['near'])]
+    hv = []
+    for s in sides:
+        runs, cur = [], None
+        for k, f in enumerate(F):
+            off = _hud(f[s]['wr'], c['near'])
+            if off and cur is None:
+                cur = u[k]
+            if not off and cur is not None:
+                runs.append((cur, u[k])); cur = None
+        if cur is not None:
+            runs.append((cur, 1.0))
+        hv.append((s, max([b - a for a, b in runs] or [0.0]), sum(b - a for a, b in runs), runs))
+    okh = not gh and all(lr <= c['offrun'] and sh <= c['offshare'] for s, lr, sh, r in hv)
+    res.append(('U23', 'PASS' if okh else 'FAIL', 'wrists clear of the game HUD: guard hidden %d%s; ' % (len(gh), (' ' + ','.join(gh[:4])) if gh else '') +
+        ' '.join('%s longest %.2f share %.2f%s' % (s, lr, sh, (' [' + ','.join('u%.2f-%.2f' % r for r in runs[:3]) + ']') if runs else '')
+                 for s, lr, sh, runs in hv) + ' (<= %.2f / %.2f)' % (c['offrun'], c['offshare'])))
     ik = sum(f['ikfail'] for f in F)
     res.append(('U15', 'PASS' if not ik else 'FAIL', 'solver: ikfail frames %d' % ik))
     return res
