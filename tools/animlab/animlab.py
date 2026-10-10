@@ -78,7 +78,8 @@ def states_of(*tables):
 
 
 def cmd_metrics(a):
-    T = M.state_table(M.frame_metrics(recfmt.parse(a.rec)), a.skip)
+    P = M.frame_metrics(recfmt.parse(a.rec))
+    T = M.state_table(P, a.skip)
     print_table([[s] + [M.fmt(T[s][c]) for c in M.METRIC_COLS] for s in states_of(T)], ('state',) + M.METRIC_COLS)
     req = getattr(a, 'require', None)
     if req is None:   # weapon from the states seen: crossbow aim + reload, sword block + swing
@@ -86,7 +87,7 @@ def cmd_metrics(a):
     else:
         req = tuple(x for x in req.split(',') if x)
     if req:
-        ok, txt = M.moves_ok(T, req)
+        ok, txt = M._both(M.moves_ok(T, req), M.moves_each(P[a.skip:], req))   # pooled + every occurrence
         print('moves %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
     arc = getattr(a, 'arc', None)
     if arc is None:   # E1: melee recordings with a swing get the edge-leads-the-arc gate by default
@@ -193,9 +194,10 @@ def cmd_hinge(a):
 
 def cmd_inline(a):
     """E1 inline: blade in line with the forearm, arm-driven arc (see metrics.inline_table / inline_check)."""
-    rec = recfmt.parse(a.rec)
-    ok, txt = M.inline_check(M.inline_table(M.inline_series(rec.frames, M.frame_metrics(rec))), tuple(x for x in a.phases.split(',') if x),
-                             a.fb_med, a.fb_max, a.sc_max, a.wr)
+    rec = recfmt.parse(a.rec); P = M.frame_metrics(rec)
+    kw = dict(phases=tuple(x for x in a.phases.split(',') if x), fb_med=a.fb_med, fb_max=a.fb_max, sc_max=a.sc_max, wr=a.wr)
+    # pooled over all swings + every swing on its own (a bad swing must not hide in the pooled median)
+    ok, txt = M._both(M.inline_check(M.inline_table(M.inline_series(rec.frames, P)), **kw), M.inline_each(rec.frames, P, **kw))
     print('inline %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
 
 

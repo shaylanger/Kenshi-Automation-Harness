@@ -1089,6 +1089,11 @@ def _nums(txt):
     return [(k, float(v)) for k, v in _re.findall(r'([A-Za-z_]+)=(-?\d+(?:\.\d+)?)', txt)]
 
 
+def _both(a, b):
+    """pooled gate + every-occurrence gate: PASS only if both pass."""
+    return a[0] and b[0], list(a[1]) + ['each:'] + list(b[1])
+
+
 def check_suite(rec, overhead=(2,)):
     """[(check, ok, text)] for every check that applies to the recording; swing checks per scripted stroke (E6 recs)."""
     global STROKE_ONLY
@@ -1109,7 +1114,7 @@ def check_suite(rec, overhead=(2,)):
         T = state_table(P)
         req = ('aim', 'reload') if ('aim' in T or 'reload' in T) else ('block', 'swing') if ('block' in T or 'swing' in T) else ()
         if req:
-            run('moves', lambda: moves_ok(T, req))
+            run('moves', lambda: _both(moves_ok(T, req), moves_each(P, req)))
         if 'ready' in T and F[0]['cls'] == 0:
             run('branch', lambda: ready_branch(ready_runs(F, P)))
         if 'ready' in T and any(f['cls'] == 1 for f in F):
@@ -1125,9 +1130,9 @@ def check_suite(rec, overhead=(2,)):
             tag = '' if s is None else '[s%d]' % s
             if 'swing' not in T:
                 continue
-            run('arc' + tag, lambda: arc_gate(T, {'swing': ARC_SHARE}))
+            run('arc' + tag, lambda: arc_gate(T, {'swing': ARC_SHARE}))   # arc_each not wired: taste R8 FP on accepted f28 (swings 0.75/0.62)
             run('churn' + tag, lambda: churn_check(churn_series(F, P))[:2])
-            run('inline' + tag, lambda: inline_check(inline_table(inline_series(F, P))))
+            run('inline' + tag, lambda: _both(inline_check(inline_table(inline_series(F, P))), inline_each(F, P)))
             run('blade' + tag, lambda: blade_check(F, P))
             run('stroke' + tag, lambda: stroke_check(F, P, overhead))
             if any(f.get('hua') for f in F):
@@ -1151,3 +1156,92 @@ def agree_rows(game, replay):
         d = ['%s %g/%g' % (k, g, r) for (k, g), (_, r) in zip(gn, rn) if abs(g - r) > 1e-9][:3]
         rows.append((c, G[c][0], R[c][0], G[c][0] == R[c][0], ' '.join(d)))
     return rows
+
+
+# ---- every occurrence (CLASS audit 2026-10-10, Shay via coordinator: a state check judges EVERY occurrence of its state in
+# a rec/take, never one pooled value: the per-press guard miss showed a pooled median hiding a bad press). moves, arc and
+# inline pooled all occurrences; these wrappers judge each run of the state / each swing and fail on the worst one.
+OCC_MIN_ARC_N = 6   # arc frames a swing needs to be judged on its own (a cut-off swing at the rec edge is skipped)
+
+
+def occurrences(P, state):
+    """runs of consecutive frames labelled `state` (viewmodel in hand) -> [[frame index, ...], ...]."""
+    out, cur = [], None
+    for i, p in enumerate(P):
+        if p['state'] == state and p['wih']:
+            if cur is None:
+                cur = []
+                out.append(cur)
+            cur.append(i)
+        else:
+            cur = None
+    return out
+
+
+def moves_each(P, required, min_n=3):
+    """C1 per occurrence: every run (>= min_n frames) of each required state moves the weapon from the median ready pose
+    (held states by the run's median pose, paths by its largest frame). Returns (ok, [text])."""
+    R = [p for p in P if p['state'] == 'ready' and p['wih']]
+    if not R:
+        return False, ['ready:MISSING']
+    rp, rf = _mpose(R)
+    ok, txt = True, []
+    for s in required:
+        runs = [r for r in occurrences(P, s) if len(r) >= min_n]
+        if not runs:
+            ok = False
+            txt.append(s + ':MISSING')
+            continue
+        still = []
+        for r in runs:
+            ps = [P[i] for i in r]
+            if s in HELD_STATES:
+                mp, mf = _mpose(ps)
+                dm, dg = ln(sub(mp, rp)), _ang(mf, rf)
+            else:
+                dm, dg = max(ln(sub(p['mp'], rp)) for p in ps), max(_ang(p['mf'], rf) for p in ps)
+            if dm < MOVE_DM and dg < MOVE_DEG:
+                still.append('%s@%d:%.1fdm/%.0fdeg' % (s, r[0], dm, dg))
+        ok = ok and not still
+        txt.append('%s:%d/%d moved%s' % (s, len(runs) - len(still), len(runs), (':STILL ' + ','.join(still[:4])) if still else ''))
+    return ok, txt
+
+
+def arc_each(P, share=ARC_SHARE, wb_lim=ARC_WB, state='swing', min_n=OCC_MIN_ARC_N):
+    """E1 arc per swing: every swing with >= min_n fast frames has arc_ok >= share and wb_max <= wb_lim."""
+    ok, txt, bad, n = True, [], [], 0
+    for r in occurrences(P, state):
+        ar = [P[i]['arc'] for i in r if P[i].get('arc') is not None]
+        if len(ar) < min_n:
+            continue
+        n += 1
+        wb = max([P[i]['wb'] for i in r if P[i]['wb'] is not None] or [0.0])
+        a = sum(1 for x in ar if x >= ARC_OK) / float(len(ar))
+        if a < share or wb > wb_lim:
+            bad.append('%s@%d:arc_ok=%.2f,wb=%.0f' % (state, r[0], a, wb))
+    if not n:
+        return False, ['%s:NO_FULL_SWING' % state]
+    ok = not bad
+    return ok, ['%s:each %d/%d swings arc_ok>=%.2f,wb<=%.0f%s' % (state, n - len(bad), n, share, wb_lim, '' if ok else ':BAD')] + bad[:4]
+
+
+INL_EACH_SLACK = 5.0   # deg on the per-swing fb median: ~12 stroke frames per swing vs ~60 pooled; accepted f23/f28/e6-anim
+                       # swings spread 25-31 around pooled 27-29 (taste R2), rejected f14-e0/f13-sw0 swings 43-54
+
+
+def inline_each(F, P, slack=INL_EACH_SLACK, **kw):
+    """E1 inline per swing: inline_check on each swing's own frames (ready/block frames stay in as info); the median limit
+    gets `slack` deg for the smaller per-swing sample (the max / screen / wrist-share limits stay)."""
+    kw = dict(kw); kw['fb_med'] = kw.get('fb_med', INL_FB_MED) + slack
+    S = inline_series(F, P)
+    res = []
+    for k, idx in enumerate(swings(F, P)):
+        keep = set(idx)
+        Sk = [s if s and (s['i'] in keep or P[s['i']]['state'] != 'swing') else None for s in S]
+        ok, txt = inline_check(inline_table(Sk), **kw)
+        res.append((ok, k, idx[0], txt))
+    if not res:
+        return inline_check(inline_table(S), **kw)
+    bad = [r for r in res if not r[0]]
+    w = bad[0] if bad else res[0]
+    return not bad, ['swings %d/%d inline%s' % (len(res) - len(bad), len(res), '' if not bad else ':BAD worst=swing%d@%d' % (w[1], w[2]))] + w[3]
