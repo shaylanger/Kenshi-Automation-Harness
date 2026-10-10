@@ -1078,3 +1078,76 @@ def guard_press_verdicts(S, elev_min=GUARD_ELEV, settle=GUARD_SETTLE, min_n=3):
         es = sorted(x[1] for x in q); med = es[len(es) // 2]
         out.append(dict(k=k, frame=p[0][0], elev=med, full=len(p) >= min_n, ok=dict(guard=med >= elev_min)))
     return out
+
+
+# ---- check suite + lab/game agreement (the lab must predict the game: every check runs on the game rec and on its replay
+# through the build's own solver; a pass/fail disagreement is a lab bug -> Misses row) ----
+import re as _re
+
+
+def _nums(txt):
+    return [(k, float(v)) for k, v in _re.findall(r'([A-Za-z_]+)=(-?\d+(?:\.\d+)?)', txt)]
+
+
+def check_suite(rec, overhead=(2,)):
+    """[(check, ok, text)] for every check that applies to the recording; swing checks per scripted stroke (E6 recs)."""
+    global STROKE_ONLY
+    F = rec.frames
+    strokes = sorted({f.get('stroke') for f in F if f.get('stroke') is not None and f.get('stroke') >= 0 and f['swing']})
+    out = []
+
+    def run(name, fn):
+        try:
+            r = fn()
+            out.append((name, bool(r[0]), ' '.join(r[1])))
+        except Exception as e:   # a check that cannot run on this rec is not a result
+            out.append((name, None, 'n/a %s' % type(e).__name__))
+    saved = STROKE_ONLY
+    try:
+        STROKE_ONLY = None
+        P = frame_metrics(rec)
+        T = state_table(P)
+        req = ('aim', 'reload') if ('aim' in T or 'reload' in T) else ('block', 'swing') if ('block' in T or 'swing' in T) else ()
+        if req:
+            run('moves', lambda: moves_ok(T, req))
+        if 'ready' in T and F[0]['cls'] == 0:
+            run('branch', lambda: ready_branch(ready_runs(F, P)))
+        if 'ready' in T and any(f['cls'] == 1 for f in F):
+            lab = label_states(F)
+            run('stock', lambda: stock_ok(stock_table(F, lab), pose_dirs(F, lab)))
+        G = guard_series(F, P)
+        if G:
+            run('guard', lambda: guard_check(G))
+        for s in (strokes or [None]):
+            STROKE_ONLY = s
+            P = frame_metrics(rec)
+            T = state_table(P)
+            tag = '' if s is None else '[s%d]' % s
+            if 'swing' not in T:
+                continue
+            run('arc' + tag, lambda: arc_gate(T, {'swing': ARC_SHARE}))
+            run('churn' + tag, lambda: churn_check(churn_series(F, P))[:2])
+            run('inline' + tag, lambda: inline_check(inline_table(inline_series(F, P))))
+            run('blade' + tag, lambda: blade_check(F, P))
+            run('stroke' + tag, lambda: stroke_check(F, P, overhead))
+            if any(f.get('hua') for f in F):
+                run('hinge' + tag, lambda: hinge_check(hinge_series(F, P), P)[:2])
+    finally:
+        STROKE_ONLY = saved
+    return out
+
+
+def agree_rows(game, replay):
+    """[(check, game ok, replay ok, agree, deltas)] for the checks both runs could judge."""
+    G = {c: (ok, t) for c, ok, t in check_suite(game)}
+    R = {c: (ok, t) for c, ok, t in check_suite(replay)}
+    rows = []
+    for c in G:
+        if c not in R or G[c][0] is None or R[c][0] is None:
+            continue
+        gn, rn = _nums(G[c][1]), _nums(R[c][1])
+        if [k for k, _ in gn] != [k for k, _ in rn]:   # same text shape: pair values by position (keys repeat per phase)
+            rd = dict(rn); rn = [(k, rd[k]) for k, _ in gn if k in rd]
+        d = ['%s %g/%g' % (k, g, r) for (k, g), (_, r) in zip(gn, rn) if abs(g - r) > 1e-9][:3]
+        rows.append((c, G[c][0], R[c][0], G[c][0] == R[c][0], ' '.join(d)))
+    return rows

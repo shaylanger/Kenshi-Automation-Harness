@@ -80,6 +80,13 @@ KenshiFP adapter: sampler `components/KenshiFP/animlab/take-sample.sh` (source i
 above the horizontal over each press's settled 70% must be >= -60 deg (`--elev`; a hanging guard, blade straight down with
 the hilt at the face, is ~-80..-90); any hanging press fails; hilt-head distance info. `guard <survey>.tsv` judges a
 per-press survey table (`blade_elev_deg` column, `tech=` in `evidence`) per row with a per-technique median.
+**Lab agreement** (`animlab.py agree <manifest> [--status STATUS.md]`): the lab must predict the game. Manifest lines
+`<game rec> <adapter of the rec's build> [adapter args]` (rec relative to the manifest); every rec is replayed and every
+check that applies (metrics.check_suite: moves, branch, stock, guard, and per scripted stroke arc/churn/inline/blade/stroke/
+hinge, plus the per-frame `gate`; zoomed-out recs without viewmodel frames get no gate row) runs on the game rec and on the
+replay; a pass/fail difference is a disagreement = a lab bug with an open Misses row. `--status` rewrites the "Lab
+agreement" section (summary + disagreements) and writes the full table to `<manifest>-table.md`. Corpus manifest:
+`C:\KenshiTestRuns\corpusgreegree.list`.
 **Native variant pools** (`animlab.py pool`): the game picks a native variant per occurrence (attack variant per swing,
 free-block technique per press), so a check on one recording cannot predict a take. `pool @list --adapter A --stroke N
 [--overhead 2] [--checks arc,blade,stroke]` replays every recording of the list with the stroke forced (`--stroke-args`,

@@ -61,6 +61,22 @@ class T(unittest.TestCase):
         self.assertIsNone(R.frames[2]['nat'])
         self.assertAlmostEqual(f['mp'][0], 2.606, places=3)
 
+    def test_agree_rows(self):
+        # lab agreement: a rec judged against itself agrees on every check; a block press that hangs only in the
+        # "game" rec is a guard disagreement (f059 z25: game -75, replay re-solved +44)
+        lines = [rec_line(i, mp=smooth(i)) for i in range(40)]
+        lines += [rec_line(i, mp=smooth(i), st='blocking', ti=3) for i in range(40, 60)] + [rec_line(i, mp=smooth(i)) for i in range(60, 80)]
+        write_rec(self.p('g.txt'), lines)
+        R = recfmt.parse(self.p('g.txt'))
+        rows = M.agree_rows(R, R)
+        self.assertTrue(rows and all(r[3] for r in rows), rows)
+        self.assertIn('guard', [r[0] for r in rows])
+        H = recfmt.parse(self.p('g.txt'))
+        for f in H.frames[40:61]:
+            f['mf'] = (0.0, -1.0, 0.05)
+        g = {r[0]: r for r in M.agree_rows(H, R)}
+        self.assertFalse(g['guard'][1]); self.assertTrue(g['guard'][2]); self.assertFalse(g['guard'][3])
+
     def test_states_native_and_settle(self):
         lines = [rec_line(i, mp=smooth(i)) for i in range(10)]
         lines += [rec_line(i, mp=smooth(i), swing=1, st='swinging') for i in range(10, 20)]

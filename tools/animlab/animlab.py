@@ -345,6 +345,82 @@ def cmd_pool(a):
     return 0 if ok else 1
 
 
+def cmd_agree(a):
+    """Lab vs game agreement: every game rec of the manifest (lines `<rec> <adapter> [adapter args]`, rec path relative to
+    the manifest, adapter = the solver of the rec's build) is replayed and every check of metrics.check_suite runs on both;
+    per-frame faithfulness = the `gate` row. Prints the table; --status writes the summary into STATUS.md."""
+    base = os.path.dirname(os.path.abspath(a.manifest))
+    jobs = []
+    for line in open(a.manifest):
+        if not line.strip() or line.startswith('#'):
+            continue
+        t = shlex.split(line)
+        rec = t[0] if os.path.isabs(t[0]) else os.path.join(base, t[0])
+        jobs.append((rec, t[1], t[2:]))
+    keep = a.keep or tempfile.mkdtemp(prefix='animlab-agree-')
+    os.makedirs(keep, exist_ok=True)
+
+    def one(j):
+        rec, ad, args = j
+        name = os.path.splitext(os.path.basename(rec))[0]
+        if not os.path.exists(rec) or not os.path.exists(shlex.split(ad)[0]):
+            return name, None, 'missing %s' % (rec if not os.path.exists(rec) else ad)
+        out = os.path.join(keep, name + '.replay.txt')
+        try:
+            run_adapter(ad, rec, out, args)
+        except RuntimeError as e:
+            return name, None, 'adapter failed: %s' % str(e).splitlines()[0][:120]
+        return name, (rec, out), os.path.basename(shlex.split(ad)[0])
+    with ThreadPoolExecutor(max_workers=a.j) as ex:   # replays in parallel, checks below in this thread (metrics.STROKE_ONLY)
+        res = list(ex.map(one, jobs))
+    for k, (name, ro, info) in enumerate(res):
+        if ro is None:
+            continue
+        rec, out = ro
+        fails, n = compare(rec, out, quiet=True)
+        # gate = per-frame replay error; no viewmodel frames (zoomed out: native animation) = not comparable, no row
+        rows = [('gate', True, not fails, not fails, 'frames=%d %s' % (n, '; '.join(fails[:2])))] if n else []
+        res[k] = (name, rows + M.agree_rows(recfmt.parse(rec), recfmt.parse(out)), info)
+    tab, summ, dis = [], {}, []
+    for name, rows, info in res:
+        if rows is None:
+            tab.append([name, '-', '-', '-', '-', info])
+            continue
+        for c, g, r, ag, d in rows:
+            tab.append([name, c, 'PASS' if g else 'FAIL', 'PASS' if r else 'FAIL', 'yes' if ag else 'NO', d[:90]])
+            k = c.split('[')[0]
+            s = summ.setdefault(k, [0, 0])
+            s[0] += 1
+            s[1] += ag
+            if not ag:
+                dis.append('%s %s: game %s, replay %s (%s; adapter %s)' % (name, c, 'PASS' if g else 'FAIL', 'PASS' if r else 'FAIL', d, info))
+    print_table(tab, ('rec', 'check', 'game', 'replay', 'agree', 'game/replay values'))
+    line = ', '.join('%s %d/%d' % (k, v[1], v[0]) for k, v in sorted(summ.items()))
+    print('agree %s recs=%d checks: %s disagreements=%d' % ('PASS' if not dis else 'FAIL', len(res), line, len(dis)))
+    for x in dis:
+        print('  DISAGREE ' + x)
+    if a.status:
+        import datetime
+        md = ['<!-- agree:begin (written by `animlab.py agree --status`, do not edit by hand) -->',
+              '%s, manifest `%s`: %d recs; agreement per check (agree/compared): %s; disagreements %d (each one has an open Misses row):'
+              % (datetime.date.today().isoformat(), a.manifest, len(res), line, len(dis)), '']
+        full = os.path.splitext(os.path.abspath(a.manifest))[0] + '-table.md'
+        with open(full, 'w') as f:   # the full per-rec table next to the manifest (STATUS keeps summary + disagreements)
+            f.write('| rec | check | game | replay | agree | game/replay values |\n|---|---|---|---|---|---|\n')
+            f.write(''.join('| %s |\n' % ' | '.join(str(c).replace('|', '/') for c in r) for r in tab))
+        md += ['- %s' % x for x in dis] + ['', 'Full table: `%s`' % full, '<!-- agree:end -->']
+        txt = open(a.status).read()
+        blk = '\n'.join(md)
+        if '<!-- agree:begin' in txt:
+            i = txt.index('<!-- agree:begin')
+            j = txt.index('<!-- agree:end -->') + len('<!-- agree:end -->')
+            txt = txt[:i] + blk + txt[j:]
+        else:
+            txt = txt.rstrip('\n') + '\n\n## Lab agreement (lab replay vs game, per check)\n' + blk + '\n'
+        open(a.status, 'w').write(txt)
+    return 0 if not dis else 1
+
+
 def parse_variant(v, default_cmd):
     name, _, rest = v.partition(':')
     cmd = default_cmd
@@ -451,13 +527,15 @@ def main():
     p.add_argument('--checks', default='arc,blade,stroke'); p.add_argument('--take', type=int, default=M.POOL_TAKE)
     p.add_argument('--rate', type=float, default=M.POOL_RATE, help='min predicted take pass rate')
     p.add_argument('-j', type=int, default=os.cpu_count() or 4); p.add_argument('--keep'); p.add_argument('-v', dest='verbose', action='store_true')
+    p = sp.add_parser('agree'); p.add_argument('manifest', help='lines `<game rec> <adapter of its build> [adapter args]`')
+    p.add_argument('--status', help='STATUS.md to write the summary into'); p.add_argument('--keep'); p.add_argument('-j', type=int, default=os.cpu_count() or 4)
     ap.add_argument('--only-stroke', dest='only_stroke', type=int, help='E6: judge only swings of this scripted stroke (others -> swing_x)')
     a = ap.parse_args()
     if a.only_stroke is not None:
         M.STROKE_ONLY = a.only_stroke
     if not a.cmd:
         ap.print_help(); return 2
-    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool}[a.cmd](a) or 0
+    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool, 'agree': cmd_agree}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':
