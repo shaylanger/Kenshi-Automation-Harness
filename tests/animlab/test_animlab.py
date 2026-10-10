@@ -107,6 +107,24 @@ class T(unittest.TestCase):
         R = recfmt.parse(self.p('wn.txt'))
         self.assertEqual([M.is_native(r) for r in (R.frames[5], R.frames[70], R.frames[85])], [False, True, True])
 
+    def test_reload_upright_and_native_wrist(self):   # Shay 2026-10-10 xbow-reload: upright two-hand reload, not nose-down
+        import spec as S
+        lines = [rec_line(i, mp=smooth(i), cls=1, wb=10.0) for i in range(40)]
+        lines += [rec_line(i, mp=smooth(i), cls=1, ti=2, st='reloading', wb=40.0 if i > 40 else 10.0) for i in range(40, 80)]
+        lines += [rec_line(i, mp=smooth(i), cls=1, wb=10.0) for i in range(80, 100)]
+        write_rec(self.p('rl.txt'), lines)
+        F = recfmt.parse(self.p('rl.txt')).frames; lab = M.label_states(F)
+        ok, txt = M.reload_check(F, lab)
+        self.assertTrue(ok, txt)                      # bow up (mu y 1), nose level
+        for i in range(40, 80):                       # bow on its side, nose down 30 deg
+            F[i]['mu'] = (1.0, 0.1, 0.0); F[i]['mf'] = (0.0, -0.5, 0.866)
+        ok, txt = M.reload_check(F, lab)
+        self.assertFalse(ok, txt); self.assertIn('reload@40', ' '.join(txt))
+        self.assertTrue(S.wrist(self.p('rl.txt'))[0])   # native reload (rlnat 1 default): wrist-exempt
+        write_rec(self.p('rl0.txt'), lines, meta=('set -1 rlnat 0',))
+        ok, txt = S.wrist(self.p('rl0.txt'))           # scripted reload (rlnat 0): solver-posed, hold limit 30
+        self.assertFalse(ok, txt); self.assertIn('reload:wb_max=40.0', txt)
+
     def test_jitter_metric(self):
         write_rec(self.p('j0.txt'), [rec_line(i, mp=smooth(i)) for i in range(60)])
         noisy = [rec_line(i, mp=(2.6 + 0.002 * i + (0.01 if i % 2 else -0.01), -1.5, 4.4)) for i in range(60)]

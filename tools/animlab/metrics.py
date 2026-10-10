@@ -33,6 +33,25 @@ NATIVE_ZF = 0.99   # zoom fade below this = the body plays the native animation 
 NATIVE_STATES = ('native', 'off', 'draw', 'lower')
 
 
+def rec_setting(meta, key, default=None):
+    """last value of a `# set <frame> <key> <value>` comment line (KenshiFP / replay --set) for key, else default."""
+    v = default
+    for m in meta or ():
+        t = m.split()
+        if len(t) >= 4 and t[0] == 'set' and t[2] == key:
+            try:
+                v = float(t[3])
+            except ValueError:
+                pass
+    return v
+
+
+def native_reload(meta):
+    """crossbow reload plays the native two-hand reload (KenshiFP g_vm_rlnat, default 1; Shay accepted it 2026-10-10,
+    rejected the scripted rlnat 0 reload): unless the recording sets rlnat 0, its crossbow reload frames are native."""
+    return rec_setting(meta, 'rlnat', 1.0) != 0
+
+
 def is_native(r):
     """record r plays the native animation: viewmodel off / not fully weighted, or faded by the zoom."""
     return (not r['on']) or r['w'] < 0.99 or r.get('zf', 1.0) < NATIVE_ZF
@@ -1213,6 +1232,39 @@ def moves_each(P, required, min_n=3):
         ok = ok and not still
         txt.append('%s:%d/%d moved%s' % (s, len(runs) - len(still), len(runs), (':STILL ' + ','.join(still[:4])) if still else ''))
     return ok, txt
+
+
+# ---- crossbow reload posture (Shay 2026-10-10, spec video xbow-reload.mp4: the two-hand upright reload, rlnat 1,
+# ACCEPTED; the old scripted reload, bow tipped on its side with the nose down, rlnat 0, REJECTED). CLASS: weapon
+# orientation in a state; judged on EVERY reload (each run of reload frames), not the take median.
+RELOAD_UP_MIN, RELOAD_ELEV_MIN, RELOAD_MIN_N = 0.5, -10.0, 10   # median bow up.y (roll < 60 deg), median nose elevation deg
+
+
+def reload_check(F, lab, up_min=RELOAD_UP_MIN, elev_min=RELOAD_ELEV_MIN, min_n=RELOAD_MIN_N):
+    """(ok, parts): every crossbow reload (run of >= min_n reload frames) keeps the bow upright (median measured edge-up
+    y >= up_min) and the nose not down (median elevation of the measured forward >= elev_min deg). Calibrated on the
+    spec-video settings replayed through the current solver: rlnat 1 up .89 elev +22 (accept), rlnat 0 up .18 elev -21
+    (reject)."""
+    import math
+    runs, cur = [], []
+    for i, s in enumerate(lab):
+        if s == 'reload' and F[i]['cls'] == 1:
+            cur.append(i)
+        elif cur:
+            runs.append(cur); cur = []
+    if cur:
+        runs.append(cur)
+    runs = [r for r in runs if len(r) >= min_n]
+    if not runs:
+        return None, ['reload n/a (no crossbow reload)']
+    ok, parts = True, []
+    for r in runs:
+        up = sorted(F[i]['mu'][1] for i in r)[len(r) // 2]
+        el = sorted(math.degrees(math.asin(max(-1.0, min(1.0, F[i]['mf'][1])))) for i in r)[len(r) // 2]
+        b = up < up_min or el < elev_min
+        ok = ok and not b
+        parts.append('reload@%d:up=%.2f/%.2f,elev=%.0f/%.0f%s' % (r[0], up, up_min, el, elev_min, ':BAD' if b else ''))
+    return ok, ['%d/%d reloads upright' % (sum(1 for x in parts if ':BAD' not in x), len(runs))] + parts
 
 
 def arc_each(P, share=ARC_SHARE, wb_lim=ARC_WB, state='swing', min_n=OCC_MIN_ARC_N):

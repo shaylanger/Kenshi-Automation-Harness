@@ -4,6 +4,7 @@ report the in-game metrics per pose state, compare variants side by side. Docs: 
 
   animlab.py metrics <rec> [--require S,..] [--arc S:share]  per-state metrics + moves (C1) / arc (E1) gates
   animlab.py bolt    <rec> [--dev D --step S]                 C3: loaded bolt rigid on the crossbow (<rec>.bolt sidecar)
+  animlab.py reload  <rec> [--up .5 --elev -10]               crossbow reload upright, nose not down (every reload)
   animlab.py compare <real> <sim> [--skip N]                 per-frame replay error + metrics side by side
   animlab.py replay  <rec> --adapter CMD [--set k=v]... [-o out.txt] [--skip N]
   animlab.py sweep   <rec> --adapter CMD [--variant 'name[@CMD]: adapter args']... [--metrics a,b] [-j N] [--keep DIR]
@@ -270,6 +271,14 @@ def cmd_stock(a):
     print('stock %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
 
 
+def cmd_reload(a):
+    """crossbow reload posture: every reload keeps the bow upright, nose not down (Shay 2026-10-10)."""
+    F = recfmt.parse(a.rec).frames
+    ok, txt = M.reload_check(F, M.label_states(F), a.up, a.elev)
+    print('reload %s %s' % ('n/a' if ok is None else 'PASS' if ok else 'FAIL', ' '.join(txt)))
+    return 0 if ok is not False else 1
+
+
 def cmd_compare(a):
     fails, n = compare(a.real, a.sim, a.skip)
     print('GATE %s frames=%d %s' % ('PASS' if not fails else 'FAIL', n, '; '.join(fails[:8])))
@@ -505,6 +514,8 @@ def main():
     p = sp.add_parser('stock'); p.add_argument('rec'); p.add_argument('--ref', help='known-good recording for the orientation check')
     p.add_argument('--max', type=float, default=M.STOCK_MAX); p.add_argument('--ori', type=float, default=M.ORI_MAX)
     p.add_argument('--h', type=float, default=M.STOCK_H, help='stock top above the bolt axis (dm)')
+    p = sp.add_parser('reload'); p.add_argument('rec'); p.add_argument('--up', type=float, default=M.RELOAD_UP_MIN)
+    p.add_argument('--elev', type=float, default=M.RELOAD_ELEV_MIN)
     p = sp.add_parser('compare'); p.add_argument('real'); p.add_argument('sim'); p.add_argument('--skip', type=int, default=0)
     for name in ('replay', 'sweep', 'gate'):
         p = sp.add_parser(name)
@@ -537,7 +548,7 @@ def main():
         M.STROKE_ONLY = a.only_stroke
     if not a.cmd:
         ap.print_help(); return 2
-    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool, 'agree': cmd_agree}[a.cmd](a) or 0
+    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'reload': cmd_reload, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool, 'agree': cmd_agree}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':

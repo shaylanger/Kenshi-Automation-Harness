@@ -8,9 +8,9 @@
   spec.py restedge <rec>                                     sword edge never toward the camera in the rest states
   spec.py stilljit <rec> [--states aim --max 1.5]            still-state weapon jitter (px at 1600x900)
   spec.py wrist    <rec> [--hold 30 --swing 50]              wrist bend limit per state (holds vs swings)
+                                                             on solver-posed frames only (native frames + native reload exempt)
   spec.py blade    <rec> [--only-stroke N --snap 32 --run .067]  R17 blade, native reference (snap at the wind-up top,
                                                              longest end-on stretch in the follow-through)
-                                                            on solver-posed frames only (native frames exempt, Shay 2026-10-10)
 
 Rules file (TSV, '#' comments): id, class (comma list: sword,crossbow,unarmed,take,all), rule, source, owner
 (shay | coord | native | inferred), checks (comma list of check ids; '-' none), status (covered | partial | missing |
@@ -162,9 +162,13 @@ def stilljit(rec, states=('aim',), lim=STILL_JIT, min_n=20):
 
 def wrist(rec, hold=WB_HOLD, swing=WB_SWING):
     M, by = _states(rec)
+    import recfmt
+    natrl = M.native_reload(recfmt.parse(rec).meta)
     ok, parts = True, []
     for s, ps in by.items():
         if s in M.NATIVE_STATES or s == 'settle':   # Shay 2026-10-10: native-animation frames are exempt from the limit
+            continue
+        if s == 'reload' and natrl:   # the native two-hand crossbow reload (rlnat 1) is a native animation too
             continue
         wb = [p['wb'] for p in ps if p['wb'] is not None]
         if not wb:
@@ -262,7 +266,8 @@ W, H = 1600, 900
 U = dict(near=3.0, eye_min=2.5, above_max=0.5, center=(0.30, 0.35), center_y=(-0.35, 0.05), guard_y=0.0, wb_max=30.0,
          ret=0.5, move_dm=1.0, strike_min=1.5, rev=450.0, grip_px=250.0, win=0.4, wshare=0.45, twist=40.0, twist_dt=1 / 30.0,
          twist_wb=30.0, windup_rise=0.1, strike_band=0.5,
-         xel_max=30.0, pcam_max=0.0, pup_max=0.2, pfwd_max=0.6, pcam_guard=0.0, cross_px=250.0, knuckle=1.2, contact_band=0.05)
+         xel_max=30.0, pcam_max=0.0, pup_max=0.2, pfwd_max=0.6, pcam_guard=0.0, cross_px=250.0, knuckle=1.2, contact_band=0.05,
+         offrun=0.05, offshare=0.08)
 # U19/U20 hand frame: KenshiFP prop convention for the weapon-class-0 target (visual.json prop_axes/prop_local_q/
 # prop_roll_deg/prop_mirror, as render.py Rig.pose): hand axes = Rp Rl^T in render's flipped space (x negated)
 PROP = dict(axes=(2, 3), q=(0.600, 0.267, 0.724, -0.211), roll=60.0,
@@ -605,6 +610,26 @@ def unarmed_checks(F, strikers=None, c=U, name=''):
             cr.append('@u%.2f(%.0fpx)' % (u[k], dmin))
     res.append(('U21', 'PASS' if not cr else 'FAIL', 'arms cross on screen (forearm+fist polylines intersect, or a fist within %.0f px of the other arm): %d frames%s' % (
         c['cross_px'], len(cr), ' ' + ','.join(cr[:6]) if cr else '')))
+    # U22 (coordinator review 2026-10-10: the R fist sat below the screen in its wind-up chamber for u.07-.41, ma 2strike;
+    # memory 'state must visibly play'): every hand's fist point stays on screen through the technique; the longest
+    # off-screen stretch <= offrun and the total off-screen share <= offshare of the clip (class: hand visibility per state)
+    vis = []
+    for s in sides:
+        runs, cur = [], None
+        for k, f in enumerate(F):
+            off = not _onscr(f[s]['pp'], c['near'], 1.0)
+            if off and cur is None:
+                cur = u[k]
+            if not off and cur is not None:
+                runs.append((cur, u[k])); cur = None
+        if cur is not None:
+            runs.append((cur, 1.0))
+        lr = max([b - a for a, b in runs] or [0.0]); sh = sum(b - a for a, b in runs)
+        vis.append((s, lr, sh, runs))
+    okv = all(lr <= c['offrun'] and sh <= c['offshare'] for s, lr, sh, r in vis)
+    res.append(('U22', 'PASS' if okv else 'FAIL', 'fists on screen: ' + ' '.join('%s longest off %.2f share %.2f%s' % (
+        s, lr, sh, (' [' + ','.join('u%.2f-%.2f' % r for r in runs[:4]) + ']') if runs else '') for s, lr, sh, runs in vis) +
+        ' (<= %.2f / %.2f of the clip)' % (c['offrun'], c['offshare'])))
     ik = sum(f['ikfail'] for f in F)
     res.append(('U15', 'PASS' if not ik else 'FAIL', 'solver: ikfail frames %d' % ik))
     return res
