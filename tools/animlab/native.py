@@ -1011,8 +1011,18 @@ FIST_DEFAULTS = dict(guard={'R': [1.9, -2.3, 4.2], 'L': [-1.9, -2.3, 4.2]},     
                      res_scale=0.35, res_max=0.5,   # native off-line wrist motion kept (scale, clamp dm), turned onto the FP strike line
                      off_scale=0.4, off_max=0.6,   # non-striking hand: its native motion scaled + clamped (dm) about its guard
                      end_blend=0.15,   # share of the clip over which the path eases back onto the guard
-                     palm_guard={'R': [-1.0, -0.4, 0.0], 'L': [1.0, -0.4, 0.0]},   # fist roll: palm normal at the guard (palms facing in)
-                     palm_strike={'R': [-0.15, -1.0, 0.0], 'L': [0.15, -1.0, 0.0]},  # ... at full extension (palm down, corkscrew)
+                     # fist roll: palm normal (-hand Z) at the guard / at full extension. Native reference: the unarmed
+                     # stances hold the palms down (badpunch, ma 2strike, shoteiL start -y .83-.97) and the one straight
+                     # punch (ma 2punchie) lands palm down (-y .78-.97). Palm-in guards showed the palm + open fingers to
+                     # the FP camera (a claw, review 2026-10-10), so both stay palm down, a little turned in.
+                     palm_guard={'R': [-0.4, -0.9, 0.0], 'L': [0.4, -0.9, 0.0]},
+                     palm_strike={'R': [-0.15, -1.0, 0.0], 'L': [0.15, -1.0, 0.0]},
+                     # palmar flex (deg, hand X turned toward the palm about the hand's thumb axis), guard / strike: the
+                     # FP shoulders sit below and behind the eye, so a forearm reaching the view centre rises ~20 deg
+                     # above the line of sight; a dead-straight hand then stands up with the (fixed, half-open) fingers
+                     # curling toward the camera = a palm-up reach. A small flex puts the knuckles in front (fist read).
+                     flex_guard=18.0, flex_strike=22.0,
+                     strikers={'badpunch': ['L']},   # per technique striking hands (native: badpunch strikes with L only)
                      strike_min=1.5, stab='pelvis', guard_anim='ma idle1', guard_t=0.0, near=3.0,
                      nkeys=[4, 12],
                      sets=['wroll=0', 'edgeclamp=0', 'wfix=0', 'hroll=0', 'e1inl=0', 'hinge=0', 'elb=0'],
@@ -1031,7 +1041,7 @@ def _clampn(v, m):
     return v * (m / n) if n > m else v
 
 
-def fist_path(tr, ref, fc, s):
+def fist_path(tr, ref, fc, s, force=None):
     """FP wrist path of hand s from the native clip (profile model). A striking hand (wrist travels >= strike_min dm
     forward of its start) keeps the native TIMING: its extension along the native strike direction e(t) (1 = the
     furthest point) drives guard -> strike point; e < 0 (pulled back before the punch) drives guard -> chamber (down and
@@ -1044,7 +1054,7 @@ def fist_path(tr, ref, fc, s):
     C = np.asarray(fc['chamber'][s], float)
     k = int(np.argmax(W[:, 2]))
     D = W[k]
-    if D[2] < fc['strike_min']:
+    if (D[2] < fc['strike_min'] if force is None else not force):
         P = np.array([G + _clampn(w * fc['off_scale'], fc['off_max']) for w in W])
         striker, info = False, dict(peak=float(D[2]))
         E = np.zeros(len(W))
@@ -1082,10 +1092,16 @@ def fist_hand(r, s, fa_to, fc, e):
     hz = rot_between(fa_n, fa_to) @ rot_between(r['hx' + s], fa_n) @ r['hz' + s]
     pn = nz((1 - e) * np.asarray(fc['palm_guard'][s], float) + e * np.asarray(fc['palm_strike'][s], float))
     a = nz(-hz - hx * float(hx @ -hz)); b = pn - hx * float(hx @ pn)
-    if np.linalg.norm(b) < 1e-3:
-        return f, u, hx
-    Q = rot_between(a, nz(b))
-    return Q @ f, Q @ u, Q @ hx
+    if np.linalg.norm(b) >= 1e-3:
+        Q = rot_between(a, nz(b))
+        f, u, hx, a = Q @ f, Q @ u, Q @ hx, Q @ a
+    fl = math.radians((1 - e) * float(fc.get('flex_guard', 0.0)) + e * float(fc.get('flex_strike', 0.0)))
+    if abs(fl) > 1e-6:   # palmar flex: hand X toward the palm normal a, about the thumb axis hx x a
+        k = nz(np.cross(hx, a))
+        Kx = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+        Q = np.eye(3) + math.sin(fl) * Kx + (1 - math.cos(fl)) * Kx @ Kx
+        f, u, hx = Q @ f, Q @ u, Q @ hx
+    return f, u, hx
 
 
 def straight_hand(r, s, fa_to):
@@ -1310,8 +1326,9 @@ def cmd_fists(a):
         ref = {s: tr[0]['wr' + s] for s in 'LR'}
         dur = ts[-1] - ts[0]
         paths, strikers, info = {}, [], {}
+        sov = (fc.get('strikers') or {}).get(name)
         for s in 'RL':
-            paths[s], st, info[s], ew = fist_path(tr, ref, fc, s)
+            paths[s], st, info[s], ew = fist_path(tr, ref, fc, s, None if sov is None else s in sov)
             info[s]['ew'] = ew
             if st:
                 strikers.append(s)

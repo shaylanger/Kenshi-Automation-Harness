@@ -261,7 +261,12 @@ W, H = 1600, 900
 #   U11 twist 40: native fist roll per 33 ms on straight-wrist frames (wb <= 30) up to 37 (ma 2strike L)
 U = dict(near=3.0, eye_min=2.5, above_max=0.5, center=(0.30, 0.35), center_y=(-0.35, 0.05), guard_y=0.0, wb_max=30.0,
          ret=0.5, move_dm=1.0, strike_min=1.5, rev=450.0, grip_px=250.0, win=0.4, wshare=0.45, twist=40.0, twist_dt=1 / 30.0,
-         twist_wb=30.0, windup_rise=0.1, strike_band=0.5)
+         twist_wb=30.0, windup_rise=0.1, strike_band=0.5,
+         xel_max=30.0, pcam_max=0.0, pup_max=0.2, pfwd_max=0.6, pcam_guard=0.0, cross_px=250.0, knuckle=1.2, contact_band=0.05)
+# U19/U20 hand frame: KenshiFP prop convention for the weapon-class-0 target (visual.json prop_axes/prop_local_q/
+# prop_roll_deg/prop_mirror, as render.py Rig.pose): hand axes = Rp Rl^T in render's flipped space (x negated)
+PROP = dict(axes=(2, 3), q=(0.600, 0.267, 0.724, -0.211), roll=60.0,
+            mirror={'L': dict(q_sign=(1, -1, -1, 1), roll_sign=-1, roll_add=180)})
 
 
 def read_pose(path):
@@ -316,6 +321,130 @@ def _vis_forearm(el, wr, near):
         if _onscr(c, near):
             return _px(c)
     return None
+
+
+def set_prop(visual_json):
+    """load the class-0 prop convention from a visual.json (KenshiFP: components/KenshiFP/animlab/visual.json)."""
+    with open(visual_json) as fh:
+        v = json.load(fh)
+    PROP.update(axes=tuple(v['prop_axes'][0]), q=tuple(v['prop_local_q']['0']),
+                roll=float((v.get('prop_roll_deg') or {}).get('0', 0.0)), mirror=v.get('prop_mirror') or {})
+
+
+def _qmat(q):
+    w, x, y, z = q
+    return ((1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)),
+            (2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)),
+            (2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)))
+
+
+def _mm(A, B):
+    return tuple(tuple(sum(A[i][k] * B[k][j] for k in range(3)) for j in range(3)) for i in range(3))
+
+
+def _tr(A):
+    return tuple(tuple(A[j][i] for j in range(3)) for i in range(3))
+
+
+def _axis(code):
+    v = [0.0, 0.0, 0.0]; v[abs(code) - 1] = 1.0 if code > 0 else -1.0
+    return tuple(v)
+
+
+def _cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _nz(a):
+    n = _ln(a)
+    return _mul(a, 1.0 / n) if n > 1e-9 else a
+
+
+def hand_axes(A, side):
+    """(hand X, hand Z) in camera numbers from one side's prop target (pf, pu), as the game/render poses the hand bone."""
+    fl = lambda v: (-v[0], v[1], v[2])
+    Fv = _nz(fl(A['pf'])); pu = fl(A['pu'])
+    Uv = _nz(_sub(pu, _mul(Fv, _dot(pu, Fv)))); Tv = _cross(Fv, Uv)
+    fa, ua = _axis(PROP['axes'][0]), _axis(PROP['axes'][1]); th = _cross(fa, ua)
+    Rp = _mm(_tr((Fv, Uv, Tv)), _tr(_tr((fa, ua, th))))
+    q, roll = list(PROP['q']), PROP['roll']
+    mq = (PROP.get('mirror') or {}).get(side)
+    if mq:
+        q = [a * b for a, b in zip(q, mq.get('q_sign', (1, 1, 1, 1)))]
+        roll = roll * float(mq.get('roll_sign', 1)) + float(mq.get('roll_add', 0))
+    Rl = _qmat(q)
+    if roll:
+        k = fa; r = math.radians(roll); sn, cs = math.sin(r), 1 - math.cos(r)
+        K = ((0, -k[2], k[1]), (k[2], 0, -k[0]), (-k[1], k[0], 0)); KK = _mm(K, K)
+        Rl = _mm(Rl, tuple(tuple((1.0 if i == j else 0.0) + sn * K[i][j] + cs * KK[i][j] for j in range(3)) for i in range(3)))
+    Rh = _mm(Rp, _tr(Rl))
+    col = lambda j: fl((Rh[0][j], Rh[1][j], Rh[2][j]))
+    return col(0), col(2)
+
+
+
+def prop_from_hand(hx, palm, side):
+    """inverse of hand_axes: the prop target (pf, pu) that poses the hand with X = hx and the palm (-Z) toward palm."""
+    fl = lambda v: (-v[0], v[1], v[2])
+    X = _nz(fl(hx)); Z = _mul(fl(palm), -1.0)
+    Z = _nz(_sub(Z, _mul(X, _dot(Z, X)))); Y = _cross(Z, X)
+    Rh = _tr((X, Y, Z))
+    fa, ua = _axis(PROP['axes'][0]), _axis(PROP['axes'][1])
+    q, roll = list(PROP['q']), PROP['roll']
+    mq = (PROP.get('mirror') or {}).get(side)
+    if mq:
+        q = [a * b for a, b in zip(q, mq.get('q_sign', (1, 1, 1, 1)))]
+        roll = roll * float(mq.get('roll_sign', 1)) + float(mq.get('roll_add', 0))
+    Rl = _qmat(q)
+    if roll:
+        k = fa; r = math.radians(roll); sn, cs = math.sin(r), 1 - math.cos(r)
+        K = ((0, -k[2], k[1]), (k[2], 0, -k[0]), (-k[1], k[0], 0)); KK = _mm(K, K)
+        Rl = _mm(Rl, tuple(tuple((1.0 if i == j else 0.0) + sn * K[i][j] + cs * KK[i][j] for j in range(3)) for i in range(3)))
+    Rp = _mm(Rh, Rl)
+    ap = lambda M, v: tuple(sum(M[i][j] * v[j] for j in range(3)) for i in range(3))
+    return fl(ap(Rp, fa)), fl(ap(Rp, ua))
+
+def hand_metrics(A, side):
+    """xel: hand X elevation above the eye->wrist sight line (deg; high = the hand stands up and the fixed half-open
+    fingers curl toward the camera: a palm-up reach); pcam: palm normal (-hand Z) toward the camera (> 0 = palm + open
+    fingers shown = claw); pup: palm normal up; pfwd: palm normal along the sight line (palm-heel strike)."""
+    hx, hz = hand_axes(A, side)
+    ray = _nz(A['wr'])
+    pn = _mul(hz, -1.0)
+    xel = math.degrees(math.asin(max(-1.0, min(1.0, hx[1])))) - math.degrees(math.asin(max(-1.0, min(1.0, ray[1]))))
+    return dict(xel=xel, pcam=-_dot(pn, ray), pup=pn[1], pfwd=_dot(pn, ray), hx=hx, pn=pn)
+
+
+def arm_px(A, near, knuckle=1.2):
+    """screen polyline (px) of the visible forearm + hand: elbow->wrist sampled, then wrist->knuckles along hand X."""
+    pts = [_add(A['el'], _mul(_sub(A['wr'], A['el']), v / 10.0)) for v in range(11)] + [_add(A['wr'], _mul(_nz(A['hx']), knuckle))]
+    return [_px(p) for p in pts if p[2] > near and abs(p[0] / p[2]) < TX * 1.2 and abs(p[1] / p[2]) < TY * 1.2]
+
+
+def _seg_x(p, q, r, s):
+    d = (q[0] - p[0]) * (s[1] - r[1]) - (q[1] - p[1]) * (s[0] - r[0])
+    if abs(d) < 1e-9:
+        return False
+    t = ((r[0] - p[0]) * (s[1] - r[1]) - (r[1] - p[1]) * (s[0] - r[0])) / d
+    v = ((r[0] - p[0]) * (q[1] - p[1]) - (r[1] - p[1]) * (q[0] - p[0])) / d
+    return 0.0 <= t <= 1.0 and 0.0 <= v <= 1.0
+
+
+def _pt_seg(p, a, b):
+    ax, ay = b[0] - a[0], b[1] - a[1]; L = ax * ax + ay * ay
+    t = 0.0 if L < 1e-9 else max(0.0, min(1.0, ((p[0] - a[0]) * ax + (p[1] - a[1]) * ay) / L))
+    return math.hypot(p[0] - a[0] - t * ax, p[1] - a[1] - t * ay)
+
+
+def _poly_dist(pts, poly):
+    """min px distance from points to a polyline (1e9 when either is off screen)."""
+    if not pts or len(poly) < 2:
+        return 1e9
+    return min(_pt_seg(p, poly[j], poly[j + 1]) for p in pts for j in range(len(poly) - 1))
+
+
+def _poly_cross(a, b):
+    return any(_seg_x(a[i], a[i + 1], b[j], b[j + 1]) for i in range(len(a) - 1) for j in range(len(b) - 1))
 
 
 def unarmed_checks(F, strikers=None, c=U, name=''):
@@ -444,6 +573,38 @@ def unarmed_checks(F, strikers=None, c=U, name=''):
     if re.search(r'(?i)shotei|palm', name or ''):
         res.append(('U17', 'PASS' if all(v[0] <= c['wb_max'] for v in wb.values()) else 'FAIL',
                     'palm-heel as a straight-wrist punch: wb_max ' + ' '.join('%s %.1f@u%.2f' % (s, wb[s][0], wb[s][1]) for s in sides) + ' (<= %.0f)' % c['wb_max']))
+    # U18-U21 (review 2026-10-10: open claws, palm-up reach at contact, forearm crossing the other hand). Fist closure
+    # is out of reach: the game skeleton has no finger bones and the body mesh's poses are face morphs only, so the hand
+    # is the fixed half-open mesh in the game too; what FP controls is the hand frame, judged here (hand Z = palm side,
+    # from the prop target through the KenshiFP prop convention, visual.json).
+    res.append(('U18', 'INFO', 'fist closure: not controllable (no finger bones; mesh poses are face-only): hand frame judged by U19/U20'))
+    for s in strikers:
+        cd = [abs(F[k][s]['pp'][0] / max(F[k][s]['pp'][2], 1e-3)) + abs(F[k][s]['pp'][1] / max(F[k][s]['pp'][2], 1e-3)) for k in range(len(F))]
+        ks = [k for k in range(len(F)) if cd[k] <= min(cd) + c['contact_band']]   # contact = the fist at the view centre (U4)
+        worst = None
+        for k in ks:
+            m = hand_metrics(F[k][s], s)
+            bad = (m['xel'] - c['xel_max']) / 10.0 + 10 * (max(0.0, m['pcam'] - c['pcam_max']) + max(0.0, m['pup'] - c['pup_max'])
+                                                         + max(0.0, m['pfwd'] - c['pfwd_max']))
+            if worst is None or bad > worst[0]:
+                worst = (bad, k, m)
+        _, k, m = worst
+        ok = m['xel'] <= c['xel_max'] and m['pcam'] <= c['pcam_max'] and m['pup'] <= c['pup_max'] and m['pfwd'] <= c['pfwd_max']
+        res.append(('U19', 'PASS' if ok else 'FAIL', 'knuckles lead at contact %s (u%.2f-%.2f, worst @u%.2f): hand X over the sight line %+.0f deg (<= %.0f), '
+                    'palm to camera %+.2f (<= %.2f), palm up %+.2f (<= %.2f), palm forward %+.2f (<= %.2f)' % (
+                        s, u[ks[0]], u[ks[-1]], u[k], m['xel'], c['xel_max'], m['pcam'], c['pcam_max'], m['pup'], c['pup_max'], m['pfwd'], c['pfwd_max'])))
+    gk = [k for k in range(len(F)) if u[k] <= .02 or u[k] >= .98]
+    pg = max([(hand_metrics(F[k][s], s)['pcam'], '%s@u%.2f' % (s, u[k])) for k in gk for s in sides] or [(0.0, '-')])
+    res.append(('U20', 'PASS' if pg[0] <= c['pcam_guard'] else 'FAIL', 'guard palm hidden: palm to camera max %+.2f %s (<= %.2f; a palm shown to the camera = open claw)' % (
+        pg[0], pg[1], c['pcam_guard'])))
+    cr = []
+    for k, f in enumerate(F):
+        a, b = arm_px(f['L'], c['near'], c['knuckle']), arm_px(f['R'], c['near'], c['knuckle'])
+        dmin = min(_poly_dist(a[-3:], b), _poly_dist(b[-3:], a))
+        if _poly_cross(a, b) or dmin < c['cross_px']:
+            cr.append('@u%.2f(%.0fpx)' % (u[k], dmin))
+    res.append(('U21', 'PASS' if not cr else 'FAIL', 'arms cross on screen (forearm+fist polylines intersect, or a fist within %.0f px of the other arm): %d frames%s' % (
+        c['cross_px'], len(cr), ' ' + ','.join(cr[:6]) if cr else '')))
     ik = sum(f['ikfail'] for f in F)
     res.append(('U15', 'PASS' if not ik else 'FAIL', 'solver: ikfail frames %d' % ik))
     return res
@@ -494,6 +655,8 @@ def cmd_unarmed(a):
     if a.rules:
         for r in read_rules(a.rules):
             owners[r['id']] = r['owner']
+    if getattr(a, 'visual', None):
+        set_prop(a.visual)
     cands = find_cands(a.cand)
     if not cands:
         print('RESULT spec-unarmed FAIL no candidate pose.txt under %s' % ' '.join(a.cand))
@@ -571,7 +734,7 @@ def main():
     p = sp.add_parser('map'); p.add_argument('rules'); p.add_argument('--md', action='store_true')
     p = sp.add_parser('run'); p.add_argument('rules'); p.add_argument('rec', nargs='+'); p.add_argument('--checks', required=True)
     p.add_argument('--class', dest='cls', required=True); p.add_argument('--set', action='append'); p.add_argument('--cache')
-    p = sp.add_parser('unarmed'); p.add_argument('cand', nargs='+'); p.add_argument('--rules')
+    p = sp.add_parser('unarmed'); p.add_argument('cand', nargs='+'); p.add_argument('--rules'); p.add_argument('--visual', help='visual.json with the prop convention (default: KenshiFP numbers)')
     p = sp.add_parser('restedge'); p.add_argument('rec'); p.add_argument('--p05', type=float, default=REST_EDGE_P05)
     p = sp.add_parser('stilljit'); p.add_argument('rec'); p.add_argument('--states', default='aim'); p.add_argument('--max', type=float, default=STILL_JIT)
     p = sp.add_parser('wrist'); p.add_argument('rec'); p.add_argument('--hold', type=float, default=WB_HOLD); p.add_argument('--swing', type=float, default=WB_SWING)

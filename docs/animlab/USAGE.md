@@ -332,7 +332,10 @@ guard -> `chamber`, down/back, never toward the eye), native off-line motion kep
 non-striking hand moves at `off_scale` (clamp `off_max`) about its guard; clamps y <= `y_max` (eye level), z >= `z_min`;
 eases back onto the guard over the last `end_blend` -> hand frame (`fist_hand`): wrist STRAIGHT (hand X on the solved
 forearm; the solver's natural 2-bone IK elbow, `elb=0`, does not depend on the hand frame, so one align solve is exact),
-rolled so the palm (-hand Z: the mesh fingers curl that way) faces `palm_guard` blended to `palm_strike` by e ->
+rolled so the palm (-hand Z: the mesh fingers curl that way) faces `palm_guard` blended to `palm_strike` by e (both palm
+down, as the native stances / the native straight punch ma 2punchie), then flexed `flex_guard`/`flex_strike` deg (18/22)
+toward the palm so the knuckles lead (the FP shoulders sit below the eye: a dead-straight hand stands up and the fixed
+half-open fingers curl toward the camera = a palm-up reach, review 2026-10-10); `strikers` overrides the striking hands ->
 `nkeys` shared keys fitted until the keyed path is within 0.8 x `path_err_max` -> the keyed path solved for both arms (fp_vm
 sets `fists.sets`) -> checks: `guard_view` (both fists on screen at u <= .02 / >= .98), `strike_<side>` (the striking fist
 reaches the view centre |x/z| <= .30, |y/z| <= .35), `eye` (forearm/fist >= 2.5 dm from the eye, never above eye level
@@ -344,7 +347,10 @@ lines in checks.txt). Why the profile model: the native unarmed clips are whole-
 ma chudan / ma 2strike / shoteiL are palm-heel strikes with the wrist bent back ~100 deg on the native skeleton itself (hand X
 vs forearm, ma chudan R 102, shoteiL L 110; badpunch R <= 23), so mapping the native path/hand gave 80-110 deg folds and
 paths far off any FP punch. Shay 2026-10-10: palm techniques become straight-wrist punches; the game hand mesh has no finger
-bones (fixed half-open hand), accepted, no closed-fist requirement.
+bones (fixed half-open hand), accepted, no closed-fist requirement. `spec.py unarmed` judges the hand frame: U19 knuckles lead at contact (hand
+X <= 30 deg above the eye->wrist sight line, palm hidden from the camera, not up, not a palm heel), U20 guard palm
+hidden, U21 arms never cross on screen (polylines intersect or a fist within 250 px of the other arm); U18 = closure INFO
+(out of reach: no finger bones, the body mesh poses are face morphs). `--visual <visual.json>` loads the prop convention.
 Outputs per technique: checks.txt (`RESULT fist-<anim> PASS|FAIL ...`), keys.json, report.txt, check_<side>.rec.txt,
 sheet-z0.png (lab FP render, both arms, crosshair = screen centre) and sheet-z25.png (what the game shows zoomed out: the
 viewmodel fades out beyond zf1 = 8 dm, so the native third-person clip, camera 25 dm from the eye orbited 60 deg to the side),

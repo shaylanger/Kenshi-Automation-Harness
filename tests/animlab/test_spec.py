@@ -18,7 +18,7 @@ def lerp(a, b, k):
     return tuple(a[i] + (b[i] - a[i]) * k for i in range(3))
 
 
-def arm(sh, wr, hx_bend=0.0, up=(0, 1, 0)):
+def arm(sh, wr, hx_bend=0.0, up=(0, 1, 0), side=None, palm=(0, -1, 0)):
     """straight-ish arm: elbow midway and dropped 1.5 dm, fist 0.8 dm past the wrist along the forearm; hand X along the
     forearm turned by hx_bend deg (wrist bend) about the up axis."""
     el = (sh[0] + (wr[0] - sh[0]) * .5, sh[1] + (wr[1] - sh[1]) * .5 - 1.5, sh[2] + (wr[2] - sh[2]) * .5)
@@ -26,6 +26,12 @@ def arm(sh, wr, hx_bend=0.0, up=(0, 1, 0)):
     b = math.radians(hx_bend)
     hx = (fa[0] * math.cos(b) + fa[2] * math.sin(b), fa[1], -fa[0] * math.sin(b) + fa[2] * math.cos(b))
     pp = tuple(wr[i] + fa[i] * 0.8 for i in range(3))
+    if side:   # prop target that poses a palm-down fist (KenshiFP prop convention, as the game), knuckles leading:
+        # hand X flexed 22 deg toward the palm (the fixed candidates' flex_strike)
+        pn = S._nz(S._sub(palm, S._mul(hx, S._dot(palm, hx))))
+        f = math.radians(22.0)
+        hx = S._nz(S._add(S._mul(hx, math.cos(f)), S._mul(pn, math.sin(f))))
+        fa, up = S.prop_from_hand(hx, palm, side)
     return [sh, el, wr, hx, pp, fa, up]
 
 
@@ -33,8 +39,8 @@ def pose_file(frames):
     """frames: list of (t, Lwr, Rwr, opts) -> metricslab pose.txt text."""
     out = ['# synthetic pose']
     for i, (t, lw, rw, o) in enumerate(frames):
-        L = arm((-2.0, -2.0, -0.5), lw, o.get('bL', 0.0), o.get('upL', (0, 1, 0)))
-        R = arm((2.0, -2.0, -0.5), rw, o.get('bR', 0.0), o.get('upR', (0, 1, 0)))
+        L = arm((-2.0, -2.0, -0.5), lw, o.get('bL', 0.0), o.get('upL', (0, 1, 0)), None if 'upL' in o else 'L', o.get('palmL', (0, -1, 0)))
+        R = arm((2.0, -2.0, -0.5), rw, o.get('bR', 0.0), o.get('upR', (0, 1, 0)), None if 'upR' in o else 'R', o.get('palmR', (0, -1, 0)))
         out.append('%d %.5f | %s | %s | 1.0 1.0 0 0 | 0,0,0 1,0,0 0,1,0 0,0,1' % (i, t, ' '.join(V(x) for x in L), ' '.join(V(x) for x in R)))
     return '\n'.join(out) + '\n'
 
@@ -64,7 +70,7 @@ def tmp(text, suffix='.txt'):
 class TestUnarmed(unittest.TestCase):
     def test_clean_punch_passes(self):
         res = S.unarmed_checks(S.read_pose(tmp(pose_file(punch()))))
-        bad = [r for r in res if r[1] != 'PASS']
+        bad = [r for r in res if r[1] not in ('PASS', 'INFO')]
         self.assertFalse(bad, bad)
         self.assertTrue(any(r[0] == 'U4' and 'strike R' in r[2] for r in res))
 
@@ -117,6 +123,40 @@ class TestUnarmed(unittest.TestCase):
         self.assertNotIn('U17', {x[0] for x in S.unarmed_checks(P, name='ma_chudan')})
         r = {x[0]: x for x in S.unarmed_checks(S.read_pose(tmp(pose_file(punch()))), name='shoteiL')}
         self.assertEqual(r['U17'][1], 'PASS', r['U17'])
+
+    # U19/U20 fixtures: ma chudan frames (corpus fists/fail-20261010 = coordinator review FAIL 2026-10-10, open claw +
+    # palm-up reach; fists/pass-20261010 = the fixed candidate): guard (t 0) and the R contact (t 1.25)
+    FAIL_GUARD = '30 0.00000 | -1.84380,-3.52586,-0.54716 -3.02570,-4.17953,1.89688 -1.89996,-2.29966,4.20052 0.35409,0.59138,0.72455 -1.92650,-1.97880,5.90650 0.03185,-0.14815,0.98850 -0.70118,0.70149,0.12773 | 1.49220,-3.19612,-1.66817 1.88201,-2.99758,1.09871 1.90001,-2.29969,4.20050 0.00565,0.21962,0.97562 1.28000,-1.22371,5.41370 -0.26199,0.84444,0.46731 -0.80743,-0.45702,0.37313 | 1.0000 1.0031 0 0'
+    FAIL_HIT = '105 1.25000 | -1.84380,-3.52586,-0.54716 -3.43647,-4.53695,1.51160 -2.64616,-2.80952,4.06099 0.24978,0.54416,0.80100 -2.85402,-2.63528,5.77577 -0.05511,-0.22932,0.97184 -0.74776,0.65448,0.11203 | 1.49220,-3.19612,-1.66817 1.50089,-2.39354,2.24840 1.08460,-1.30277,5.20566 -0.10447,0.33610,0.93607 -0.04152,-0.67203,6.36666 -0.72829,0.55401,0.40338 -0.31059,-0.79157,0.52635 | 1.0000 1.4317 0 0'
+    PASS_GUARD = '30 0.00000 | -1.84380,-3.52586,-0.54716 -3.02575,-4.17954,1.89685 -1.90002,-2.29964,4.20047 0.52072,0.33376,0.78583 -1.99060,-1.86790,5.87959 -0.21423,-0.04590,0.97575 -0.15458,0.98795,0.01253 | 1.49220,-3.19612,-1.66817 1.88201,-2.99759,1.09864 1.90000,-2.29972,4.20044 -0.12243,-0.06547,0.99037 0.73580,-2.27856,5.48811 -0.77202,0.28260,0.56935 -0.22552,-0.95928,0.17032 | 1.0000 1.0031 0 0'
+    PASS_HIT = '105 1.25000 | -1.84380,-3.52586,-0.54716 -3.43643,-4.53695,1.51163 -2.64621,-2.80961,4.06111 0.40754,0.28255,0.86843 -2.96632,-2.48127,5.73555 -0.34497,-0.10469,0.93281 -0.15864,0.98602,0.05199 | 1.49220,-3.19612,-1.66817 1.50088,-2.39331,2.26007 1.08457,-1.30397,5.21785 -0.21800,-0.00873,0.97596 -0.20055,-1.39810,6.38124 -0.86812,0.17816,0.46331 -0.06992,-0.96801,0.24120 | 1.0000 1.4358 0 0'
+
+    def _fr(self, line):
+        return S.read_pose(tmp(line + '\n'))[0]
+
+    def test_hand_axes_match_pose_hx(self):
+        for line in (self.FAIL_GUARD, self.FAIL_HIT, self.PASS_GUARD, self.PASS_HIT):
+            f = self._fr(line)
+            for s in 'LR':
+                hx, _ = S.hand_axes(f[s], s)
+                self.assertLess(S._ang(hx, f[s]['hx']), 0.5)
+
+    def test_knuckles_lead_and_palm_hidden(self):
+        c = S.U
+        fg, fh, pg, ph = (self._fr(x) for x in (self.FAIL_GUARD, self.FAIL_HIT, self.PASS_GUARD, self.PASS_HIT))
+        self.assertGreater(S.hand_metrics(fh['R'], 'R')['xel'], c['xel_max'])          # rejected: hand stands up = reach
+        self.assertLessEqual(S.hand_metrics(ph['R'], 'R')['xel'], c['xel_max'] - 5)     # fixed: knuckles lead
+        self.assertGreater(S.hand_metrics(fg['L'], 'L')['pcam'], c['pcam_guard'])        # rejected guard shows the palm
+        for s in 'LR':
+            self.assertLess(S.hand_metrics(pg[s], s)['pcam'], c['pcam_guard'])
+            self.assertLess(S.hand_metrics(ph[s], s)['pup'], c['pup_max'])
+
+    def test_arms_cross(self):
+        self.assertEqual(checks(tmp(pose_file(punch())))['U21'], 'PASS')
+        # left fist driven across onto the right arm (badpunch class: forearm over the other hand mid-screen)
+        fr = punch(opts=lambda k, u: {})
+        fr = [(t, lerp(GL, (1.6, -1.6, 4.4), math.sin(math.pi * k / (len(fr) - 1.0))), rw, o) for k, (t, lw, rw, o) in enumerate(fr)]
+        self.assertEqual(checks(tmp(pose_file(fr)))['U21'], 'FAIL')
 
     def test_cmd_unarmed_dir_skips_helpers(self):
         d = tempfile.mkdtemp()
