@@ -112,7 +112,7 @@ def load_pose(path):
         return parse_state(path)
     first = next((l for l in head.splitlines() if l and not l.startswith('#')), '')
     g = first.split('|')
-    if len(g) == 5 and len(g[0].split()) == 2:
+    if len(g) >= 5 and len(g[0].split()) == 2:   # drive output (group 5 'H' optional)
         return parse_drive(path)
     return parse_rec(path)
 

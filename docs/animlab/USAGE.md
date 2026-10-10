@@ -1,4 +1,9 @@
-# Animation lab, phase 1: REPLAY (usage)
+# Animation lab (usage)
+
+Phases: 1 REPLAY (below), 2 METRICS LAB, 3 VISUAL LAB, 4 NATIVE (sections further down); take and video-frame checks under
+"Take checks". Durable state, misses and next steps: STATUS.md.
+
+## Phase 1: REPLAY
 
 Replays a recorded first-person viewmodel session through the real solver, offline, and prints the in-game
 `vmcheck` metrics per pose state. Variants (setting overrides or patched solver source) run in parallel.
@@ -150,7 +155,7 @@ Cannot (yet):
 `bash components/KenshiFP/animlab/regress.sh` (WSL): offline unit tests, the gate above, and the native round trip.
 Unit tests only: `python3 tests/animlab/test_animlab.py`. Phase 1 is tagged `animlab-p1`.
 
-# Phase 2: METRICS LAB (author motions, measure them through the real solver)
+## Phase 2: METRICS LAB (author motions, measure them through the real solver)
 
 Write a motion as time-keyed weapon targets (JSON), solve it through the viewmodel solver on a real recorded body
 (skeleton, shoulders, arm lengths and prop calibration from a game recording), and get per-segment metrics plus reach
@@ -216,7 +221,7 @@ recordings because X5 (xwalign) changed the crossbow elbow after they were made 
 Can't: native animation blending (swing/reload follow the native pose; the drive holds one body frame), target
 smoothing/springs (authored poses are applied directly), body motion while walking.
 
-# Phase 3: VISUAL LAB (render arms + weapon offline, frames / MP4 / side by side with a game frame)
+## Phase 3: VISUAL LAB (render arms + weapon offline, frames / MP4 / side by side with a game frame)
 
 `tools/animlab/visual/render.py` poses the game's own skeleton and arm/weapon meshes from per-frame joint data and
 rasterises them (numpy z-buffer, flat shading) from the eye. Meshes and skeleton are Ogre binaries read from the game
@@ -256,3 +261,76 @@ Frames where the solver has the arms out of view (holster, `w` -> 0) render blac
 ## Regression
 `regress.sh` steps 7-8 run `tests/animlab/test_visual.py` (synthetic Ogre binaries: reader, rasteriser, posing, prop
 mirror, CLI) and, when the game install exists, a real-asset still of the dual-wield example (both hand X errors < 1 deg).
+
+## Phase 4: NATIVE (the game's own skeletal animations, offline)
+
+`tools/animlab/native.py` reads the animations inside the game's Ogre `.skeleton` (`visual/ogre.py`: SK_ANIMATION tracks,
+keyframes applied to the bind pose, linear position / shortest-path nlerp rotation, loop or clamp, as Ogre), plays and
+samples them on the skeleton, renders them third person, extracts hand / weapon trajectories in first-person camera
+numbers and adapts them into phase-2 motions or KenshiFP key tables that run through the real viewmodel solver (drive
+adapter) and the recording checks. It is NOT the game's animation blending (layers, speed factors, blend-in) and has no
+root-motion physics. Game files are read at run time (config `game_dir`, `ANIMLAB_GAME_DIR`); nothing is copied.
+
+```
+L=/mnt/c/KenshiModding/Kenshi-Automation-Harness/tools/animlab; A=/mnt/c/KenshiModding/components/KenshiFP/animlab
+python3 $L/native.py list --config $A/native.json [--filter punch]                  # 174 clips on the male skeleton
+python3 $L/native.py catalog --config $A/native.json -o catalog.md                    # techniques per weapon class (game data)
+python3 $L/native.py sample --config $A/native.json "ma chudan" --fps 10 --bones "Bip01 R Hand"   # model-space bone poses, dm
+python3 $L/native.py render --config $A/native.json "ma chudan" -o fr --views side,front[,z25] --sheet s.png [--mp4 m.mp4]
+python3 $L/native.py traj  --config $A/native.json "chop down" --weapon katana --body vmrec-q-sword-z0-a.txt -o traj.txt
+python3 $L/native.py adapt --config $A/native.json "chop down" --weapon katana --body vmrec-q-sword-z0-a.txt -o motion.json
+python3 $L/native.py run   --config $A/native.json "chop down" --weapon katana --adapter /root/animlab-build/kfpvm_drive_cur \
+        --body vmrec-q-sword-z0-a.txt --body-frame 100 --out run --visual $A/visual.json      # + native-vs-fp.mp4 / sheet
+python3 $L/native.py fists --config $A/native.json "ma chudan,ma 2strike" --adapter /root/animlab-build/kfpvm_drive_cur \
+        --body vmrec-q-sword-z0-a.txt --body-frame 100 --out fists --visual $A/visual.json     # key tables + NA1 checks
+```
+
+**Trajectories** (`traj`/`adapt`/`run`): per sample the grip p, blade/hand f, edge/up u, both shoulders/elbows/wrists and
+hand X axes, in FP camera numbers. `--stab torso` (default) re-expresses every frame in the chest bone at the start (lean,
+twist, steps drop out: a weapon swing as seen from the head); `--stab pelvis` removes only the pelvis' ground travel
+(steps, lunges) and keeps torso turns (martial-arts punches turn the torso ~90 deg; torso-stabilised they point sideways);
+`--stab world` = a world-fixed camera. Framing `--anchor fit|ready|shoulder|none` (+ `--lift`, `--gain`) places the native
+shoulder on the body recording's shoulder and turns the motion about it (see the docstring). `--target weapon` follows the
+native prop bone; `--target hand` (fists, default without a weapon) applies the solver's prop convention to the native
+hand (left hand = the drive's mirrored left grip, config `prop_mirror`) and, in `run`, first solves once to measure the
+solver's wrist in its prop frame (`measure_grip`; KenshiFP class 0: -1.64, -0.46, -/+0.34 dm) so the SOLVED wrist lands on
+the native wrist (with the skeleton's bind prop offset it was 1.7 dm off). Swing phases (wind-up top, stroke end) are found
+from the tip path (`--phases` overrides) and mapped onto KenshiFP's swing u (0.28 / 0.58 / 0.78).
+
+**run**: adapt -> metricslab drive -> report -> synthetic KenshiFP recording (`adapted.rec.txt`) -> `animlab.py` checks
+(arc, churn, inline, hinge, blade, stroke; blade checks are INFO for fists) -> side-by-side video (native 3P | adapted FP).
+A raw native clip is not an FP swing: expect FAILs (regress keeps it as an info row); it is the measuring tool.
+
+**Keyed path** (`keyed_at`, `fit_keys`): Python port of KenshiFP `vm_swing_at` (start pose -> keys -> end pose,
+non-uniform Catmull-Rom on p/f/u per component, zero tangent at the rest poses, `vm_pose_norm`). `fit_keys` picks key times
+shared by all hands (coordinate descent over the dense samples) that best reproduce a dense path; values = the dense pose.
+
+**fists** (NA1, unarmed): per technique, both hands: `--stab pelvis` trajectory with the calibrated grip -> guard-anchored
+similarity map per hand (the technique's start wrist onto the FP guard `fists.guard`, a striking hand's furthest point onto
+`fists.strike`, rotation + uniform scale; a hand that does not strike stays near its guard at `off_scale`) -> hand
+orientation re-aimed on the SOLVED forearm (native wrist bend kept; `align_iters` solves) -> 5..9 shared keys fitted until
+the keyed path is within `path_err_max` -> the keyed path solved for both arms (fp_vm sets `fists.sets`: sword roll
+features off) -> checks: `guard_view` (both fists on screen at u <= .02 / >= .98), `strike_<side>` (the striking fist
+reaches the view centre |x/z| <= .30, |y/z| <= .35), `eye` (forearm/fist >= 2.5 dm from the eye, never above eye level
++0.5 dm), `nearcut` (no on-screen forearm/fist point nearer than 3 dm), `wrist` (wb_max <= 30, PT30), `solver`
+(metricslab limits), `reach` (solved wrist vs keyed target p95 <= 0.35 dm), `keys` (keyed vs adapted path p95 <= 0.5 dm).
+Outputs per technique: checks.txt (`RESULT fist-<anim> PASS|FAIL ...`), keys.json, report.txt, sheet-z0.png (lab FP render,
+both arms) and sheet-z25.png (native third person from 25 dm behind the eye, orbit 0 = what the game shows zoomed out);
+all techniques: `fist_keys.inc` (C tables `g_vm_fist_guard[2]`, `g_vm_fist_u_<anim>[]`, `g_vm_fist_<anim>[2][n]`, VP format,
+L rows in the drive's --side L convention). Config: `native.json` `fists` (defaults `FIST_DEFAULTS` in native.py).
+
+**Catalogue** (`catalog`): the FCS game data (gamedata.base + mods, v16 and v17 headers) -> COMBAT_TECHNIQUE records per weapon
+category (anim name, length, speed mult, attack/block/dodge, arms, skill range), combat stances, unreferenced clips.
+
+**Config** (KenshiFP `components/KenshiFP/animlab/native.json`): game_dir, skeleton, body_meshes, game_data, head_bone,
+eye_from_head, bones per side, prop_axes / prop_local_q / prop_roll_deg / prop_mirror (= visual.json), weapons {mesh, bone,
+class, blade, hands}, default_weapon per category, fov_3p, fists.
+
+Limits: no game blending/layering (upper/lower body layers, blend-in, anim speed x skill factor), no IK foot placement, the
+FP body is a recorded frame (sword-ready torso for fists until an unarmed body recording exists), the drive applies poses
+directly (no target springs).
+
+## Regression
+`regress.sh` step P4: `tests/animlab/test_native.py` (synthetic skeleton + animation chunks: reader, interpolation, pose
+sampling, pelvis stabilisation, left mirror, grip offset, keyed path, key fit, FCS v17) and, with the game install, list /
+catalog / run / fists complete. Phase 4 is tagged `animlab-p4`.

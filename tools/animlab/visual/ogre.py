@@ -5,6 +5,7 @@ bones (name, handle, parent, bind local position/orientation/scale) with derived
 Files are read at run time from a game install; nothing here ships assets.
 Quaternions are (w, x, y, z) numpy arrays; positions numpy float32/float64 arrays.
 """
+import math
 import struct
 
 import numpy as np
@@ -223,3 +224,163 @@ def load_skeleton(path):
             sk.bones[ch].parent = par
         r.p = cend
     return sk.derive()
+
+
+# ---------------- skeleton animations (phase 4) ----------------
+SK_ANIMATION_BASEINFO, SK_ANIMATION_TRACK, SK_ANIMATION_TRACK_KEYFRAME = 0x4010, 0x4100, 0x4110
+
+
+class Track:
+    """one bone's node track. times (n,), rot (n,4 w,x,y,z), trans (n,3), scale (n,3) are Ogre keyframe values,
+    applied to the bone's bind (initial) state: local pos = bind pos + trans, local q = bind q * rot,
+    local scale = bind scale * scale (NodeAnimationTrack::applyToNode: translate parent space, rotate local)."""
+    def __init__(self, bone, times, rot, trans, scale):
+        self.bone, self.times, self.rot, self.trans, self.scale = bone, times, rot, trans, scale
+
+
+class Animation:
+    def __init__(self, name, length):
+        self.name, self.length, self.tracks = name, float(length), {}
+        self.base = None   # (base animation name, base key time) if the file declares an additive base
+
+    def nkeys(self):
+        return sum(len(t.times) for t in self.tracks.values())
+
+
+def _read_animation(r, end):
+    a = Animation(r.s(), r.f32(1)[0])
+    while r.p + 6 <= end:
+        cid, cend = r.chunk()
+        if cid == SK_ANIMATION_BASEINFO:
+            a.base = (r.s(), r.f32(1)[0])
+        elif cid == SK_ANIMATION_TRACK:
+            h = r.u16()
+            T, Q, P, S = [], [], [], []
+            while r.p + 6 <= cend:
+                kid, kend = r.chunk()
+                if kid != SK_ANIMATION_TRACK_KEYFRAME:
+                    r.p -= 6; break
+                t = r.f32(1)[0]; x, y, z, w = r.f32(4); p = r.f32(3)
+                s = r.f32(3) if kend - r.p >= 12 else (1.0, 1.0, 1.0)
+                T.append(t); Q.append((w, x, y, z)); P.append(p); S.append(s)
+                r.p = kend
+            a.tracks[h] = Track(h, np.array(T, float), np.array(Q, float), np.array(P, float), np.array(S, float))
+        r.p = cend
+    return a
+
+
+def load_animations(path, names=None):
+    """{name: Animation} from an Ogre .skeleton (v1.8x). `names` restricts which animations are decoded."""
+    with open(path, 'rb') as f:
+        r = _R(f.read())
+    if r.u16() != M_HEADER:
+        raise ValueError('%s: not an Ogre skeleton' % path)
+    r.s()
+    want = set(names) if names is not None else None
+    out = {}
+    while True:
+        c = r.chunk()
+        if c is None:
+            break
+        cid, cend = c
+        if cid == SK_BONE:   # chunk size leaves out the name (see load_skeleton): skip name, then size - 6 bytes
+            size = cend - (r.p - 6)
+            r.s(); r.p += size - 6
+            continue
+        if cid == SK_ANIMATION:
+            p0 = r.p
+            nm = r.s()
+            if want is None or nm in want:
+                r.p = p0
+                a = _read_animation(r, cend)
+                out[a.name] = a
+        r.p = cend
+    return out
+
+
+def nlerp(a, b, u):
+    """Ogre Quaternion::nlerp with shortestPath (RIM_LINEAR, Ogre's default rotation interpolation)."""
+    if np.dot(a, b) < 0:
+        b = -b
+    q = a + u * (b - a)
+    return q / np.linalg.norm(q)
+
+
+def track_at(tr, t, length, loop=True):
+    """(rot, trans, scale) of track `tr` at time t, Ogre rules (Animation::getKeyFramesAtTime + IM_LINEAR /
+    RIM_LINEAR): looping wraps t into [0, length) and interpolates last key -> first key across the wrap; without
+    loop t is clamped to [0, length] and the value holds past the last key."""
+    T = tr.times
+    if len(T) == 1:
+        return tr.rot[0], tr.trans[0], tr.scale[0]
+    if loop and length > 0:
+        t = math.fmod(t, length)
+        if t < 0:
+            t += length
+    else:
+        t = min(max(t, 0.0), max(length, T[-1]))
+    i = int(np.searchsorted(T, t, side='right'))   # first key with time > t
+    if i == 0:
+        return tr.rot[0], tr.trans[0], tr.scale[0]
+    k1 = i - 1
+    if i < len(T):
+        k2, t1, t2 = i, T[k1], T[i]
+    elif loop and length > T[-1] + 1e-6:
+        k2, t1, t2 = 0, T[k1], length + T[0]
+    else:
+        return tr.rot[k1], tr.trans[k1], tr.scale[k1]
+    u = 0.0 if t2 <= t1 else (t - t1) / (t2 - t1)
+    return (nlerp(tr.rot[k1], tr.rot[k2], u), tr.trans[k1] + u * (tr.trans[k2] - tr.trans[k1]),
+            tr.scale[k1] + u * (tr.scale[k2] - tr.scale[k1]))
+
+
+class Pose:
+    """an animated skeleton pose: local and derived (model space) transforms per bone handle."""
+    def __init__(self, sk):
+        self.sk = sk
+        self.pos, self.q, self.scale = {}, {}, {}
+        self.dpos, self.dq, self.dscale = {}, {}, {}
+
+    def derive(self):
+        sk, done = self.sk, set()
+
+        def go(h):
+            if h in done:
+                return
+            b = sk.bones[h]
+            if b.parent >= 0:
+                go(b.parent); p = b.parent
+                self.dq[h] = qmul(self.dq[p], self.q[h])
+                self.dscale[h] = self.dscale[p] * self.scale[h]
+                self.dpos[h] = self.dpos[p] + qrot(self.dq[p], self.dscale[p] * self.pos[h])
+            else:
+                self.dq[h], self.dscale[h], self.dpos[h] = self.q[h].copy(), self.scale[h].copy(), self.pos[h].copy()
+            done.add(h)
+        for h in sk.bones:
+            go(h)
+        return self
+
+    def skin(self, h):
+        """(P_now, A) such that a bind-pose vertex v maps to P_now + A (v - P_bind) (Ogre skinning matrix)."""
+        b = self.sk.bones[h]
+        A = qmat(self.dq[h]) @ np.diag(self.dscale[h] / b.dscale) @ qmat(b.dq).T
+        return self.dpos[h], A
+
+    def mat(self, h):
+        """3x3 model-space rotation of bone h."""
+        return qmat(self.dq[h])
+
+
+def sample_pose(sk, anim, t, loop=True, weight=1.0):
+    """Pose of skeleton `sk` with animation `anim` applied at time t (bind pose for bones without a track)."""
+    P = Pose(sk)
+    for h, b in sk.bones.items():
+        pos, q, sc = b.pos.astype(float), b.q.astype(float), b.scale.astype(float)
+        tr = anim.tracks.get(h) if anim is not None else None
+        if tr is not None and len(tr.times):
+            r, d, s = track_at(tr, t, anim.length, loop)
+            if weight != 1.0:
+                r = nlerp(np.array([1.0, 0, 0, 0]), r, weight); d = d * weight; s = 1 + (s - 1) * weight
+            pos, q, sc = pos + d, qmul(q, r), sc * s
+        P.pos[h], P.q[h], P.scale[h] = pos, q / np.linalg.norm(q), sc
+    return P.derive()
