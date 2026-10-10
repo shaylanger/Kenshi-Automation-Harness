@@ -2,7 +2,7 @@
 
 Owner: animation-lab builder agent (ordered by Shay, 2026-10-09). This file + git are the
 ONLY state (no temp handoffs). Update, commit and push at every milestone.
-Builders #1-#3 stopped (context limit); builder #4 finished P2 + started P3; builder #5 finished P3, then the phase-2 open points.
+Builders #1-#3 stopped (context limit); builder #4 finished P2 + started P3; builder #5 finished P3, then the phase-2 open points; maintainers #6-#7 work the Misses list.
 
 ## Goal
 An offline animation lab for Kenshi first-person viewmodels, built in 3 phases (all required):
@@ -112,26 +112,24 @@ Format: date | point | what the game showed | recording path | build | status
 - Useful for P3: /root/KenshiFP/client/kfp_meshray.h parses Ogre .mesh triangles (read-only reference).
 
 ## Next steps
-1. Standing lab maintainer (coordinator order 2026-10-09): work through "Misses" (a failing check per miss or a reason),
-   report one line per closed miss to main. Both P2 open points are solved (see Results).
-   Order (maintainer #6 resume list, from builder #5 handoff):
-   a. (DONE, see Misses E1) E1: metrics.py has per-frame `arc` (edge_arc = cos(mu, mid-blade velocity perp. to blade), melee, speed > 8 dm/s)
-      and per-state arc_ok (share >= 0.7), arc_p05, arc_n. `animlab.py metrics f14-e0.txt` (copy
-      /root/animlab-work/f14-e0.txt of C:\KenshiTestRuns\f14\e0.txt): swing arc_ok 0.42 arc_p05 -1.00 = reproduces E1.
-      Add a gate that FAILS on it, then variant build with pending-fixes/kfp-e1-swlead.py:
-      `build.sh --src /root/animlab-kfp-src/client --patch /mnt/c/KenshiModding/pending-fixes/kfp-e1-swlead.py --out /root/animlab-build/kfpvm_e1`,
-      replay e0 with both adapters; base replay should reproduce the game's arc; patched should pass.
-   b. C1 (moves FAIL aim:MISSING on f13/x3.txt, f14/xb0.txt, xb0b.txt: game st never 'aim'; asked fixer if C1 or unloaded
-      setup; need a PASS recording on a fixed build to close): check exists (metrics moves_ok, `moves PASS` line); needs a recording where aim stayed in ready, else
-      "reproduced by check moves (no recording)".
-   c. (DONE, see Misses X1) X1 jitter: optional quantised bone-world map mode in kfpvm_replay (floating-origin grid) vs game 5-6 px on Step 12 PASS half pinned to rev d40b6ad (the live source replay jitter drifts).
-      vmq-f8c crossbow-z0; same for general jitter under-report.
-   d. (C3 check DONE, see Misses) C2: port f16/c2.py (stock height from mp/mf/mu) into metrics as a gate. C3: add a PASS case once a fixed build records. Old note: C2/C3 bolt:
-   e. Sword elbow drift on long replays.
-   Not yet sent to main: "P2 open points solved: L/R mirror exact (adapter groll 180-g + patches/left-hand-mirror.py),
-   sword drive @6c9516b PASS via elbow seed".
-   Gotchas: /root/animlab-kfp-src may be re-synced by others (new globals -> stubs in prelude.h); stdin readers in WSL
-   heredocs (ffmpeg needs -nostdin); untracked *.obj/vc100.pdb are not ours.
+1. Standing lab maintainer (#7 since 2026-10-09; #6 handoff copied here): work through "Misses" (a failing check per miss
+   or a reason), one line to main per closed miss. Done: E1, X1, jitter under-report, C3 check (no pass case yet).
+   Left, in order:
+   a. C1: `moves FAIL aim:MISSING` on f13/x3, f14/xb0, xb0b predate the C1 fix (fp_combat input path): pass case = a
+      post-fix crossbow recording (newest vmq-* / f16); add a regress pair (fail old, pass new) and close.
+   b. C3: PASS case once the fixer records a fixed build; meanwhile try a lab-side bolt-pin variant (send it to the fixer
+      as pending-fixes/kfp-c3-*.py if one passes `animlab.py bolt`).
+   c. C2: gate in metrics: stock top <= 25% from the screen bottom (port C:\KenshiTestRuns\f16\c2.py, mp/mf/mu) AND
+      crossbow orientation within ~3 deg of the d40b6ad-era pose (Shay: C2 rotated the crossbow); fail on an f16 c2 rec.
+   d. Sword elbow drift on long replays (Misses row "partly").
+   e. New Misses rows from the fixer (agent a7ff9f30a50ed26e7) in order.
+   Not yet sent to main: "C3 partly: check animlab.py bolt, f16/c3a FAIL dev95 0.82; no passing build yet".
+   Gotchas: /root/animlab-kfp-src is re-synced by the fixer (kfpvm_cur drifts: pin checks with build.sh --rev; new
+   globals -> stubs in prelude.h); never Windows python (edit via WSL python scripts; Git Bash /tmp != WSL /tmp);
+   detached WSL jobs die with wsl.exe (use Bash run_in_background); animlab.py prints GATE twice (anchor on
+   `def cmd_compare`); STATUS.md is edited by others (edit by anchors); ffmpeg needs -nostdin in heredocs;
+   untracked *.obj/vc100.pdb are not ours. pending-fixes/kfp-e1-*.py untracked by design (regress -> INFO if missing).
+   Scratch /root/animlab-work (f14-e0, f13-sw0, f14-xb0, f16-c3a*, e1/ renders).
 
 ## How to resume
 Read this file, `git log -- tools/animlab docs/animlab tests/animlab` in the harness repo and
