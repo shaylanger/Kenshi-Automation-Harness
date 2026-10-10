@@ -52,6 +52,12 @@ other strokes are labelled `swing_x` and skip every swing gate); `hinge` compare
 `animlab.py [--only-stroke N] blade <rec>` judges what a 30 fps video shows, per frame instead of per window: `snap` = sword
 rotation over one video frame (33 ms) right after the wind-up top (<= 22 deg, `--snap`), `seen` = per-frame visible blade
 (screen length of 7 dm of blade x |flat normal . view ray|; an edge-on katana is a hairline) over u .45-.95 (>= 0.05, `--seen`).
+`animlab.py [--only-stroke N] stroke <rec> [--overhead 2]` judges how each stroke reads on screen: `len` = min on-screen
+length of 7 dm of blade over u .40-.78 (>= 240 px at 1600x900, `--len`; a blade pointing into the screen is a short stub at
+an odd angle to the forearm, which `inline`'s 0.5 dm grip segments and 3D angle do not see); for the scripted strokes listed
+in `--overhead`: blade tilt from screen vertical <= 35 deg over u .28-.78 (`--tilt`) and the blade-middle path over the
+stroke within 20 deg of straight down (`--path`). The tip leaving the top edge at an overhead's wind-up top is not gated
+(a raised sword is expected to leave the frame).
 
 ## Metrics (per state)
 

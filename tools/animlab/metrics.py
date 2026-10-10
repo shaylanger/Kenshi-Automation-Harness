@@ -830,3 +830,65 @@ def blade_check(F, P, snap_max=SNAP_MAX, see_min=SEE_MIN, win=SNAP_WIN, snap_u=S
         good = wv[1] >= see_min; ok = ok and good
         txt.append('seen=%.3f/%.2f%s@swing%d(frame%d),u=%.2f' % (wv[1], see_min, '' if good else ':BAD', wv[0], wv[3], wv[2]))
     return ok, txt
+
+
+# ---- E6 stroke readability (Misses 2026-10-10, anim-sword-e6 A2C2E8AC): stroke 1 blade foreshortened into the screen,
+# stroke 2 overhead read as a diagonal. inline/blade passed both: inline measures 0.5 dm straight segments at the grip
+# (sc 3-22 deg) and the 3D forearm-blade angle (~30), but a blade pointing into the screen (mf.z ~0.9) is drawn as a short
+# curved stub whose visible shape no longer follows the forearm; blade 'seen' gates only the end-on facing, not the length.
+STK_LEN_U, STK_LEN_MIN = (0.40, 0.78), 240.0   # u window (stroke + follow), min on-screen blade length px (1600 wide)
+STK_OH_U, STK_OH_TILT, STK_OH_PATH = (0.28, 0.78), 35.0, 20.0   # overhead: u window, max blade tilt and mid-path angle from vertical
+
+
+def _uproj(c):
+    """screen px of a camera-numbers point, not clipped to the view (None behind / at the eye)."""
+    if c[2] < 0.3:
+        return None
+    return (W_PX / 2 + W_PX / 2 * (c[0] / c[2]) / TX, H_PX / 2 - H_PX / 2 * (c[1] / c[2]) / TY)
+
+
+def stroke_series(F, P, L=7.0):
+    """per swing: [(u, frame, len_px, tilt_deg, mid_px)]: grip -> grip + L*blade on screen (unclipped); tilt = blade angle
+    from screen vertical (+ = tip right); mid = the blade point ARC_MID dm from the grip."""
+    out = []
+    for idx in swings(F, P):
+        S = []
+        for i in idx:
+            p = P[i]; g = _uproj(p['mp']); t = _uproj(add(p['mp'], mul(p['mf'], L))); m = _uproj(add(p['mp'], mul(p['mf'], ARC_MID)))
+            if g and t:
+                dx, dy = t[0] - g[0], t[1] - g[1]
+                S.append((F[i]['swu'], i, math.hypot(dx, dy), math.degrees(math.atan2(dx, -dy)), m))
+        out.append((F[idx[0]].get('stroke'), S))
+    return out
+
+
+def stroke_check(F, P, overhead=(), len_min=STK_LEN_MIN, len_u=STK_LEN_U, tilt_max=STK_OH_TILT, path_max=STK_OH_PATH, oh_u=STK_OH_U):
+    """E6 per swing: (1) len = min on-screen blade length over len_u >= len_min px (a blade foreshortened into the screen
+    reads as a stub at an odd angle to the forearm); (2) strokes in `overhead` (scripted stroke ids): blade tilt from
+    screen vertical <= tilt_max over oh_u and the blade-middle path from the first to the last frame of the stroke
+    (u ARC_U0..ARC_U1) within path_max of straight down."""
+    txt, ok = [], True
+    sw = stroke_series(F, P)
+    if not sw:
+        return False, ['no swing:BAD']
+    for k, (stk, S) in enumerate(sw):
+        L = [s for s in S if len_u[0] <= s[0] <= len_u[1]]
+        parts = []
+        if L:
+            m = min(L, key=lambda s: s[2]); g = m[2] >= len_min; ok = ok and g
+            parts.append('len=%.0f/%.0f%s@u%.2f(frame%d)' % (m[2], len_min, '' if g else ':BAD', m[0], m[1]))
+        else:
+            ok = False; parts.append('len=n/a:BAD')
+        if stk is not None and stk in overhead:
+            T = [s for s in S if oh_u[0] <= s[0] <= oh_u[1]]
+            M_ = [s[4] for s in S if ARC_U0 <= s[0] <= ARC_U1 and s[4]]
+            if T and len(M_) > 1:
+                w = max(T, key=lambda s: abs(s[3])); dx, dy = M_[-1][0] - M_[0][0], M_[-1][1] - M_[0][1]
+                pa = math.degrees(math.atan2(abs(dx), dy)) if dy > 0 else 180.0
+                g1, g2 = abs(w[3]) <= tilt_max, pa <= path_max; ok = ok and g1 and g2
+                parts.append('overhead tilt=%.0f/%.0f%s@u%.2f(frame%d) path=%.0f/%.0f%s(%+.0f,%+.0f px)' % (
+                    abs(w[3]), tilt_max, '' if g1 else ':BAD', w[0], w[1], pa, path_max, '' if g2 else ':BAD', dx, dy))
+            else:
+                ok = False; parts.append('overhead n/a:BAD')
+        txt.append('swing%d%s:%s' % (k, '' if stk is None else '(stroke%d)' % stk, ','.join(parts)))
+    return ok, txt

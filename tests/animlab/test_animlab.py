@@ -254,6 +254,22 @@ class T(unittest.TestCase):
         ok, t = M.hinge_faith(G, R); self.assertTrue(ok, t); self.assertIn('fa_max=90@50', t)
         ok, t = M.hinge_faith(G, [None] * len(G)); self.assertFalse(ok)
 
+    def test_stroke_check(self):
+        # E6 misses 2026-10-10: a blade pointing into the screen is a short stub (len FAIL); an overhead whose blade lays
+        # over to the side (tilt) or whose middle travels sideways (path) reads as a diagonal
+        def swing(mf_at, stroke=2, n=40):
+            F = [dict(swu=k / (n - 1.0), stroke=stroke, t=k * 0.02) for k in range(n)]
+            P = [dict(state='swing', wih=1, mp=(0.0, 3.0 - 6.0 * k / (n - 1.0), 6.0), mf=M.nz(mf_at(k / (n - 1.0)))) for k in range(n)]
+            return F, P
+        up = lambda u: (0.0, 1.0, 0.3)
+        ok, t = M.stroke_check(*swing(up), overhead=(2,)); self.assertTrue(ok, t)
+        ok, t = M.stroke_check(*swing(lambda u: (0.0, 0.15, 1.0))); self.assertFalse(ok, t); self.assertIn('len=', t[0]); self.assertIn(':BAD', t[0])
+        ok, t = M.stroke_check(*swing(lambda u: (-u, 1.0 - u * 0.5, 0.3)), overhead=(2,)); self.assertFalse(ok, t); self.assertIn('tilt=', t[0])
+        ok, t = M.stroke_check(*swing(lambda u: (-u, 1.0 - u * 0.5, 0.3)), overhead=()); self.assertTrue(ok, t)   # only declared overheads
+        F, P = swing(up)
+        for k, p in enumerate(P):
+            p['mp'] = (-3.0 * k / 39.0, p['mp'][1], 6.0)   # middle moves left as much as down
+        ok, t = M.stroke_check(F, P, overhead=(2,)); self.assertFalse(ok, t); self.assertIn('path=', t[0]); self.assertIn(':BAD(', t[0])
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)
