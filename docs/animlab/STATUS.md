@@ -203,6 +203,18 @@ Format: date | point | what the game showed | recording path | build | status
       run_in_background + `wait`); `pkill -f al10/climb.py` inside `bash -c` kills its own shell (use `bash -s`); ev.py
       scores branch-A swings, each B ready costs 3; climb ~1.5 min/gen at POP 100 / NP 15.
 
+   #11 STATE (2026-10-09, end of #11): DONE: (2) branch check `animlab.py branch` + regress 19; fixer #21's kfp-rb-single.py frame
+      fixed by pending-fixes/kfp-rb-camup.py (applied in /root/KenshiFP by the fixer). (3) crossbow READY miss CLOSED: game L1n ~0.87 x
+      rendered upper arm (Misses row). COORDINATOR DECISION: do NOT change the game's L1 (Shay approved the crossbow look; a ~0.7 dm
+      shift would undo it): true-L1 game fix PARKED pending Shay. The lab's DEFAULT game model is now l1k 0.871 (build.sh applies
+      patches/l1-scale.py to every replay build; --no-l1 = old lab; --drive builds stay exact); regress 20. (1) wrist bend: variant
+      pending-fixes/kfp-e1-wb36.py (+ kfp-e1-inlwb.py; al11 climb c2, %TEMP%/claude/C--KenshiModding/al11 tools, WBT/WBK env in ev.py)
+      wb 47 -> 36, stroke fb 28/39, roll 14; still C:\KenshiTestRunsnimlab\e1-wb36-still.png; forwarded to Shay as an alternative.
+      RE-SCORE under l1k 0.871 (@f41f862): review candidate kfp-e1-inline.py arc 0.86/0.82/0.86 (f13-sw0 FAILS arc 0.85), wb36
+      0.94/0.91/0.96 all checks PASS (inline, arc, churn --stroke, branch). Regress 18 now shows the inline candidate f13-sw0 arc FAIL
+      as INFO. Left: (4) no other open Misses; if Shay picks an E1 version, re-render e1-compare with the L1 model; climb tools
+      (al10/al11 ev.py) predate the default L1 model: rebuild their binaries to use it.
+
 ## How to resume
 Read this file, `git log -- tools/animlab docs/animlab tests/animlab` in the harness repo and
 `git log -- components/KenshiFP/animlab` in C:\KenshiModding. Run regress.sh (must be ALL PASS). Continue at "Next steps".
