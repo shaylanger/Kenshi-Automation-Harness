@@ -325,19 +325,32 @@ A raw native clip is not an FP swing: expect FAILs (regress keeps it as an info 
 non-uniform Catmull-Rom on p/f/u per component, zero tangent at the rest poses, `vm_pose_norm`). `fit_keys` picks key times
 shared by all hands (coordinate descent over the dense samples) that best reproduce a dense path; values = the dense pose.
 
-**fists** (NA1, unarmed): per technique, both hands: `--stab pelvis` trajectory with the calibrated grip -> guard-anchored
-similarity map per hand (the technique's start wrist onto the FP guard `fists.guard`, a striking hand's furthest point onto
-`fists.strike`, rotation + uniform scale; a hand that does not strike stays near its guard at `off_scale`) -> hand
-orientation re-aimed on the SOLVED forearm (native wrist bend kept; `align_iters` solves) -> 5..9 shared keys fitted until
-the keyed path is within `path_err_max` -> the keyed path solved for both arms (fp_vm sets `fists.sets`: sword roll
-features off) -> checks: `guard_view` (both fists on screen at u <= .02 / >= .98), `strike_<side>` (the striking fist
+**fists** (NA1, unarmed): per technique, both hands: `--stab pelvis` trajectory with the calibrated grip -> profile model
+(`fist_path`): a striking hand (wrist >= `strike_min` dm forward) keeps the native TIMING only: its extension e(t) along the
+native strike direction drives the FP guard `fists.guard` -> strike point `fists.strike` (e < 0, pulled back = wind-up:
+guard -> `chamber`, down/back, never toward the eye), native off-line motion kept at `res_scale` (clamp `res_max`); a
+non-striking hand moves at `off_scale` (clamp `off_max`) about its guard; clamps y <= `y_max` (eye level), z >= `z_min`;
+eases back onto the guard over the last `end_blend` -> hand frame (`fist_hand`): wrist STRAIGHT (hand X on the solved
+forearm; the solver's natural 2-bone IK elbow, `elb=0`, does not depend on the hand frame, so one align solve is exact),
+rolled so the palm (-hand Z: the mesh fingers curl that way) faces `palm_guard` blended to `palm_strike` by e ->
+`nkeys` shared keys fitted until the keyed path is within 0.8 x `path_err_max` -> the keyed path solved for both arms (fp_vm
+sets `fists.sets`) -> checks: `guard_view` (both fists on screen at u <= .02 / >= .98), `strike_<side>` (the striking fist
 reaches the view centre |x/z| <= .30, |y/z| <= .35), `eye` (forearm/fist >= 2.5 dm from the eye, never above eye level
 +0.5 dm), `nearcut` (no on-screen forearm/fist point nearer than 3 dm), `wrist` (wb_max <= 30, PT30), `solver`
-(metricslab limits), `reach` (solved wrist vs keyed target p95 <= 0.35 dm), `keys` (keyed vs adapted path p95 <= 0.5 dm).
-Outputs per technique: checks.txt (`RESULT fist-<anim> PASS|FAIL ...`), keys.json, report.txt, sheet-z0.png (lab FP render,
-both arms) and sheet-z25.png (native third person from 25 dm behind the eye, orbit 0 = what the game shows zoomed out);
-all techniques: `fist_keys.inc` (C tables `g_vm_fist_guard[2]`, `g_vm_fist_u_<anim>[]`, `g_vm_fist_<anim>[2][n]`, VP format,
-L rows in the drive's --side L convention). Config: `native.json` `fists` (defaults `FIST_DEFAULTS` in native.py).
+(metricslab limits), `reach` (solved wrist vs keyed target at the same clip time, p95 <= 0.35 dm), `keys` (keyed vs adapted
+path p95 <= 0.5 dm), `churn_<side>` (animlab.py churn on a synthetic recording of each striking hand, swing window = start
+-> strike peak, L mirrored onto the R slot; arc/inline/blade/stroke/hinge read a sword edge/blade or need >= 3 swings: INFO
+lines in checks.txt). Why the profile model: the native unarmed clips are whole-body moves (90 deg torso turns, lunges) and
+ma chudan / ma 2strike / shoteiL are palm-heel strikes with the wrist bent back ~100 deg on the native skeleton itself (hand X
+vs forearm, ma chudan R 102, shoteiL L 110; badpunch R <= 23), so mapping the native path/hand gave 80-110 deg folds and
+paths far off any FP punch. Shay 2026-10-10: palm techniques become straight-wrist punches; the game hand mesh has no finger
+bones (fixed half-open hand), accepted, no closed-fist requirement.
+Outputs per technique: checks.txt (`RESULT fist-<anim> PASS|FAIL ...`), keys.json, report.txt, check_<side>.rec.txt,
+sheet-z0.png (lab FP render, both arms, crosshair = screen centre) and sheet-z25.png (what the game shows zoomed out: the
+viewmodel fades out beyond zf1 = 8 dm, so the native third-person clip, camera 25 dm from the eye orbited 60 deg to the side),
+both full-resolution 800x450 tiles; all techniques: `fist_keys.inc` (C tables `g_vm_fist_guard[2]`, `g_vm_fist_u_<anim>[]`,
+`g_vm_fist_<anim>[2][n]`, VP format, L rows in the drive's --side L convention). Config: `native.json` `fists` (defaults
+`FIST_DEFAULTS` in native.py). The FP body is the sword-ready recording until an unarmed body recording exists.
 
 **Catalogue** (`catalog`): the FCS game data (gamedata.base + mods, v16 and v17 headers) -> COMBAT_TECHNIQUE records per weapon
 category (anim name, length, speed mult, attack/block/dodge, arms, skill range), combat stances, unreferenced clips.

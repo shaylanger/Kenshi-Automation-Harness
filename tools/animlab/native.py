@@ -544,6 +544,7 @@ def trajectory(N, anim, ts, body=None, eye='fixed', anchor='fit', target='weapon
             for k, bi in (('sh', 1), ('el', 2), ('wr', 3)):
                 r[k + s] = cam_pt(wp(N.h(B[s][bi])), E, axes) + delta
             r['hx' + s] = cam_dir(M @ P.mat(N.h(B[s][3]))[:, 0], axes)
+            r['hz' + s] = cam_dir(M @ P.mat(N.h(B[s][3]))[:, 2], axes)   # hand Z: the fingers curl toward -Z (palm normal)
         for s in hands:
             hh = N.h(B[s][3])
             if target == 'hand':   # the prop bone is parked anywhere in unarmed clips: grip = hand + bind prop offset
@@ -571,7 +572,7 @@ def trajectory(N, anim, ts, body=None, eye='fixed', anchor='fit', target='weapon
         for k, v in r.items():
             if k == 't':
                 continue
-            if k[0] in 'fu' or k.startswith('hx'):
+            if k[0] in 'fu' or k.startswith('hx') or k.startswith('hz'):
                 q[k] = Rr @ v
             else:
                 q[k] = S + gain * (Rr @ (v - S))
@@ -1003,12 +1004,20 @@ def vp(p, f, u):
 
 
 # ---------------- fists: per-technique FP key tables from native unarmed clips ----------------
-FIST_DEFAULTS = dict(guard={'R': [2.0, -2.0, 3.8], 'L': [-2.0, -2.0, 3.8]},     # FP guard wrists (camera numbers, dm)
-                     strike={'R': [0.4, -0.9, 6.6], 'L': [-0.4, -0.9, 6.6]},    # where a full punch puts the wrist
-                     scale_clamp=[0.2, 1.5], off_scale=0.5, strike_min=1.5, stab='pelvis', guard_anim='ma idle1', guard_t=0.0, near=3.0,
-                     nkeys=[5, 9], align_iters=3,
-                     sets=['wroll=0', 'edgeclamp=0', 'wfix=0', 'hroll=0', 'e1inl=0', 'hinge=0'],
-                     center=[0.30, 0.35], wb_max=30.0, wr_err_max=0.35, path_err_max=0.5, eye_min=2.5, above_max=0.5)
+FIST_DEFAULTS = dict(guard={'R': [1.9, -2.3, 4.2], 'L': [-1.9, -2.3, 4.2]},     # FP guard wrists (camera numbers, dm)
+                     strike={'R': [0.6, -0.9, 5.5], 'L': [-0.6, -0.9, 5.5]},    # where a full punch puts the wrist
+                     chamber={'R': [0.3, -0.7, -0.3], 'L': [-0.3, -0.7, -0.3]},  # full wind-up offset from the guard (down, back)
+                     chamber_e=0.25,   # native extension (fraction of the strike, negative = pulled back) that maps to the full chamber
+                     res_scale=0.35, res_max=0.5,   # native off-line wrist motion kept (scale, clamp dm), turned onto the FP strike line
+                     off_scale=0.4, off_max=0.6,   # non-striking hand: its native motion scaled + clamped (dm) about its guard
+                     end_blend=0.15,   # share of the clip over which the path eases back onto the guard
+                     palm_guard={'R': [-1.0, -0.4, 0.0], 'L': [1.0, -0.4, 0.0]},   # fist roll: palm normal at the guard (palms facing in)
+                     palm_strike={'R': [-0.15, -1.0, 0.0], 'L': [0.15, -1.0, 0.0]},  # ... at full extension (palm down, corkscrew)
+                     strike_min=1.5, stab='pelvis', guard_anim='ma idle1', guard_t=0.0, near=3.0,
+                     nkeys=[4, 12],
+                     sets=['wroll=0', 'edgeclamp=0', 'wfix=0', 'hroll=0', 'e1inl=0', 'hinge=0', 'elb=0'],
+                     center=[0.30, 0.35], wb_max=30.0, wr_err_max=0.35, path_err_max=0.5, eye_min=2.5, above_max=0.5,
+                     y_max=0.0, z_min=3.4)   # path clamps: wrist never above y_max (eye level), never nearer than z_min
 
 
 def fist_cfg(cfg):
@@ -1017,46 +1026,84 @@ def fist_cfg(cfg):
     return c
 
 
-def fist_map(tr, ref, xf, fc):
-    """guard-anchored similarity map of a both-hands trajectory (target hand), per hand xf[s] = (R, k):
-    wrist' = G_s + k R (wrist - ref_s), f' = R f, u' = R u; elbows/shoulders are left to the solver."""
-    out = []
-    for r in tr:
-        q = dict(t=r['t'])
-        for s in 'LR':
-            R, k = xf[s]
-            q['wr' + s] = np.asarray(fc['guard'][s], float) + k * (R @ (r['wr' + s] - ref[s]))
-            q['f' + s], q['u' + s], q['hx' + s] = R @ r['f' + s], R @ r['u' + s], R @ r['hx' + s]
-            q['fa' + s] = nz(R @ (r['wr' + s] - r['el' + s]))   # native forearm direction
-        out.append(q)
-    return out
+def _clampn(v, m):
+    n = float(np.linalg.norm(v))
+    return v * (m / n) if n > m else v
 
 
-def fist_gains(tr, ref, fc):
-    """per hand: striking = its wrist travels >= strike_min dm forward of the technique's start -> rotation + uniform
-    scale taking its furthest point onto the configured strike point (shape kept); a hand that does not strike keeps
-    its direction at off_scale (it stays near its guard)."""
-    xf, peak = {}, {}
-    lo, hi = fc['scale_clamp']
-    for s in 'LR':
-        V = np.array([r['wr' + s] - ref[s] for r in tr])
-        k = int(np.argmax(V[:, 2]))
-        peak[s] = (float(V[k, 2]), tr[k]['t'])
-        if V[k, 2] < fc['strike_min']:
-            xf[s] = (np.eye(3), float(fc['off_scale']))
-            continue
-        d = np.asarray(fc['strike'][s], float) - np.asarray(fc['guard'][s], float)
-        xf[s] = (rot_between(V[k], d), min(max(float(np.linalg.norm(d) / np.linalg.norm(V[k])), lo), hi))
-    strikers = sorted(s for s in 'LR' if peak[s][0] >= fc['strike_min'])
-    return xf, strikers, peak
+def fist_path(tr, ref, fc, s):
+    """FP wrist path of hand s from the native clip (profile model). A striking hand (wrist travels >= strike_min dm
+    forward of its start) keeps the native TIMING: its extension along the native strike direction e(t) (1 = the
+    furthest point) drives guard -> strike point; e < 0 (pulled back before the punch) drives guard -> chamber (down and
+    back, never toward the eye); the native off-line motion is kept scaled/clamped and turned onto the FP strike line.
+    A non-striking hand keeps its native motion scaled + clamped about its guard. Clamps: never above y_max, never
+    nearer than z_min, eases back onto the guard over the last end_blend. Returns (positions [n,3], striker, info)."""
+    W = np.array([r['wr' + s] for r in tr]) - ref[s]
+    G = np.asarray(fc['guard'][s], float)
+    T = np.asarray(fc['strike'][s], float) - G
+    C = np.asarray(fc['chamber'][s], float)
+    k = int(np.argmax(W[:, 2]))
+    D = W[k]
+    if D[2] < fc['strike_min']:
+        P = np.array([G + _clampn(w * fc['off_scale'], fc['off_max']) for w in W])
+        striker, info = False, dict(peak=float(D[2]))
+        E = np.zeros(len(W))
+    else:
+        n = float(np.linalg.norm(D)); d = D / n
+        e = W @ d / n
+        Rm = rot_between(d, T)
+        P = []
+        for i in range(len(W)):
+            res = _clampn(Rm @ (W[i] - e[i] * n * d) * fc['res_scale'], fc['res_max'])
+            ei = float(e[i])
+            base = G + min(ei, 1.0) * T if ei >= 0 else G + min(-ei / fc['chamber_e'], 1.0) * C
+            P.append(base + res)
+        P = np.array(P)
+        E = np.clip(e, 0.0, 1.0)
+        striker, info = True, dict(peak=float(D[2]), u_peak=k / max(len(W) - 1, 1), e_min=float(e.min()))
+    m = len(P)
+    for i in range(m):
+        u = i / max(m - 1, 1)
+        if u > 1.0 - fc['end_blend']:
+            w = (u - (1.0 - fc['end_blend'])) / fc['end_blend']; w = w * w * (3 - 2 * w)
+            P[i] = (1 - w) * P[i] + w * G
+            E[i] *= 1 - w
+        P[i][1] = min(P[i][1], fc['y_max'])
+        P[i][2] = max(P[i][2], fc['z_min'])
+    return P, striker, info, E
+
+
+def fist_hand(r, s, fa_to, fc, e):
+    """fist hand frame: hand X on the solved forearm fa_to (straight wrist), rolled about it so the palm (-hand Z) faces
+    the palm normal blended guard -> strike by the extension e (0..1). The native hand only supplies the prop axes'
+    relation to the hand bone. Returns (f, u, hx)."""
+    f, u, hx = straight_hand(r, s, fa_to)
+    fa_n = nz(r['wr' + s] - r['el' + s])
+    hz = rot_between(fa_n, fa_to) @ rot_between(r['hx' + s], fa_n) @ r['hz' + s]
+    pn = nz((1 - e) * np.asarray(fc['palm_guard'][s], float) + e * np.asarray(fc['palm_strike'][s], float))
+    a = nz(-hz - hx * float(hx @ -hz)); b = pn - hx * float(hx @ pn)
+    if np.linalg.norm(b) < 1e-3:
+        return f, u, hx
+    Q = rot_between(a, nz(b))
+    return Q @ f, Q @ u, Q @ hx
+
+
+def straight_hand(r, s, fa_to):
+    """the native hand frame of r (f, u, hx of side s) with the wrist straightened (hand X onto the native forearm,
+    smallest turn: the twist about the forearm is kept), then carried by the smallest turn native forearm -> fa_to.
+    Returns (f, u, hx)."""
+    fa_n = nz(r['wr' + s] - r['el' + s])
+    Q = rot_between(fa_n, fa_to) @ rot_between(r['hx' + s], fa_n)
+    return Q @ r['f' + s], Q @ r['u' + s], Q @ r['hx' + s]
 
 
 def _onscr(c, near, m=0.95):
     return c[2] > near and abs(c[0] / c[2]) < 1.245 * m and abs(c[1] / c[2]) < 0.70 * m
 
 
-def fist_checks(fc, solved, frames, n0, key_wr, dense_err, ku, strikers, mvrows, verdict):
-    """NA1 rows on the solved keyed path (both arms). Returns [(name, PASS|FAIL|INFO, text)]."""
+def fist_checks(fc, solved, frames, n0, key_wr, dense_err, ku, strikers, mvrows, verdict, dur):
+    """NA1 rows on the solved keyed path (both arms). dur = the technique's clip length (the motion's hold after it is
+    at u > 1). Returns [(name, PASS|FAIL|INFO, text)]."""
     res = []
     near = fc['near']
     sides = sorted(solved)
@@ -1064,7 +1111,6 @@ def fist_checks(fc, solved, frames, n0, key_wr, dense_err, ku, strikers, mvrows,
     fr = {s: frames[s][n0:] for s in sides}
     n = min(len(rows[s]) for s in sides)
     T = np.array([x[0] for x in fr[sides[0]]][:n])
-    dur = T[-1] if len(T) else 1.0
     U = T / max(dur, 1e-9)
     # guard: both fists (wrist + grip) on screen at the start / end
     gk = [k for k in range(n) if U[k] <= 0.02 or U[k] >= 0.98]
@@ -1103,49 +1149,92 @@ def fist_checks(fc, solved, frames, n0, key_wr, dense_err, ku, strikers, mvrows,
     wb = {r['side']: r['wb_max'] for r in mvrows if r['seg'] == '*all*'}
     res.append(('wrist', 'PASS' if all(v <= fc['wb_max'] for v in wb.values()) else 'FAIL',
                 'wb_max %s (<= %.0f, PT30)' % (' '.join('%s %.1f' % kv for kv in sorted(wb.items())), fc['wb_max'])))
-    res.append(('solver', 'PASS' if verdict['ok'] else 'FAIL', 'metricslab limits (terr, reach, ikfail, wb)%s' % (
+    res.append(('solver', 'PASS' if verdict['ok'] else 'FAIL', 'metricslab limits (terr, reach, ikfail, wb, fist/arm clearance)%s' % (
         (' fails=' + ','.join(verdict.get('fails', []))) if not verdict['ok'] else '')))
-    # fidelity: solved wrist vs the keyed target wrist; keyed path vs the dense adapted path
+    # fidelity: solved wrist vs the keyed target wrist at the same clip time; keyed path vs the dense adapted path
     we = []
     for k in range(n):
         for s in sides:
-            j = min(int(round(U[k] * (len(key_wr[s]) - 1))), len(key_wr[s]) - 1)
+            j = min(max(int(round(U[k] * (len(key_wr[s]) - 1))), 0), len(key_wr[s]) - 1)
             we.append(float(np.linalg.norm(np.asarray(rows[s][k][s]['wr']) - key_wr[s][j])))
     w95 = float(np.percentile(we, 95)) if we else float('nan')
     res.append(('reach', 'PASS' if w95 <= fc['wr_err_max'] else 'FAIL', 'solved wrist vs keyed target p95 %.2f dm (<= %.2f)' % (w95, fc['wr_err_max'])))
-    res.append(('keys', 'PASS' if dense_err[0] <= fc['path_err_max'] else 'FAIL', 'keyed path vs adapted native path p95 %.2f max %.2f dm (<= %.2f), key u %s' % (
+    res.append(('keys', 'PASS' if dense_err[0] <= fc['path_err_max'] else 'FAIL', 'keyed path vs adapted path p95 %.2f max %.2f dm (<= %.2f), key u %s' % (
         dense_err[0], dense_err[1], fc['path_err_max'], ','.join('%.2f' % x for x in ku))))
     return res
 
 
-def fist_render(a, cfg, N, an, pose_path, fc, ku, t_end, out, tag):
-    """labelled sheets: FP zoom 0 (visual lab, both arms solved) and zoom 25 (native third person from a camera 25 dm
-    behind the eye, orbit 0: what the game shows zoomed out)."""
+def fist_rec_checks(m, solved, frames, s, dur, t_peak, path):
+    """the animlab.py recording checks on hand s's solved keyed path (synthetic recording, swing window = start ->
+    the strike peak; an L hand is mirrored onto the R slot). Only churn gates a fist; arc/inline/blade/stroke read a
+    sword edge/blade and hinge needs >= 3 swings + drive hinge output: INFO. Returns [(name, PASS|FAIL|INFO, text)]."""
+    import copy
+    rows, fr = solved[s][0], frames[s]
+    if s == 'L':
+        X = np.array([-1.0, 1.0, 1.0])
+        mir = lambda v: list(np.asarray(v, float) * X) if v is not None and len(v) == 3 else v
+        R2 = []
+        for r in rows:
+            q = copy.deepcopy(r)
+            q['R'] = {k: mir(v) for k, v in r['L'].items()}; q['L'] = {k: mir(v) for k, v in r['R'].items()}
+            for k in ('eye', 'up', 'fw'):
+                q[k] = mir(r[k])
+            q['rt'] = list(-np.asarray(mir(r['rt'])))
+            R2.append(q)
+        rows = R2
+        fr = [(t, c, mir(p), mir(f), mir(u), o, sg) for (t, c, p, f, u, o, sg) in fr]
+    mm = dict(m, native=dict(anim=m['name'], phases=[0.0, t_peak * 0.4, t_peak * 0.7, t_peak, min(dur, t_peak + 0.05 * dur)]))
+    rec = synth_rec(mm, rows, fr, path)
+    out = []
+    for k, (v, ln) in run_checks(rec, True).items():
+        out.append(('%s_%s' % (k, s), v if k == 'churn' else 'INFO', ln[:160]))
+    return out
+
+
+def _crosshair(img):
+    img = np.array(img, copy=True)
+    h, w = img.shape[:2]
+    cx, cy = w // 2, h // 2
+    img[cy - 1:cy + 1, cx - 12:cx - 4] = 230; img[cy - 1:cy + 1, cx + 4:cx + 12] = 230
+    img[cy - 12:cy - 4, cx - 1:cx + 1] = 230; img[cy + 4:cy + 12, cx - 1:cx + 1] = 230
+    return img
+
+
+def fist_render(a, cfg, N, an, pose_path, fc, ku, t_end, out, tag, n=12, orbit=60.0):
+    """labelled sheets, full-resolution 800x450 tiles (no downscale): FP zoom 0 (visual lab, both arms solved, crosshair =
+    screen centre) and zoom 25 (what the game shows zoomed out: KenshiFP fades the viewmodel out beyond zf1 = 8 dm, so
+    the body plays the native third-person clip; camera 25 dm from the eye orbited `orbit` deg round to the side so the
+    arm motion is not hidden behind the body)."""
     import render as VR
     vcfg = VR.load_cfg(a.visual, 'none')
     rig = VR.Rig(vcfg)
     Pf = VR.load_pose(pose_path)
     T = np.array([f['t'] for f in Pf])
-    n = 12
     ts = [t_end * i / (n - 1) for i in range(n)]
     z0, z25 = [], []
     R3 = Render3P(N, an, None, ('z25',), (800, 450), 0.0, an.length)
+    E, (Rx, U, D) = R3.cams['z25']
+    pel = R3.pel0 + np.array([0.0, 9.0, 0.0])   # orbit about the chest height above the pelvis
+    th = math.radians(orbit)
+    rot = lambda v: np.array([v[0] * math.cos(th) + v[2] * math.sin(th), v[1], -v[0] * math.sin(th) + v[2] * math.cos(th)])
+    R3.cams['z25'] = (pel + rot(E - pel), (rot(Rx), rot(U), rot(D)))
     for t in ts:
         i = int(np.argmin(np.abs(T - t)))
         img, _, _ = VR.render_frame(rig, Pf[i], (800, 450), np.full((450, 800, 3), 40, np.float32))
         u = t / max(t_end, 1e-9)
         kmark = ' KEY' if any(abs(u - k) < 0.5 / (n - 1) for k in ku) else ''
-        z0.append(label(img, ['%s  FP zoom 0 (lab: KenshiFP solver, both arms)' % an.name, 't %.2f s  u %.2f%s' % (t, u, kmark), tag]))
-        z25.append(R3.frame(t * an.length / max(t_end, 1e-9), ['zoom 25 (native 3P, orbit 0)', tag]))
-    sheet(z0, 4, os.path.join(out, 'sheet-z0.png'), 0.5)
-    sheet(z25, 4, os.path.join(out, 'sheet-z25.png'), 0.5)
+        z0.append(label(_crosshair(img), ['%s  FP zoom 0 (lab: KenshiFP solver, both arms)' % an.name, 't %.2f s  u %.2f%s' % (t, u, kmark), tag]))
+        z25.append(R3.frame(t * an.length / max(t_end, 1e-9), ['zoom 25: viewmodel faded out, native 3P clip', 'camera orbit %.0f deg' % orbit, tag]))
+    sheet(z0, 4, os.path.join(out, 'sheet-z0.png'), 1.0)
+    sheet(z25, 4, os.path.join(out, 'sheet-z25.png'), 1.0)
     return os.path.join(out, 'sheet-z0.png'), os.path.join(out, 'sheet-z25.png')
 
 
 def cmd_fists(a):
-    """per technique: native clip -> both-hands trajectory (torso-stabilised, solver grip calibrated) -> guard-anchored FP
-    map -> 5 shared key times fitted on the game's keyed path -> keyed path solved on the body through the drive adapter
-    (both arms, sword roll features off) -> NA1 checks + key tables (VP, KenshiFP format) + labelled sheets."""
+    """per technique: native clip -> both-hands trajectory (pelvis-stabilised, solver grip calibrated) -> profile model
+    (fist_path: native timing, FP guard/strike/chamber geometry) -> straight wrist on the solved forearm (straight_hand)
+    -> shared key times fitted on the game's keyed path -> keyed path solved on the body through the drive adapter (both
+    arms, natural 2-bone IK: elb=0, sword roll features off) -> NA1 checks + key tables (VP, KenshiFP format) + sheets."""
     import metricslab as ML
     cfg = load_cfg(a.config); N = Native(cfg, a.skeleton); fc = fist_cfg(cfg)
     body = body_ref(a.body, a.body_frame)
@@ -1157,7 +1246,7 @@ def cmd_fists(a):
     def traj(an, ts, grip):
         return trajectory(N, an, ts, body, 'fixed', 'shoulder', 'hand', None, 'R', ts[0], 0.0, None, 1.0, fc['stab'], grip)
 
-    def motion(name, keys, dt):
+    def motion(name, keys):
         return dict(name=name, fps=60, interp='linear', preroll=0.5, hold=0.3, body=dict(rec=a.body, frame=a.body_frame),
                     hands={s: dict(weapon='sword', blade=1.0, keys=keys[s]) for s in 'RL'},
                     limits=dict(head_min=0.0, clip_frames=10 ** 6))
@@ -1170,24 +1259,46 @@ def cmd_fists(a):
         m = ML.load_motion(mp)
         solved, frames = ML.run_motion(m, a.adapter, a.body, a.body_frame, out, extra, True)
         return m, solved, frames
+
+    def key(t, p, f, u):
+        return dict(t=round(float(t), 5), p=[float(x) for x in p], f=[float(x) for x in f], u=[float(x) for x in u])
+
+    def solved_fa(sv, frm, times):
+        """per side: solved forearm direction at each of `times` (motion clock)."""
+        n0 = sum(1 for x in frm['R'] if x[0] < -1e-9)
+        Ta = np.array([x[0] for x in frm['R']])
+        out = {s: [] for s in 'RL'}
+        for t in times:
+            k = max(int(np.argmin(np.abs(Ta - t))), n0)
+            for s in 'RL':
+                A = sv[s][0][k][s]
+                out[s].append(nz(np.asarray(A['wr'], float) - np.asarray(A['el'], float)))
+        return out
     # 1. the solver's grip offset (one calibration solve on the guard clip, then fixed)
     gts = times_of(ga.length, 10, gt, min(ga.length, gt + 0.5))
     gtr = traj(ga, gts, None)
-    keys = {s: [dict(t=round(r['t'] - gts[0], 4), p=list(r['p' + s]), f=list(r['f' + s]), u=list(r['u' + s])) for r in gtr] for s in 'RL'}
-    _, sv, frm = solve(motion('grip-cal', keys, 0.1), os.path.join(a.out, '_cal'))
+    keys = {s: [key(r['t'] - gts[0], r['p' + s], r['f' + s], r['u' + s]) for r in gtr] for s in 'RL'}
+    _, sv, frm = solve(motion('grip-cal', keys), os.path.join(a.out, '_cal'))
     n0 = sum(1 for x in frm['R'] if x[0] < -1e-9)
     grip = {s: measure_grip(sv[s][0], s, n0) for s in 'RL'}
-    gref = traj(ga, [gt], grip)[0]   # guard orientation: the unarmed combat stance
+    # 2. guard pose: the FP guard wrists, hands straight on the solved forearm (native unarmed stance twist)
+    gref = traj(ga, [gt], grip)[0]
+    gfu = {s: fist_hand(gref, s, nz(gref['wr' + s] - gref['el' + s]), fc, 0.0)[:2] for s in 'RL'}
+    G = {s: np.asarray(fc['guard'][s], float) for s in 'RL'}
+    gk = {s: [key(t, G[s] - grip_vec(gfu[s][0], gfu[s][1], grip[s]), gfu[s][0], gfu[s][1]) for t in (0.0, 0.2)] for s in 'RL'}
+    _, sv, frm = solve(motion('guard', gk), os.path.join(a.out, '_guard'))
+    fa = solved_fa(sv, frm, [0.1])
+    gpose = {}
+    for s in 'RL':
+        f, u, _ = fist_hand(gref, s, fa[s][0], fc, 0.0)
+        gpose[s] = pose_norm(G[s] - grip_vec(f, u, grip[s]), f, u)
     summary = []
     tables = ['/* KenshiFP fist key tables (candidate, NOT installed): animlab native.py fists, %s.' % ', '.join(names),
               ' * Poses VP(p, f, u) in camera numbers (dm), KenshiFP prop target convention for the weapon class 0 path; L rows',
               ' * are in the drive\'s --side L convention (mirrored grip, as dual wield). Guard = start/end pose of every technique.',
               ' * Key u = per technique (the swing clock runs over the native clip length / anim speed mult).',
+              ' * Wrists straight (hand X on the solved forearm); fingers: the game hand mesh has no finger bones (fixed hand).',
               ' * Solver settings the lab used: fp_vm set %s */' % ' '.join(fc['sets'])]
-    gpose = {}
-    for s in 'RL':
-        w = np.asarray(fc['guard'][s], float)
-        gpose[s] = pose_norm(w - grip_vec(gref['f' + s], gref['u' + s], grip[s]), gref['f' + s], gref['u' + s])
     tables.append('static VmPose g_vm_fist_guard[2] = { %s,   /* R */\n                                     %s }; /* L */' % (vp(*gpose['R']), vp(*gpose['L'])))
     for name in names:
         an = N.anim(name)
@@ -1196,41 +1307,34 @@ def cmd_fists(a):
         os.makedirs(od, exist_ok=True)
         ts = times_of(an.length, a.key_fps, 0.0, an.length)
         tr = traj(an, ts, grip)
-        ref = {s: tr[0]['wr' + s] for s in 'LR'}   # the technique's own start = the FP guard
-        xf, strikers, peak = fist_gains(tr, ref, fc)
-        mp_ = fist_map(tr, ref, xf, fc)
-        gains = {s: np.array([xf[s][1], math.degrees(math.acos(max(-1.0, min(1.0, (np.trace(xf[s][0]) - 1) / 2))))]) for s in 'LR'}
+        ref = {s: tr[0]['wr' + s] for s in 'LR'}
         dur = ts[-1] - ts[0]
-        # hand orientation: keep the native wrist bend on the SOLVED forearm (the map moves the wrist, the solver picks
-        # the elbow, so the native hand orientation alone folds the wrist): solve the dense path, turn each hand by the
-        # native->solved forearm rotation, repeat
-        for it in range(int(fc['align_iters']) + 1):
-            dense = {s: [] for s in 'RL'}
-            dk = {s: [] for s in 'RL'}
-            for r in mp_:
-                for s in 'RL':
-                    p = r['wr' + s] - grip_vec(r['f' + s], r['u' + s], grip[s])
-                    dense[s].append(((r['t'] - ts[0]) / dur, p) + tuple(pose_norm(p, r['f' + s], r['u' + s])[1:]))
-                    dk[s].append(dict(t=round(r['t'] - ts[0], 5), p=[float(x) for x in p], f=[float(x) for x in r['f' + s]], u=[float(x) for x in r['u' + s]]))
-            if it == int(fc['align_iters']):
-                break
-            _, sv, frm = solve(motion('align', dk, dur), os.path.join(a.out, '_align'))
-            n0a = sum(1 for x in frm['R'] if x[0] < -1e-9)
-            Ta = np.array([x[0] for x in frm['R']])
-            wbs = []
-            for r in mp_:
-                k = int(np.argmin(np.abs(Ta - (r['t'] - ts[0]))))
-                for s in 'RL':
-                    A = sv[s][0][max(k, n0a)][s]
-                    fa_s = nz(np.asarray(A['wr'], float) - np.asarray(A['el'], float))
-                    Rf = rot_between(r['fa' + s], fa_s)
-                    r['f' + s], r['u' + s], r['hx' + s], r['fa' + s] = Rf @ r['f' + s], Rf @ r['u' + s], Rf @ r['hx' + s], fa_s
-                    wbs.append(math.degrees(math.acos(max(-1.0, min(1.0, float(fa_s @ nz(A['hx'])))))))
-            print('  align %d: solved wb p95 %.1f max %.1f' % (it, np.percentile(wbs, 95), max(wbs)))
+        paths, strikers, info = {}, [], {}
+        for s in 'RL':
+            paths[s], st, info[s], ew = fist_path(tr, ref, fc, s)
+            info[s]['ew'] = ew
+            if st:
+                strikers.append(s)
+        strikers.sort()
+        # hands straight: first on the native forearm (any orientation: the solver's elbow does not depend on it with
+        # elb=0, the wrist is held), solve, then on the solved forearm
+        dk = {s: [] for s in 'RL'}
+        for i, r in enumerate(tr):
+            for s in 'RL':
+                f, u, _ = fist_hand(r, s, nz(r['wr' + s] - r['el' + s]), fc, info[s]['ew'][i])
+                dk[s].append(key(r['t'] - ts[0], paths[s][i] - grip_vec(f, u, grip[s]), f, u))
+        _, sv, frm = solve(motion('align', dk), os.path.join(a.out, '_align'))
+        fa = solved_fa(sv, frm, [r['t'] - ts[0] for r in tr])
         shutil.rmtree(os.path.join(a.out, '_align'), ignore_errors=True)
+        dense = {s: [] for s in 'RL'}
+        for i, r in enumerate(tr):
+            for s in 'RL':
+                f, u, _ = fist_hand(r, s, fa[s][i], fc, info[s]['ew'][i])
+                p = paths[s][i] - grip_vec(f, u, grip[s])
+                dense[s].append(((r['t'] - ts[0]) / dur,) + tuple(pose_norm(p, f, u)))
         for nk in range(fc['nkeys'][0], fc['nkeys'][1] + 1):
             idx, ku, e95, emax = fit_keys(dense, gpose, gpose, nkeys=nk)
-            if e95 <= fc['path_err_max']:
+            if e95 <= fc['path_err_max'] * 0.8:
                 break
         kp = {s: [dense[s][k][1:] for k in idx] for s in 'RL'}
         # keyed path as the game would play it, dense at 60 fps over the clip length
@@ -1242,22 +1346,24 @@ def cmd_fists(a):
                 p, f, uu = keyed_at(gpose[s], kp[s], gpose[s], ku, u)
                 mkeys[s].append(dict(t=round(u * dur, 5), p=[round(x, 4) for x in p], f=[round(x, 5) for x in f], u=[round(x, 5) for x in uu]))
                 key_wr[s].append(p + grip_vec(f, uu, grip[s]))
-        m, solved, frames = solve(motion('fist-' + tag, mkeys, dur), od)
+        m, solved, frames = solve(motion('fist-' + tag, mkeys), od)
         P, rows, v = ML.evaluate(m, solved, frames)
         with open(os.path.join(od, 'report.txt'), 'w') as f:
             ML.print_report(m, rows, v, f)
         n0 = sum(1 for x in frames['R'] if x[0] < -1e-9)
-        res = fist_checks(fc, solved, frames, n0, key_wr, (e95, emax), ku, strikers, rows, v)
+        res = fist_checks(fc, solved, frames, n0, key_wr, (e95, emax), ku, strikers, rows, v, dur)
+        for s in strikers:
+            res += fist_rec_checks(m, solved, frames, s, dur, info[s]['u_peak'] * dur, os.path.join(od, 'check_%s.rec.txt' % s))
         bad = [r[0] for r in res if r[1] == 'FAIL']
-        line = 'RESULT fist-%s %s strikers=%s gains=%s %s' % (tag, 'PASS' if not bad else 'FAIL', ''.join(strikers) or '-',
-               ';'.join('%s:%s' % (s, ','.join('%.2f' % x for x in gains[s])) for s in 'RL'),
-               ' '.join('%s=%s' % (r[0], r[1]) for r in res)) + ((' fails=' + ','.join(bad)) if bad else '')
+        line = 'RESULT fist-%s %s strikers=%s keys=%d %s' % (tag, 'PASS' if not bad else 'FAIL', ''.join(strikers) or '-', len(ku),
+               ' '.join('%s=%s' % (r[0], r[1]) for r in res if r[1] != 'INFO')) + ((' fails=' + ','.join(bad)) if bad else '')
         with open(os.path.join(od, 'checks.txt'), 'w') as f:
             for r in res:
                 f.write('%-9s %-4s %s\n' % r)
             f.write(line + '\n')
         for r in res:
-            print('  %-9s %-4s %s' % r)
+            if r[1] != 'INFO':
+                print('  %-9s %-4s %s' % r)
         print(line)
         summary.append(line)
         cid = ''.join(c if c.isalnum() else '_' for c in an.name.lower())
@@ -1267,14 +1373,16 @@ def cmd_fists(a):
             cid, len(ku), ',\n      '.join(vp(*k) for k in kp['R']), ',\n      '.join(vp(*k) for k in kp['L'])))
         with open(os.path.join(od, 'keys.json'), 'w') as f:
             json.dump(dict(anim=an.name, length=an.length, ku=ku, guard={s: [list(map(float, x)) for x in gpose[s]] for s in 'RL'},
-                           keys={s: [[list(map(float, x)) for x in k] for k in kp[s]] for s in 'RL'}, gains={s: gains[s].tolist() for s in 'RL'},
+                           keys={s: [[list(map(float, x)) for x in k] for k in kp[s]] for s in 'RL'},
+                           info={s: {k: v for k, v in info[s].items() if k != 'ew'} for s in 'RL'},
                            strikers=strikers, grip={s: grip[s].tolist() for s in 'RL'}, sets=fc['sets'], result=line), f, indent=1)
         if not a.no_video:
             s0, s25 = fist_render(a, cfg, N, an, os.path.join(od, 'pose.txt'), fc, ku, dur, od, 'candidate %s' % ('PASS' if not bad else 'FAIL'))
             print('  sheets %s %s' % (s0, s25))
     with open(os.path.join(a.out, 'fist_keys.inc'), 'w') as f:
         f.write('\n'.join(tables) + '\n')
-    shutil.rmtree(os.path.join(a.out, '_cal'), ignore_errors=True)
+    for d in ('_cal', '_guard'):
+        shutil.rmtree(os.path.join(a.out, d), ignore_errors=True)
     print('keys %s' % os.path.join(a.out, 'fist_keys.inc'))
     return 0 if all(' PASS ' in x for x in summary) else 1
 
