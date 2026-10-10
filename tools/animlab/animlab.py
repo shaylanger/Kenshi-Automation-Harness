@@ -173,6 +173,13 @@ def cmd_bolt(a):
     print('bolt %s %s src=%s' % ('PASS' if ok else 'FAIL', ' '.join(txt), M.read_bolt.used))
 
 
+def cmd_churn(a):
+    """E1 arm churn + wind-up hand roll (see metrics.churn_check)."""
+    rec = recfmt.parse(a.rec); P = M.frame_metrics(rec)
+    ok, txt, _ = M.churn_check(M.churn_series(rec.frames, P), a.rev, a.grip, roll_max=a.roll)
+    print('churn %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
+
+
 def cmd_stock(a):
     """C2: crossbow stock low on screen (stock top <= --max % from the bottom in ready) and, with --ref, ready orientation
     within --ori deg of a known-good recording."""
@@ -265,6 +272,8 @@ def main():
     p = sp.add_parser('bolt'); p.add_argument('rec'); p.add_argument('--bolt', help='sidecar (default <rec>.bolt)')
     p.add_argument('--dev', type=float, default=0.1); p.add_argument('--step', type=float, default=0.05)
     p.add_argument('--source', choices=('sl', 'bl'), help='sidecar column group: sl = post-IK Prop2 frame (default when present), bl = weapon frame')
+    p = sp.add_parser('churn'); p.add_argument('rec'); p.add_argument('--rev', type=float, default=M.CHURN_REV)
+    p.add_argument('--grip', type=float, default=M.CHURN_GRIP); p.add_argument('--roll', type=float, default=M.ROLL_MAX)
     p = sp.add_parser('stock'); p.add_argument('rec'); p.add_argument('--ref', help='known-good recording for the orientation check')
     p.add_argument('--max', type=float, default=M.STOCK_MAX); p.add_argument('--ori', type=float, default=M.ORI_MAX)
     p.add_argument('--h', type=float, default=M.STOCK_H, help='stock top above the bolt axis (dm)')
@@ -286,7 +295,7 @@ def main():
     a = ap.parse_args()
     if not a.cmd:
         ap.print_help(); return 2
-    return {'bolt': cmd_bolt, 'stock': cmd_stock, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
+    return {'bolt': cmd_bolt, 'churn': cmd_churn, 'stock': cmd_stock, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':

@@ -17,7 +17,7 @@ States: ready, swing, block, swing->block (a block entered straight from a swing
 draw / lower (blends), native (viewmodel faded out by zoom, zf < 0.99), off (no viewmodel). Hitch frames (dt > 0.07 s, or next to one) are left out of jit/step.
 """
 import math
-from recfmt import sub, add, mul, dot, ln, nz, ang, remap
+from recfmt import sub, add, mul, dot, ln, nz, ang, remap, cross
 
 W_PX, H_PX, TX, TY = 1600.0, 900.0, 1.245, 0.70   # Kenshi FP view: tan half-angles (vmcheck onscr)
 BLADE = {0: 8.0, 1: 5.85}
@@ -286,6 +286,121 @@ def bolt_ok(T, dev=BOLT_DEV, step=BOLT_STEP, min_n=10):
         ok = ok and good
         txt.append('%s:dev95=%.3f,step95=%.3f,n=%d%s' % (s, t['dev95'], t['step95'], t['n'], '' if good else ':BAD'))
     return ok and bool(txt), txt or ['no visible bolt frames']
+
+
+CHURN_REV, CHURN_GRIP, CHURN_T, CHURN_WIN, CHURN_SKIP = 450.0, 250.0, 0.4, 0.15, 10   # E1 arm churn (px, px, s, s, frames)
+ROLL_MAX = 15.0   # E1: hand roll about the forearm axis during the wind-up (deg)
+
+
+def _scr(c):
+    return (W_PX / 2 + W_PX / 2 * (c[0] / c[2]) / TX, H_PX / 2 - H_PX / 2 * (c[1] / c[2]) / TY)
+
+
+def _forearm_vis(wr, el, near=0.5):
+    """screen end of the visible forearm: the elbow if on screen, else where wrist->elbow leaves the screen (None when
+    the wrist is off screen). The elbow is first pulled in front of the near plane along the forearm."""
+    if wr[2] < near:
+        return None
+    if el[2] < near:
+        el = add(wr, mul(sub(el, wr), (wr[2] - near) / (wr[2] - el[2])))
+    w, e = _scr(wr), _scr(el)
+    if not (0 <= w[0] <= W_PX and 0 <= w[1] <= H_PX):
+        return None
+    t = 1.0
+    for k, lim in ((0, 0.0), (0, W_PX), (1, 0.0), (1, H_PX)):
+        de = e[k] - w[k]
+        if abs(de) > 1e-9 and 0 < (lim - w[k]) / de < t:
+            t = (lim - w[k]) / de
+    return (w[0] + (e[0] - w[0]) * t, w[1] + (e[1] - w[1]) * t), w
+
+
+def churn_series(F, P):
+    """per rendered frame: v = visible forearm end (screen px; vm = median of 3 frames), w = wrist, g = grip, tip, ax =
+    forearm axis, mu = blade up; None without a full viewmodel or with the wrist off screen."""
+    S = []
+    for i, p in enumerate(P):
+        r = F[i]
+        fv = _forearm_vis(p['J'][5], p['J'][4]) if r['on'] and r['w'] >= 0.99 else None
+        if not fv:
+            S.append(None); continue
+        g = _scr(p['mp']) if p['mp'][2] > 0.5 else fv[1]
+        tp = _scr(p['tip']) if p['tip'][2] > 0.5 else fv[1]
+        S.append(dict(i=i, t=r['t'], st=p.get('state'), swu=r.get('swu', 1.0), v=fv[0], w=fv[1], g=g, tip=tp,
+                      ax=nz(sub(p['J'][5], p['J'][4])), B=(p['mf'], p['mu'], nz(cross(p['mf'], p['mu'])))))
+    for i in range(1, len(S) - 1):
+        if S[i - 1] and S[i] and S[i + 1]:
+            S[i]['vm'] = tuple(sorted(S[k]['v'][c] for k in (i - 1, i, i + 1))[1] for c in range(2))
+    for s in S:
+        if s and 'vm' not in s:
+            s['vm'] = s['v']
+    return S
+
+
+def _d2(a, b):
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def _twist(a, B0, B1):
+    """twist (deg) about axis a of the rotation taking frame B0 to B1 (B = weapon f, u, f x u: rigid in the hand, so
+    this is the hand's roll about the forearm; wrist flex/deviation, about axes across the forearm, is excluded)."""
+    R = [[sum(B1[k][r] * B0[k][c] for k in range(3)) for c in range(3)] for r in range(3)]
+    w = math.sqrt(max(0.0, 1.0 + R[0][0] + R[1][1] + R[2][2])) / 2
+    v = ((R[2][1] - R[1][2]) / 4, (R[0][2] - R[2][0]) / 4, (R[1][0] - R[0][1]) / 4) if w > 1e-4 else (0.0, 0.0, 0.0)
+    if w <= 1e-4:
+        return 0.0
+    v = (v[0] / w, v[1] / w, v[2] / w)   # quaternion (1, v) up to scale
+    return math.degrees(2 * math.atan2(dot(v, a), 1.0))
+
+
+def churn_check(S, rev_max=CHURN_REV, grip_max=CHURN_GRIP, tw=CHURN_T, win=CHURN_WIN, skip=CHURN_SKIP, roll_max=ROLL_MAX, u0=ARC_U0):
+    """E1 arm churn (Shay: the arm moves around a ton while the sword barely moves).
+    (b) gate: the visible forearm end goes out and comes back by more than rev_max px within tw s while the grip stays
+        within grip_max px; worst window = rev px @ frames start-turn-end, grip extent.
+    (a) info: (visible forearm end + forearm mid) screen path / (grip + tip) path over win s (arm path >= 150 px).
+    (d) gate: hand roll about the forearm axis in each swing's wind-up (first swing frame .. swu < u0): max |cumulative
+        twist| of the blade up vector <= roll_max deg."""
+    n = len(S); rev = (0.0, None); ratio = (0.0, None)
+    for i in range(skip, n):
+        if not S[i]:
+            continue
+        j = i
+        while j + 1 < n and S[j + 1] and S[j + 1]['t'] - S[i]['t'] <= tw:
+            j += 1
+        ge, k = 0.0, i
+        for e in range(i + 1, j + 1):
+            ge = max(ge, max(_d2(S[e]['g'], S[q]['g']) for q in range(i, e)))
+            if ge > grip_max:
+                break
+            if _d2(S[e]['vm'], S[i]['vm']) > _d2(S[k]['vm'], S[i]['vm']):
+                k = e
+            r = min(_d2(S[k]['vm'], S[i]['vm']), _d2(S[k]['vm'], S[e]['vm']))
+            if r > rev[0]:
+                rev = (r, (S[i]['i'], S[k]['i'], S[e]['i'], ge, S[k]['st']))
+        arm = wep = 0.0; q = i
+        mid = lambda s: ((s['vm'][0] + s['w'][0]) / 2, (s['vm'][1] + s['w'][1]) / 2)
+        while q + 1 < n and S[q + 1] and S[q + 1]['t'] - S[i]['t'] <= win:
+            a, b = S[q], S[q + 1]
+            arm += _d2(a['vm'], b['vm']) + _d2(mid(a), mid(b)); wep += _d2(a['g'], b['g']) + _d2(a['tip'], b['tip']); q += 1
+        if arm >= 150 and arm / max(wep, 100.0) > ratio[0]:
+            ratio = (arm / max(wep, 100.0), (S[i]['i'], S[q]['i'], arm, wep, S[i]['st']))
+    rolls = []
+    for i in range(1, n):
+        if S[i] and S[i]['st'] == 'swing' and S[i - 1] and S[i - 1]['st'] != 'swing':
+            cum, mx, k = 0.0, 0.0, i
+            while k < n and S[k] and S[k]['st'] == 'swing' and S[k]['swu'] < u0:
+                cum += _twist(S[k]['ax'], S[k - 1]['B'], S[k]['B'])
+                mx = max(mx, abs(cum)); k += 1
+            if k > i:
+                rolls.append((mx, S[i]['i'], S[k - 1]['i']))
+    worst_roll = max(rolls) if rolls else None
+    ok_rev = rev[0] <= rev_max
+    ok_roll = worst_roll is None or worst_roll[0] <= roll_max
+    txt = ['rev=%.0fpx/%.0f%s' % (rev[0], rev_max, '' if ok_rev else ':BAD')]
+    if rev[1]:
+        txt[-1] += '@%d-%d-%d,grip=%.0fpx,%s' % rev[1]
+    txt.append('windup_roll=%s/%.0f%s' % ('%.1fdeg@%d-%d' % worst_roll if worst_roll else 'none', roll_max, '' if ok_roll else ':BAD'))
+    txt.append('ratio=%.2f(info)' % ratio[0] + ('@%d-%d,arm=%.0f,wep=%.0f,%s' % ratio[1] if ratio[1] else ''))
+    return ok_rev and ok_roll, txt, dict(rev=rev, ratio=ratio, rolls=rolls)
 
 
 STOCK_H, STOCK_BACK, STOCK_NEAR = 1.45, 8.0, 1.5   # C2: stock top above the bolt axis, stock length behind the grip, near clip (dm)

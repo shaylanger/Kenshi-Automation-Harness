@@ -177,6 +177,30 @@ class T(unittest.TestCase):
         self.assertFalse(ok); self.assertEqual(len(txt), 1); self.assertTrue(txt[0].startswith('ready:') and txt[0].endswith(':BAD'))
         self.assertTrue(M.jitter_faithful(g, dict(r, ready=dict(n=50, jit_p95=1.0)))[0])   # reload below 1 px, swing skipped
 
+    def test_churn_check(self):   # E1: forearm out-and-back with the grip still fails; wind-up hand roll > 15 deg fails
+        def series(vx, roll_step, n=40):
+            S = []
+            for i in range(n):
+                a = math.radians(roll_step * max(0, i - 15))   # blade up rolls about the forearm axis x in the wind-up
+                f, u = (1.0, 0.0, 0.0), (0.0, math.cos(a), math.sin(a))
+                B = (f, u, M.cross(f, u))
+                x = vx(i); st = 'swing' if i >= 15 else 'ready'
+                S.append(dict(i=i, t=i / 60.0, st=st, swu=min(1.0, max(0.0, (i - 15) / 40.0)), v=(x, 600.0), vm=(x, 600.0),
+                              w=(800.0, 600.0), g=(800.0, 500.0), tip=(900.0, 300.0), ax=(1.0, 0.0, 0.0), B=B))
+            return S
+        still = lambda i: 600.0
+        ok, txt, d = M.churn_check(series(still, 1.0))   # 1 deg/frame over 11 wind-up frames (u < 0.28)
+        self.assertTrue(ok, txt); self.assertTrue(txt[0].startswith('rev=0px')); self.assertIn('windup_roll=11.0deg', txt[1])
+        ok, txt, d = M.churn_check(series(still, 3.0))
+        self.assertFalse(ok); self.assertTrue(txt[1].endswith(':BAD')); self.assertIn('windup_roll=33.0deg', txt[1])
+        out_back = lambda i: 600.0 + 30.0 * (10 - abs(i - 20)) if 10 <= i <= 30 else 600.0   # 300 px out and back in 0.33 s
+        ok, txt, d = M.churn_check(series(out_back, 0.0))
+        self.assertTrue(ok, txt)   # 300 px < 450
+        big = lambda i: 600.0 + 60.0 * (10 - abs(i - 20)) if 10 <= i <= 30 else 600.0   # 600 px out and back
+        ok, txt, d = M.churn_check(series(big, 0.0))
+        self.assertFalse(ok); self.assertTrue(txt[0].startswith('rev=600px/450:BAD@10-20-30'), txt[0])
+        self.assertAlmostEqual(M._twist((0, 0, 1.0), ((1, 0, 0), (0, 1, 0), (0, 0, 1)), ((1, 0, 0), (0, 0, 1), (0, -1, 0))), 0.0)   # roll about x, not z
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)

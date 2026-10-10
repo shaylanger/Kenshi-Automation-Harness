@@ -130,8 +130,14 @@ Format: date | point | what the game showed | recording path | build | status
       f14/e0). (2) render.py review sheet: every Nth frame, elbow + grip trails, churn frames boxed red. (3) fix the
       candidate (elbow side continuous through the wind-up), keep arc/wb. Re-render e1-compare.mp4 + sheet, message main
       numbers + paths; send the patch to the fixer only after arc + wb + churn pass.
-   CHURN STATE (maintainer 7 stopped at context limit; work UNCOMMITTED in the harness tree: tools/animlab/metrics.py
-      churn_series/churn_check/_twist/_forearm_vis + animlab.py `churn` cmd; no unit test / regress step yet).
+   CHURN STATE (maintainer #8 since 2026-10-09, #7 handoff copied here): `animlab.py churn` (metrics.py churn_series/
+      churn_check/_twist/_forearm_vis) COMMITTED with unit test test_churn_check + regress step 17 (game vmq-f8c sword-z0
+      PASS, candidate kfp-e1-keys on f14-e0 FAIL rev+roll). Coordinator decision (2026-10-09): keep the wind-up roll gate
+      (~15 deg) for the fix; the current game swing failing it is expected (part of what is being fixed). Fix needs ALL:
+      arc (>= 0.7 on >= 85% of fast stroke frames, may gate stroke + follow-through only), wb <= ~50, churn rev <= 450,
+      windup_roll <= 15. Patch = pending-fixes/kfp-e1-*.py (never /root/KenshiFP). Send to the fixer (now agent
+      a6b11f2fff651d5bf) only after main confirms Shay is OK with the video. Edit tip: python edit scripts via WSL
+      python3 (Bash heredocs mangle backslashes; Git Bash sed corrupts Windows paths).
       Shay add-on (via main): NO hand roll in the wind-up (roll change <= ~10 deg), small gradual roll at stroke start;
       gate (d) total wind-up roll about the forearm > ~15 deg FAILs; arc may be gated on stroke + follow-through only.
       Measured with `animlab.py churn` (rev = visible forearm end out-and-back px within 0.4 s with grip extent <= 250 px,
@@ -147,7 +153,7 @@ Format: date | point | what the game showed | recording path | build | status
       frames boxed red); re-render C:\KenshiTestRuns\animlab\e1-compare.mp4 (old: /root/animlab-work/e1/fr-e1base,
       fr-e1k = 190 frames of f14-e0 swing 1) + sheet; message main; patch to fixer only after arc+wb+churn pass.
       Scratch scripts: C:\Users\Shay\AppData\Local\Temp\claude\C--KenshiModding\al7 (churn*.py, runchurn.sh).
-   e. New Misses rows from the fixer (agent a7ff9f30a50ed26e7) in order.
+   e. New Misses rows from the fixer (agent a6b11f2fff651d5bf, was a7ff9f30a50ed26e7) in order.
    Not yet sent to main: "C3 partly: check animlab.py bolt, f16/c3a FAIL dev95 0.82; no passing build yet".
    Gotchas: /root/animlab-kfp-src is re-synced by the fixer (kfpvm_cur drifts: pin checks with build.sh --rev; new
    globals -> stubs in prelude.h); never Windows python (edit via WSL python scripts; Git Bash /tmp != WSL /tmp);
