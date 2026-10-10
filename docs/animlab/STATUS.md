@@ -133,7 +133,7 @@ before 2026-10-10 11:30 unclassed)
 - 2026-10-10 | E6 stroke 2 blade seen: replay below game (reverse) | game e6fix stroke 2 seen 0.116 at swing1 frame 1318 u .94; replay (F0595751 source and refit 4) 0.030 at the same frame: replay FAIL, game PASS, at the recovery end | same rec | F0595751 | OPEN
 - 2026-10-10 | taste R8 wrist (vmcheck) | Shay accepted f28-sword-z0c (sword zoom 0, 3912d09) and picked wb36 (f23-sword-z0d) but vmcheck (fp-viewmodel.sh PT30) still gates sword SWING frames at wb 30: FAILS both (wb 37.8 / 36.4); spec.py wrist + arc.wb (swing 50) PASS | corpus rec/f28-sword-z0c.txt, rec/f23-sword-z0d.txt | E334DB71 / 9E5422A6 | OPEN (taste, class taste): vmcheck swing limit should follow metrics.ARC_WB 50 (fp-viewmodel.sh owner: KenshiFP fixer)
 - 2026-10-10 | taste R17 blade on stroke 0 | `animlab blade` FAILS the Shay-accepted stroke 0 (f28 snap 26/22 + seen 0.000 @u.65; e6-anim stroke 0 seen 0.000): the documented "baseline exception" is not in the check, so every stroke-0 swing is a false alarm | corpus rec/f28-sword-z0c.txt, rec/e6-anim.txt | E334DB71 / 9DA35EE0 | CLOSED (spec 2026-10-10): R17 snap/end-on now native-referenced (`spec.py blade`: snap <= 32, end-on <= 67 ms, from the game's katana attacks); stroke 0 passes with no exception (t65/t66 TN). New disagreement t62 (coordinator reject of stroke 2: snap 27, end-on 23 ms) is inside the native range | class: taste, rule threshold vs native
-- 2026-10-10 | taste t62 R17 FN (native reference) | coordinator rejected E6 stroke 2 (wind-up snap 27 deg/33 ms + one end-on frame 23 ms); `spec.py blade` (native katana attacks: snap 7-32, end-on <= 67 ms) passes it: the flaw is inside what the game's own swings do | corpus rec/e6-anim.txt (--only-stroke 2) | 9DA35EE0 | OPEN (coordinator): keep the coord reject as taste (FN stays) or relabel; stroke 2 was refit since (e6-anim-b2 / e6fix pass both checks) | class: taste, coord verdict vs native reference
+- 2026-10-10 | taste t62 R17 FN (native reference) | coordinator rejected E6 stroke 2 (wind-up snap 27 deg/33 ms + one end-on frame 23 ms); `spec.py blade` (native katana attacks: snap 7-32, end-on <= 67 ms) passes it: the flaw is inside what the game's own swings do | corpus rec/e6-anim.txt (--only-stroke 2) | 9DA35EE0 | CLOSED (coordinator 2026-10-10): superseded by native rule R17 (coordinator reject 10-10 predates native reference; stroke 2 refit passes anyway); taste t62 relabelled superseded | class: taste, coord verdict vs native reference
 - 2026-10-10 | taste R2 inline per swing (working tree) | the uncommitted per-swing `inline` (metrics.py "each: swings k/n", working tree 2026-10-10 ~12:40) FAILS the Shay-accepted f28-sword-z0c (swings 3/5, worst swing3@1182) and f23-sword-z0d; the committed whole-take inline PASSED both | corpus rec/f28-sword-z0c.txt, rec/f23-sword-z0d.txt | E334DB71 / 9E5422A6 | OPEN (taste): maintainer to recheck the per-swing limits against the taste set (`bash components/KenshiFP/animlab/taste/run.sh --only R2`) before committing
 
 ## Catch-rate ledger (animlab-loop; `python3 components/KenshiFP/animlab/ledger.py`)
@@ -205,14 +205,13 @@ Every FN / FP is a Misses row of class "taste".
 | R13 no clipped or hollow limbs (near-plane cut) | 4 | 2 | 2 | 0 | 0 |
 | R14 zoom 25 looks natural: hand away from the head, weapon visible, wrist  | 1 | 0 | 1 | 0 | 0 |
 | R15 every frame judgeable: open ground, nothing solid in frame, full res,  | 6 | 3 | 3 | 0 | 0 |
-| R17 blade reads on screen: wind-up-top rotation within the native rate, en | 5 | 2 | 2 | 1 | 0 |
+| R17 blade reads on screen: wind-up-top rotation within the native rate, en | 4 | 2 | 2 | 0 | 0 |
 | R20 take labels match game state; no combat / bystanders; video ends at th | 2 | 2 | 0 | 0 | 0 |
 
-Items 67 scored (+4 open/superseded listed), weighted agreement 0.96 (was 0.89; fresh cache 2026-10-10 after the native-reference
+Items 66 scored (+5 open/superseded listed), weighted agreement 0.96 (was 0.89; fresh cache 2026-10-10 after the native-reference
 R17 + the maintainer's per-swing inline). Disagreements: t33 (R8 FP f28-sword-z0c.txt), t34 (R8 FP f23-sword-z0d.txt): vmcheck.wrist
-gates swings at 30; t62 (R17 FN e6-anim.txt stroke 2, coordinator reject): its snap 27 deg/33 ms and 23 ms end-on lie inside the
-native katana range (snap 7-32, end-on <= 67 ms), so the native-reference rule no longer rejects it (the Shay-accepted stroke 0,
-snap 20-26 / end-on 12-30 ms, passes with no exception).
+gates swings at 30. t62 (coordinator reject of E6 stroke 2: snap 27, end-on 23 ms, inside the native range) relabelled superseded
+by native rule R17 (coordinator 2026-10-10); the Shay-accepted stroke 0 (snap 20-26 / end-on 12-30 ms) passes with no exception.
 
 ## Rule -> check map (spec-first; `bash .../taste/run.sh map --md`)
 Rules file `components/KenshiFP/animlab/taste/rules.tsv` (owner shay / coord / native / inferred), checks `taste/checks.json` (check id ->
