@@ -130,13 +130,18 @@ class Overlay(unittest.TestCase):   # class of the cursor miss: nothing foreign 
         self.assertFalse(ok, txt); self.assertIn('panel', txt)
 
     def test_hud_and_label_zones_pass(self):
-        fs = [tag(scene(k), 1300, 400, 'LOADED') for k in range(6)]   # the take's own HUD in every frame = baseline
+        fs = [tag(scene(k), 710, 470, 'LOADED') for k in range(6)]    # KenshiFP HUD text box under the crosshair
         fs = [tag(f, 700, 30, 'Katana ready, zoom 0') for f in fs]    # title label band
         fs[2] = tag(fs[2], 700, 120, 'stroke 0')                        # centred label down to 0.2 H
         ok, txt = self.run_(fs)
         self.assertTrue(ok, txt)
         fs[4] = tag(fs[4], 40, 40, 'debug: x=12')                       # stray string in the top-left corner stays checked
         self.assertFalse(self.run_(fs)[0])
+
+    def test_persistent_name_tag_fails(self):   # Misses 2026-10-10: [Axima] tag in every frame was hidden by the text baseline
+        fs = [tag(scene(k), 720, 325, '[Axima]') for k in range(6)]
+        ok, txt = self.run_(fs)
+        self.assertFalse(ok, txt); self.assertIn('overlay_frames=6', txt)
 
 
 if __name__ == '__main__':

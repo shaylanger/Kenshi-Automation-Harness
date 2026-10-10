@@ -16,9 +16,10 @@
       No foreign overlay over the scene (class of the cursor miss, Shay 2026-10-10): NPC speech bars, name tags, damage
       numbers, hint/notification lists, dialog popups, stray strings. Frames scaled to 1600x900, 16x10 px cells: text
       cells (outlined thin text or text on a flat dark panel, >= 3 glyph strokes) forming a line of >= 3 cells, or a flat
-      neutral UI panel (rectangle with straight edges, >= 6x4 cells). Cells flagged in >= 40% (text) / 80% (panels) of
-      the frames are the take's own HUD (baseline); expected zones: centred label band (x .15-.85, top 20%) and
-      Kenshi's bottom UI panel (bottom 30%). takecheck.py runs it on every take given with --video.
+      neutral UI panel (rectangle with straight edges, >= 6x4 cells). Panel cells in >= 80% of the frames are the take's
+      own HUD (baseline); text has NO baseline (a name tag shown in every frame is still foreign, Misses 2026-10-10
+      persistent tag); expected zones: centred label band (x .15-.85, top 20%), Kenshi's bottom UI panel (bottom 30%) and
+      the KenshiFP HUD text box (at W/2-90, H/2+20: LOADED / RELOAD n / NO POWER). takecheck.py runs it on every take given with --video.
 Needs ffmpeg on PATH. Exit 0 = PASS. Last line: `RESULT <name> PASS|FAIL ...`.
 """
 import argparse, subprocess, sys
@@ -199,8 +200,11 @@ def cursor_check(video, fps=5.0, t0=None, t1=None, name='take'):
 # damage numbers, hint/notification lists, dialog popups, stray debug strings (turret-fp.mp4 speech/name tag/damage,
 # sword-z25-block-f36 [Malzin], anim-xbow-z25 hint list + [Axima]; mutation vid-popup-overlay = a flat grey dialog box).
 OW, OH, CW, CH = 1600, 900, 16, 10            # analysis frame size and cell grid (100 x 90 cells)
-OV_BASE_TEXT, OV_BASE_PANEL = 0.4, 0.8        # cells flagged in >= this share of frames = the take's own HUD (baseline)
-OV_ZONES = ((0.15, 0.0, 0.85, 0.20), (0.0, 0.70, 1.0, 1.0))   # x0 y0 x1 y1: centred title/state label band (down to
+OV_BASE_TEXT, OV_BASE_PANEL = None, 0.8       # panel cells in >= this share of frames = the take's own HUD (baseline);
+#   text has no baseline (was 0.4): the 5090-operator's op-b1 blkG / op-probe takes show the [Axima] name tag in every
+#   frame (KenshiFP picks the own character at the screen centre at zoom 25) and the baseline hid it (Misses 2026-10-10)
+OV_ZONES = ((0.15, 0.0, 0.85, 0.20), (0.0, 0.70, 1.0, 1.0), (0.43, 0.505, 0.60, 0.565))   # + KenshiFP HUD text box
+#   (kfp_controls.inc g_widget_setpos(vw/2-90, vh/2+20): LOADED / RELOAD n.n / NO POWER under the crosshair)   # x0 y0 x1 y1: centred title/state label band (down to
 #   0.2 H: anim-sword-e6 "stroke 0"), Kenshi's bottom UI panel. The top corners (stray debug strings) stay checked.
 
 
@@ -322,7 +326,7 @@ def overlay_check(video, fps=2.0, t0=None, t1=None, zones=OV_ZONES, frames=None)
     if not ts:
         return False, 'no frames:BAD'
     TX, AX, PX = np.stack(TX), np.stack(AX), np.stack(PX)
-    bt = TX.mean(0) >= OV_BASE_TEXT
+    bt = TX.mean(0) >= OV_BASE_TEXT if OV_BASE_TEXT else np.zeros(TX.shape[1:], bool)
     bp = PX.mean(0) >= OV_BASE_PANEL
     hits = []
     for k, t in enumerate(ts):
