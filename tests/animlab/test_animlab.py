@@ -128,6 +128,14 @@ class T(unittest.TestCase):
         self.assertFalse(ok); self.assertIn('aim:MISSING', txt)
         self.assertTrue(M.moves_ok(T, ('aim',))[0])
 
+    def test_arc_gate(self):   # E1: edge must lead on >= share of fast stroke frames, without folding the wrist
+        good = dict(arc_ok=0.95, arc_p05=0.8, arc_n=80, wb_max=20.0)
+        self.assertTrue(M.arc_gate({'swing': good}, {'swing': 0.85})[0])
+        ok, txt = M.arc_gate({'swing': dict(good, arc_ok=0.5)}, {'swing': 0.85})
+        self.assertFalse(ok); self.assertTrue(txt[0].endswith(':BAD'))
+        self.assertFalse(M.arc_gate({'swing': dict(good, wb_max=107.0)}, {'swing': 0.85})[0])   # lead by wrist fold
+        self.assertEqual(M.arc_gate({}, {'swing': 0.85}), (False, ['swing:NO_FAST_FRAMES']))
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)

@@ -94,7 +94,7 @@ Format: date | point | what the game showed | recording path | build | status
 - 2026-10-09 | X1 crossbow jitter | game jitter p95 5-6 px vs replay ~0: bone-world map quantised at the floating origin (fixed in game by the node map, e948f86) | C:\KenshiTestRuns\vmq-f8c\vmrec-q-crossbow-z0.txt | 419D164F (6c9516b) | open: try an optional quantised-map mode
 - 2026-10-09 | jitter under-reported | lab jitter generally below the game's | vmq-f8c recordings | 419D164F | open
 - 2026-10-09 | sword elbow branch drift | elbow switches branch on long replays/drives (e.g. drive @6c9516b sword-z0-a 83-232: elbow on the right branch, game low; no S2 re-seed + no elbow warm start in the drive) | C:\KenshiTestRuns\vmq-f8c\vmrec-q-sword-z0-a.txt | 419D164F (6c9516b) | partly: branch history dependence reproduced by check regress step 10 (cold drive @6c9516b elbow95 5.16 vs seeded 0.05); drift over long replays itself still open
-- 2026-10-09 | E1 edge leads | game swing led with the back of the blade (edge_arc -0.9 in the main stroke) | C:\KenshiTestRuns\f14\e0.txt | build Oct 9 18:21:44 | open: check the lab's edge_arc reproduces it
+- 2026-10-09 | E1 edge leads | game swing led with the back of the blade (edge_arc -0.9 in the main stroke) | C:\KenshiTestRuns\f14\e0.txt | build Oct 9 18:21:44 | CLOSED (lab): `animlab.py metrics` arc gate (stroke frames after the wind-up u>=0.28: edge_arc>=0.7 on >=85%, swing wb_max<=30), regress step 11: game e0 arc_ok 0.50 FAIL, current solver replay 0.56 FAIL. Patch pending-fixes/kfp-e1-swlead.py: arc_ok 1.00 but wb_max 107 (the lead comes from fading the PT17 wfix roll = wrist fold); sweep with components/KenshiFP/animlab/patches/e1-lead-variants.py (e1wfix 0..1, e1clamp, edgeclamp, swlse/swlin/swlout): no variant has arc_ok>=0.85 with wb<=30 (e1wfix 0: wb 27 but arc 0.56). The lead roll must come from the forearm, not the wrist
 - 2026-10-09 | C2 stock height / C3 bolt jitter on walk | bolt is a separate node, not in the lab's skeleton | tbd | - | open: can the lab measure it?
 
 ## Key findings / gotchas
@@ -115,7 +115,7 @@ Format: date | point | what the game showed | recording path | build | status
 1. Standing lab maintainer (coordinator order 2026-10-09): work through "Misses" (a failing check per miss or a reason),
    report one line per closed miss to main. Both P2 open points are solved (see Results).
    Order (maintainer #6 resume list, from builder #5 handoff):
-   a. E1: metrics.py has per-frame `arc` (edge_arc = cos(mu, mid-blade velocity perp. to blade), melee, speed > 8 dm/s)
+   a. (DONE, see Misses E1) E1: metrics.py has per-frame `arc` (edge_arc = cos(mu, mid-blade velocity perp. to blade), melee, speed > 8 dm/s)
       and per-state arc_ok (share >= 0.7), arc_p05, arc_n. `animlab.py metrics f14-e0.txt` (copy
       /root/animlab-work/f14-e0.txt of C:\KenshiTestRuns\f14\e0.txt): swing arc_ok 0.42 arc_p05 -1.00 = reproduces E1.
       Add a gate that FAILS on it, then variant build with pending-fixes/kfp-e1-swlead.py:

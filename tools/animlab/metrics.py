@@ -11,7 +11,8 @@ callback measures what the previous apply rendered). Per frame:
   step    tip screen step per frame, px
   arc     edge_arc (E1, melee): cos(blade edge mu, mid-blade velocity perpendicular to the blade), frames where that speed
           > 8 dm/s; +1 = the edge leads the arc, -1 = the back of the blade leads. Per state: arc_ok = share of fast frames
-          with arc >= 0.7, arc_p05 = 5th percentile
+          with arc >= 0.7, arc_p05 = 5th percentile. Only after the wind-up (swing u >= ARC_U0): in the wind-up the edge
+          faces the coming strike, i.e. away from the backswing motion, so arc < 0 there is correct
 States: ready, swing, block, swing->block (a block entered straight from a swing), aim, reload (crossbow),
 draw / lower (blends), native (viewmodel faded out by zoom, zf < 0.99), off (no viewmodel). Hitch frames (dt > 0.07 s, or next to one) are left out of jit/step.
 """
@@ -21,6 +22,7 @@ from recfmt import sub, add, mul, dot, ln, nz, ang, remap
 W_PX, H_PX, TX, TY = 1600.0, 900.0, 1.245, 0.70   # Kenshi FP view: tan half-angles (vmcheck onscr)
 BLADE = {0: 8.0, 1: 5.85}
 ARC_MID, ARC_SPEED = 4.0, 8.0   # edge_arc: point on the blade (dm from the grip), minimum perpendicular speed (dm/s)
+ARC_U0 = 0.28                   # edge_arc: swing u where the wind-up ends (KenshiFP swing key 1, g_vm_swk_u[1])
 STATE_ORDER = ('ready', 'swing', 'block', 'swing->block', 'aim', 'reload', 'settle', 'draw', 'lower', 'native')
 NATIVE_ZF = 0.99   # zoom fade below this = the body plays the native animation (viewmodel faded, PT29)
 
@@ -104,7 +106,7 @@ def frame_metrics(rec):
             mid = lambda q: add(q["mp"], mul(q["mf"], ARC_MID))
             vel = mul(sub(mid(c), mid(a)), 1.0 / max(F[i]["dt"] + F[i + 1]["dt"], 1e-4))
             vp = sub(vel, mul(b["mf"], dot(vel, b["mf"])))
-            if ln(vp) > ARC_SPEED:
+            if ln(vp) > ARC_SPEED and F[i].get("swu", 1.0) >= ARC_U0:
                 b["arc"] = dot(b["mu"], nz(vp))
         if not (a['tpx'] and b['tpx'] and c['tpx']) or max(F[i - 1]['dt'], F[i]['dt'], F[i + 1]['dt']) > 0.07:
             continue
@@ -191,6 +193,27 @@ def moves_ok(table, required):
         still = m['move_dm'] < MOVE_DM and m['move_deg'] < MOVE_DEG
         ok = ok and not still
         txt.append('%s:%.1fdm/%.0fdeg%s' % (s, m['move_dm'], m['move_deg'], ':STILL' if still else ''))
+    return ok, txt
+
+
+ARC_OK, ARC_SHARE, ARC_WB = 0.7, 0.85, 30.0   # E1 gate: per-frame edge_arc >= ARC_OK on >= ARC_SHARE of fast frames, wrist bend <= ARC_WB
+
+
+def arc_gate(table, spec, wb_lim=ARC_WB):
+    """E1 gate (sword edge leads the arc): spec = {state: share}. Each state must exist with fast frames, have
+    arc_ok >= share and a sane wrist (wb_max <= wb_lim deg; a patch that turns the edge by folding the wrist fails).
+    Returns (ok, [text per state])."""
+    ok, txt = True, []
+    for s, share in spec.items():
+        m = table.get(s)
+        if not m or not m.get('arc_n'):
+            ok = False
+            txt.append(s + ':NO_FAST_FRAMES')
+            continue
+        good = m['arc_ok'] >= share and m['wb_max'] <= wb_lim
+        ok = ok and good
+        txt.append('%s:arc_ok=%.2f/%.2f,arc_p05=%.2f,n=%d,wb_max=%.1f/%.0f%s' % (
+            s, m['arc_ok'], share, m['arc_p05'], m['arc_n'], m['wb_max'], wb_lim, '' if good else ':BAD'))
     return ok, txt
 
 

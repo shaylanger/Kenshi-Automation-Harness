@@ -2,7 +2,7 @@
 """animlab.py -- offline animation lab, phase 1 (REPLAY): replay recorded viewmodel frames through a solver adapter,
 report the in-game metrics per pose state, compare variants side by side. Docs: docs/animlab/USAGE.md.
 
-  animlab.py metrics <rec>                                   per-state metrics of one recording (game or replay)
+  animlab.py metrics <rec> [--require S,..] [--arc S:share]  per-state metrics + moves (C1) / arc (E1) gates
   animlab.py compare <real> <sim> [--skip N]                 per-frame replay error + metrics side by side
   animlab.py replay  <rec> --adapter CMD [--set k=v]... [-o out.txt] [--skip N]
   animlab.py sweep   <rec> --adapter CMD [--variant 'name[@CMD]: adapter args']... [--metrics a,b] [-j N] [--keep DIR]
@@ -87,6 +87,13 @@ def cmd_metrics(a):
     if req:
         ok, txt = M.moves_ok(T, req)
         print('moves %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
+    arc = getattr(a, 'arc', None)
+    if arc is None:   # E1: melee recordings with a swing get the edge-leads-the-arc gate by default
+        arc = 'swing:%g' % M.ARC_SHARE if 'swing' in T else ''
+    spec = {k: float(v or M.ARC_SHARE) for k, _, v in (x.partition(':') for x in arc.split(',') if x)}
+    if spec:
+        ok, txt = M.arc_gate(T, spec, a.wb_max)
+        print('arc %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
 
 
 NOCMP = ('off', 'draw', 'lower', 'native', 'settle')   # not compared: blends + native animation (no solver output on screen)
@@ -230,6 +237,8 @@ def main():
     sp = ap.add_subparsers(dest='cmd')
     p = sp.add_parser('metrics'); p.add_argument('rec'); p.add_argument('--skip', type=int, default=0)
     p.add_argument('--require', help='states that must move visibly from ready, comma list (default: aim,reload or block,swing by the states seen)')
+    p.add_argument('--arc', help="E1 edge-leads-the-arc gate, 'state[:share],...' (default swing:0.85 when a swing is seen; '' = off)")
+    p.add_argument('--wb-max', type=float, default=30.0, help='wrist bend limit (deg) for the arc gate')
     p = sp.add_parser('compare'); p.add_argument('real'); p.add_argument('sim'); p.add_argument('--skip', type=int, default=0)
     for name in ('replay', 'sweep', 'gate'):
         p = sp.add_parser(name)
