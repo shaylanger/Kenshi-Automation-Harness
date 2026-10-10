@@ -11,8 +11,9 @@ callback measures what the previous apply rendered). Per frame:
   step    tip screen step per frame, px
   arc     edge_arc (E1, melee): cos(blade edge mu, mid-blade velocity perpendicular to the blade), frames where that speed
           > 8 dm/s; +1 = the edge leads the arc, -1 = the back of the blade leads. Per state: arc_ok = share of fast frames
-          with arc >= 0.7, arc_p05 = 5th percentile. Only after the wind-up (swing u >= ARC_U0): in the wind-up the edge
-          faces the coming strike, i.e. away from the backswing motion, so arc < 0 there is correct
+          with arc >= 0.7, arc_p05 = 5th percentile. Only in the stroke (ARC_U0 <= swing u < ARC_U1): in the wind-up the edge
+          faces the coming strike, i.e. away from the backswing motion, so arc < 0 there is correct; Shay 2026-10-09: the edge
+          must line up from the stroke start and lead through it, the wind-up / follow-through may be off-line
 States: ready, swing, block, swing->block (a block entered straight from a swing), aim, reload (crossbow),
 draw / lower (blends), native (viewmodel faded out by zoom, zf < 0.99), off (no viewmodel). Hitch frames (dt > 0.07 s, or next to one) are left out of jit/step.
 """
@@ -23,6 +24,7 @@ W_PX, H_PX, TX, TY = 1600.0, 900.0, 1.245, 0.70   # Kenshi FP view: tan half-ang
 BLADE = {0: 8.0, 1: 5.85}
 ARC_MID, ARC_SPEED = 4.0, 8.0   # edge_arc: point on the blade (dm from the grip), minimum perpendicular speed (dm/s)
 ARC_U0 = 0.28                   # edge_arc: swing u where the wind-up ends (KenshiFP swing key 1, g_vm_swk_u[1])
+ARC_U1 = 0.58                   # edge_arc: swing u where the stroke ends (key 4); Shay 2026-10-09: only the stroke is gated
 STATE_ORDER = ('ready', 'swing', 'block', 'swing->block', 'aim', 'reload', 'settle', 'draw', 'lower', 'native')
 NATIVE_ZF = 0.99   # zoom fade below this = the body plays the native animation (viewmodel faded, PT29)
 
@@ -106,7 +108,7 @@ def frame_metrics(rec):
             mid = lambda q: add(q["mp"], mul(q["mf"], ARC_MID))
             vel = mul(sub(mid(c), mid(a)), 1.0 / max(F[i]["dt"] + F[i + 1]["dt"], 1e-4))
             vp = sub(vel, mul(b["mf"], dot(vel, b["mf"])))
-            if ln(vp) > ARC_SPEED and F[i].get("swu", 1.0) >= ARC_U0:
+            if ln(vp) > ARC_SPEED and ARC_U0 <= F[i].get("swu", 1.0) < ARC_U1:
                 b["arc"] = dot(b["mu"], nz(vp))
         if not (a['tpx'] and b['tpx'] and c['tpx']) or max(F[i - 1]['dt'], F[i]['dt'], F[i + 1]['dt']) > 0.07:
             continue
@@ -415,6 +417,96 @@ def churn_check(S, rev_max=CHURN_REV, grip_max=CHURN_GRIP, tw=CHURN_T, win=CHURN
                '%.1f@%d' % (wstep[1], wstep[2]) if wstep else '-', sroll_step, ('' if ok_sroll else ':BAD') if sroll_gate else '(info)'))
     txt.append('ratio=%.2f(info)' % ratio[0] + ('@%d-%d,arm=%.0f,wep=%.0f,%s' % ratio[1] if ratio[1] else ''))
     return ok_rev and ok_roll and (ok_sroll or not sroll_gate), txt, dict(rev=rev, ratio=ratio, rolls=rolls, srolls=srolls)
+
+
+# E1 inline (Shay 2026-10-09, reference photos e1*.png vs Chivalry): the blade stays roughly in line with the forearm through the
+# wind-up and stroke, the arc comes from the shoulder/elbow, the wrist does little.
+SWING_PHASES = ((ARC_U0, 'windup'), (0.58, 'stroke'), (0.78, 'follow'), (9.0, 'recov'))   # swing u ends (KenshiFP g_vm_swk_u 1, 4, 5)
+INL_FB_MED, INL_FB_MAX, INL_SC_MAX, INL_WR = 30.0, 40.0, 40.0, 0.6   # gate: forearm-blade deg (median, max), screen max, wrist share
+INL_GATE, INL_WR_GATE = ('windup', 'stroke'), ('stroke',)   # the wind-up moves the hand from the ready grip into line: wrist share gated in the stroke only
+
+
+def swing_phase(st, u):
+    if st != 'swing':
+        return st
+    return next(n for e, n in SWING_PHASES if u < e)
+
+
+def _rot_min(a, b, v):
+    """v rotated by the minimal rotation taking unit a to unit b (no twist about the forearm: pronation stays 'wrist')."""
+    x = cross(a, b); s = ln(x)
+    if s < 1e-9:
+        return v
+    k = mul(x, 1 / s); t = math.atan2(s, dot(a, b))
+    return add(add(mul(v, math.cos(t)), mul(cross(k, v), math.sin(t))), mul(k, dot(k, v) * (1 - math.cos(t))))
+
+
+def _scr_ang(a0, a1, b0, b1):
+    """screen angle (deg) between the projected segments a0->a1 and b0->b1 (None if off screen / too short)."""
+    p = [proj(x) for x in (a0, a1, b0, b1)]
+    if not all(p):
+        return None
+    v1, v2 = (p[1][0] - p[0][0], p[1][1] - p[0][1]), (p[3][0] - p[2][0], p[3][1] - p[2][1])
+    if math.hypot(*v1) <= 3 or math.hypot(*v2) <= 3:
+        return None
+    return abs(math.degrees(math.atan2(v1[0] * v2[1] - v1[1] * v2[0], dot(v1 + (0,), v2 + (0,)))))
+
+
+def inline_series(F, P):
+    """per rendered melee frame: phase, elbow el, wrist wr, grip mp, blade mf, tip (camera numbers, dm)."""
+    S = []
+    for i in range(len(P)):
+        b = P[i]
+        if not b['wih'] or F[i]['cls'] != 0 or b['state'] == 'off':
+            S.append(None); continue
+        S.append(dict(i=i, ph=swing_phase(b['state'], F[i].get('swu', 0.0)), el=b['J'][4], wr=b['J'][5], mp=b['mp'], mf=b['mf'], tip=b['tip']))
+    return S
+
+
+def inline_table(S):
+    """{phase: dict(n, fb_med, fb_max, sc_med, sc_max, wr)}.
+    fb = 3D angle forearm (elbow -> wrist) vs blade (0 = in line); sc = the same angle on screen (forearm drawn back from the
+    wrist, blade forward from the grip); wr = wrist share of the tip motion: sum |tip - where it would be if the blade had
+    stayed rigid with the forearm (minimal rotation, so forearm twist counts as wrist)| / sum |tip step|, over consecutive
+    frames of the same phase. ~0 = the arm carries the blade, ~1 = the wrist turns it."""
+    A, C, W = {}, {}, {}
+    for k, s in enumerate(S):
+        if not s:
+            continue
+        fa = nz(sub(s['wr'], s['el']))
+        A.setdefault(s['ph'], []).append(math.degrees(math.acos(max(-1.0, min(1.0, dot(fa, s['mf']))))))
+        sc = _scr_ang(sub(s['wr'], mul(fa, 0.5)), s['wr'], s['mp'], add(s['mp'], mul(s['mf'], 0.5)))
+        if sc is not None:
+            C.setdefault(s['ph'], []).append(sc)
+        a = S[k - 1] if k else None
+        if a and a['ph'] == s['ph']:
+            fa0 = nz(sub(a['wr'], a['el']))
+            rig = add(s['wr'], _rot_min(fa0, fa, sub(a['tip'], a['wr'])))
+            w = W.setdefault(s['ph'], [0.0, 0.0]); w[0] += ln(sub(s['tip'], rig)); w[1] += ln(sub(s['tip'], a['tip']))
+    out = {}
+    for ph, xs in A.items():
+        xs = sorted(xs); cs = sorted(C.get(ph, [])); w = W.get(ph)
+        out[ph] = dict(n=len(xs), fb_med=xs[len(xs) // 2], fb_max=xs[-1], sc_med=cs[len(cs) // 2] if cs else float('nan'),
+                       sc_max=cs[-1] if cs else float('nan'), wr=w[0] / w[1] if w and w[1] > 1e-6 else float('nan'))
+    return out
+
+
+def inline_check(T, phases=INL_GATE, fb_med=INL_FB_MED, fb_max=INL_FB_MAX, sc_max=INL_SC_MAX, wr=INL_WR, wr_phases=INL_WR_GATE):
+    """E1 inline gate: in each swing phase of `phases` the forearm-blade angle (median <= fb_med, max <= fb_max, screen max
+    <= sc_max), in each of `wr_phases` also the wrist share (<= wr). Other phases are printed as info. Returns (ok, [text])."""
+    ok, txt = True, []
+    for ph in ('windup', 'stroke', 'follow', 'recov', 'ready', 'block'):
+        m = T.get(ph)
+        if not m:
+            if ph in phases:
+                ok = False; txt.append(ph + ':MISSING')
+            continue
+        g = ph in phases
+        good = not g or (m['fb_med'] <= fb_med and m['fb_max'] <= fb_max and not m['sc_max'] > sc_max and (ph not in wr_phases or not m['wr'] > wr))
+        ok = ok and good
+        txt.append('%s:fb=%.0f/%.0f,sc=%.0f/%.0f,wr=%.2f%s' % (ph, m['fb_med'], m['fb_max'], m['sc_med'], m['sc_max'], m['wr'],
+                                                             ('' if good else ':BAD') if g else '(info)'))
+    return ok, ['limits fb<=%.0f/%.0f,sc<=%.0f,wr<=%.2f(%s)' % (fb_med, fb_max, sc_max, wr, '+'.join(wr_phases))] + txt
 
 
 STOCK_H, STOCK_BACK, STOCK_NEAR = 1.45, 8.0, 1.5   # C2: stock top above the bolt axis, stock length behind the grip, near clip (dm)

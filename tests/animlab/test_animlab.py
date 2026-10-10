@@ -206,6 +206,29 @@ class T(unittest.TestCase):
         self.assertTrue(M.churn_check(series(still, 0.0, stroke_step=3.0), sroll_gate=True)[0])   # 3 deg/frame: small + gradual
         self.assertAlmostEqual(M._twist((0, 0, 1.0), ((1, 0, 0), (0, 1, 0), (0, 0, 1)), ((1, 0, 0), (0, 0, 1), (0, -1, 0))), 0.0)   # roll about x, not z
 
+    def test_inline_check(self):   # E1 (Shay 2026-10-09): blade in line with the forearm, the arm (not the wrist) drives the arc
+        def series(off, arm_turn, hand_turn, n=40):
+            S = []
+            for i in range(n):
+                ph = 'windup' if i < 20 else 'stroke'
+                ta = math.radians(arm_turn * i); tb = ta + math.radians(off + hand_turn * i)
+                el = (0.0, -3.0, 10.0); fa = (math.sin(ta), math.cos(ta), 0.0)   # forearm turns about the elbow in the screen plane
+                wr = M.add(el, M.mul(fa, 2.5)); mf = (math.sin(tb), math.cos(tb), 0.0)
+                S.append(dict(i=i, ph=ph, el=el, wr=wr, mp=wr, mf=mf, tip=M.add(wr, M.mul(mf, 8.0))))
+            return S
+        T = M.inline_table(series(10.0, 2.0, 0.0))   # 10 deg off line, the whole arm turns: no wrist share
+        self.assertAlmostEqual(T['stroke']['fb_med'], 10.0, 3); self.assertAlmostEqual(T['stroke']['sc_max'], 10.0, 1)
+        self.assertLess(T['stroke']['wr'], 1e-6)
+        ok, txt = M.inline_check(T); self.assertTrue(ok, txt)
+        T = M.inline_table(series(80.0, 0.0, 2.0))   # blade 80-158 deg off the still forearm, turned by the wrist only
+        self.assertAlmostEqual(T['stroke']['wr'], 1.0, 6); self.assertGreater(T['windup']['fb_med'], 80.0)
+        ok, txt = M.inline_check(T); self.assertFalse(ok)
+        self.assertTrue(txt[1].startswith('windup:') and txt[1].endswith(':BAD') and txt[2].endswith(':BAD'), txt)
+        ok, txt = M.inline_check(M.inline_table(series(10.0, 1.0, 1.0)))   # in line at first, the wrist drifts it off 40+ deg
+        self.assertFalse(ok); self.assertIn('stroke:', txt[2]); self.assertTrue(txt[2].endswith(':BAD'), txt)
+        self.assertEqual(M.swing_phase('swing', 0.3), 'stroke'); self.assertEqual(M.swing_phase('swing', 0.1), 'windup')
+        self.assertEqual(M.swing_phase('block', 0.3), 'block')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)

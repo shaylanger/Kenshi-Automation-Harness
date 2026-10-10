@@ -180,6 +180,14 @@ def cmd_churn(a):
     print('churn %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
 
 
+def cmd_inline(a):
+    """E1 inline: blade in line with the forearm, arm-driven arc (see metrics.inline_table / inline_check)."""
+    rec = recfmt.parse(a.rec)
+    ok, txt = M.inline_check(M.inline_table(M.inline_series(rec.frames, M.frame_metrics(rec))), tuple(x for x in a.phases.split(',') if x),
+                             a.fb_med, a.fb_max, a.sc_max, a.wr)
+    print('inline %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
+
+
 def cmd_stock(a):
     """C2: crossbow stock low on screen (stock top <= --max % from the bottom in ready) and, with --ref, ready orientation
     within --ori deg of a known-good recording."""
@@ -275,6 +283,9 @@ def main():
     p = sp.add_parser('churn'); p.add_argument('rec'); p.add_argument('--rev', type=float, default=M.CHURN_REV)
     p.add_argument('--grip', type=float, default=M.CHURN_GRIP); p.add_argument('--roll', type=float, default=M.ROLL_MAX)
     p.add_argument('--stroke', action='store_true', help='also gate the stroke-start roll (E1 fix: small + gradual)')
+    p = sp.add_parser('inline'); p.add_argument('rec'); p.add_argument('--phases', default=','.join(M.INL_GATE))
+    p.add_argument('--fb-med', type=float, default=M.INL_FB_MED); p.add_argument('--fb-max', type=float, default=M.INL_FB_MAX)
+    p.add_argument('--sc-max', type=float, default=M.INL_SC_MAX); p.add_argument('--wr', type=float, default=M.INL_WR)
     p = sp.add_parser('stock'); p.add_argument('rec'); p.add_argument('--ref', help='known-good recording for the orientation check')
     p.add_argument('--max', type=float, default=M.STOCK_MAX); p.add_argument('--ori', type=float, default=M.ORI_MAX)
     p.add_argument('--h', type=float, default=M.STOCK_H, help='stock top above the bolt axis (dm)')
@@ -296,7 +307,7 @@ def main():
     a = ap.parse_args()
     if not a.cmd:
         ap.print_help(); return 2
-    return {'bolt': cmd_bolt, 'churn': cmd_churn, 'stock': cmd_stock, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
+    return {'bolt': cmd_bolt, 'churn': cmd_churn, 'inline': cmd_inline, 'stock': cmd_stock, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':
