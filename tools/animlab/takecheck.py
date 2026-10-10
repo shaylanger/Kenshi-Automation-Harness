@@ -23,7 +23,11 @@ A take = a video (optional), a labels file and one or more evidence files:
 Video: the take must end at the `end` label: video length - (end + offset) within [-0.2, endslack] s, and no
 frame may show the Windows mouse cursor (frames.py cursor at 5 fps; `--no-cursor` skips it).
 
-Usage: takecheck.py --labels L --ev E [--ev E2 ...] --rules R [--video V [--no-cursor] | --video-len S] [--name take]
+KenshiFP log (`--kfplog LOG [--log-t0 HH:MM:SS.ms]`): every free block / free swing in the take must have run its native
+animation (`... end: ... live=1`); a press whose progress never went live (fb_lives 0, p 1.010) fails `animlive`.
+
+Usage: takecheck.py --labels L --ev E [--ev E2 ...] --rules R [--video V [--no-cursor] | --video-len S] [--kfplog LOG
+       [--log-t0 T]] [--name take]
 Exit 0 = PASS. Prints one line per check, then `RESULT <name> PASS|FAIL <failed checks>`.
 """
 import argparse, re, shlex, subprocess, sys
@@ -219,12 +223,57 @@ def check(L, S, R, cfg, vlen=None):
     return not fails, lines, fails
 
 
+# ---- native animation liveness from the KenshiFP log (Misses 2026-10-10 fb_lives: fb_lives stayed 0 over 90+ free
+# blocks, progress p=1.010 / pmin 9.000 the whole time, while the body showed the block pose; nothing in the vm rec or the
+# sampled evidence shows it). CLASS: a native animation the take relies on never ran (progress never live). Judged from
+# the log lines `PT34 free block start tech=..` / `PT34 free block end: .. pmin=.. live=N` and `free swing end: .. live=N`.
+LOGT = re.compile(r'^\[(\d+):(\d+):(\d+(?:\.\d+)?)\]')
+
+
+def log_events(path, t0=None, t1=None):
+    """[(wall s, kind, live, info)] for free block / free swing ends between wall clock t0..t1 (s of the day)."""
+    out, tech = [], None
+    for line in open(path, errors='replace'):
+        m = LOGT.match(line)
+        if not m:
+            continue
+        t = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+        if (t0 is not None and t < t0) or (t1 is not None and t > t1):
+            continue
+        g = re.search(r'PT34 free block start tech=([0-9a-fA-F]+)', line)
+        if g:
+            tech = g.group(1).lstrip('0')[-6:]
+            continue
+        g = re.search(r'(PT34 free block end|free swing end):.*?pmin=([-0-9.]+).*?live=(\d)', line)
+        if g:
+            out.append((t, 'block' if 'block' in g.group(1) else 'swing', int(g.group(3)), 'pmin=%s%s' % (g.group(2), (' tech=' + tech) if tech and 'block' in g.group(1) else '')))
+            tech = None
+    return out
+
+
+def wall(s):
+    h, m, x = s.split(':'); return int(h) * 3600 + int(m) * 60 + float(x)
+
+
+def animlive_check(path, t0=None, t1=None):
+    E = log_events(path, t0, t1)
+    dead = [e for e in E if not e[2]]
+    ok = not dead
+    txt = 'ends=%d (block %d swing %d) never_live=%d%s' % (len(E), sum(1 for e in E if e[1] == 'block'), sum(1 for e in E if e[1] == 'swing'),
+                                                           len(dead), '' if ok else ':BAD')
+    if dead:
+        txt += ' ' + ' '.join('%s@%02d:%02d:%05.2f(%s)' % (e[1], e[0] // 3600, e[0] % 3600 // 60, e[0] % 60, e[3]) for e in dead[:6])
+    return ok, txt
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--labels', required=True); ap.add_argument('--ev', action='append', default=[])
     ap.add_argument('--rules', required=True); ap.add_argument('--video'); ap.add_argument('--video-len', type=float, help='known video length (s) instead of --video (archived takes)'); ap.add_argument('--name', default='take')
     ap.add_argument('--set', action='append', default=[], help='name=value, overrides a rules-file `set`')
     ap.add_argument('--no-cursor', action='store_true', help='skip the mouse-cursor frame check on --video')
+    ap.add_argument('--kfplog', help='KenshiFP.log of the take: every free block / free swing must have run its native animation (live=1)')
+    ap.add_argument('--log-t0', help='wall clock HH:MM:SS[.ms] of take t=0 in the log (default: judge the whole log)')
     a = ap.parse_args()
     L = read_labels(a.labels); S = read_ev(a.ev); R, cfg = read_rules(a.rules)
     for x in a.set:
@@ -241,6 +290,13 @@ def main():
         lines.append('cursor %s %s' % ('PASS' if cok else 'FAIL', ctxt))
         if not cok:
             ok = False; fails.append('cursor')
+    if a.kfplog:
+        t0 = wall(a.log_t0) if a.log_t0 else None
+        t1 = t0 + (L[-1][0] if L else 0) + 1.0 if t0 is not None else None
+        aok, atxt = animlive_check(a.kfplog, t0, t1)
+        lines.append('animlive %s %s' % ('PASS' if aok else 'FAIL', atxt))
+        if not aok:
+            ok = False; fails.append('animlive')
     for x in lines:
         print(x)
     print('RESULT %s %s %s' % (a.name, 'PASS' if ok else 'FAIL', ' '.join(fails) if fails else '%d checks' % len(lines)))

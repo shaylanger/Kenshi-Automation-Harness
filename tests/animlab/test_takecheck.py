@@ -85,5 +85,21 @@ class TakeCheck(unittest.TestCase):
         self.assertTrue(T.cond_ok(c('n=1'), '1.00'))
 
 
+    def test_animlive(self):   # miss 2026-10-10 fb_lives 0: free block progress never live while the body showed the pose
+        log = """[10:30:55.380] [controls] PT34 free block start tech=000000014b9b27b0 dir=1 f=50.0 org=0
+[10:30:57.140] [controls] PT34 free block end: 1760 ms p=1.010 pmin=9.000 live=0
+[10:31:00.000] [controls] free swing end: 1359 ms steps=95 pmin=0.010 live=1 why=done
+[10:31:05.000] [controls] PT34 free block start tech=000000014b9b1500 dir=1 f=50.0 org=0
+[10:31:06.000] [controls] PT34 free block end: 900 ms p=1.010 pmin=0.050 live=1
+"""
+        with tempfile.NamedTemporaryFile('w', suffix='.log', delete=False) as f:
+            f.write(log)
+        try:
+            ok, t = T.animlive_check(f.name); self.assertFalse(ok, t); self.assertIn('never_live=1:BAD', t); self.assertIn('tech=9b27b0', t)
+            ok, t = T.animlive_check(f.name, T.wall('10:30:59'), T.wall('10:31:10')); self.assertTrue(ok, t); self.assertIn('ends=2', t)
+        finally:
+            os.unlink(f.name)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=1)

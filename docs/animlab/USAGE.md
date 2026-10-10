@@ -71,6 +71,9 @@ hold over the label's WHOLE segment with no unsampled gap > `maxgap` (a label tr
 = setup state at the label start (e.g. loaded before an aim), `forbid` = nothing may happen in the take (combat messages,
 bystanders, KO), `cover` = keys sampled across the whole take, and the video must end at the `end` label (`endslack`).
 Prints one line per check and `RESULT <name> PASS|FAIL <failed checks>`. A take without sampled evidence fails (unproven).
+`--kfplog <KenshiFP.log> [--log-t0 HH:MM:SS.ms]` adds `animlive`: every free block / free swing in the take (log window
+t0 .. t0 + end label + 1 s) must have run its native animation (`PT34 free block end ... live=1`, `free swing end ... live=1`);
+progress that never went live (p 1.010, pmin 9.000) fails. Block tech ids in the log are heap pointers (per session: info only).
 KenshiFP adapter: sampler `components/KenshiFP/animlab/take-sample.sh` (source it in the take script:
 `take_sample_start <ev> "$T0" <fp char> ["<allowed>|..."]` ... `take_sample_stop`) + rules `take-rules.txt`.
 `animlab.py guard <rec>`: block guard readability judged per press (runs of block frames): the median blade elevation
