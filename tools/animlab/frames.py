@@ -137,6 +137,37 @@ def find_cursor(f, white=200, dark=110):
     return out
 
 
+KC_CENTRE = 6   # px: the game draws its own target cursor at the screen centre in FP view = the FP crosshair (accepted)
+
+
+def find_kcursor(f, a0=5, a1=11, con=25, bright=90, share=0.8):
+    """Kenshi's own target/move cursor (4 thin 1-px arrows pointing at a centre gap, ~25 px across): list of (x, y)
+    centres. Misses 2026-10-10 "cursor variants": the harness-parked mouse showed as this cursor at (1278,719) in
+    anim-xbow-z25 7-37 s and vm-rework anim-sword/xbow-z0, where the arrow test (find_cursor) saw nothing. Per centre:
+    each arm (offsets a0..a1 px) is a thin line (brighter than the pixels 2 px to either side) on >= share of its
+    pixels, the arrows stop short of the centre (a plain cross / grid line runs through) and every arm has arrowhead
+    pixels beside the line (a UI grid line has none)."""
+    import numpy as np
+    L = f.min(2).astype(np.int16)
+    Hh, Ww = L.shape
+    Pd = np.pad(L, 2, mode='edge')
+    V = (L - np.maximum(Pd[2:-2, :-4], Pd[2:-2, 4:]) > con) & (L > bright)
+    Hm = (L - np.maximum(Pd[:-4, 2:-2], Pd[4:, 2:-2]) > con) & (L > bright)
+    B = L > bright
+    m = a1 + 2
+    def sl(A, dy, dx):
+        return A[m + dy:Hh - m + dy, m + dx:Ww - m + dx].astype(np.int16)
+    need = int(np.ceil(share * (a1 - a0 + 1)))
+    c = np.ones((Hh - 2 * m, Ww - 2 * m), bool)
+    for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        A = V if dx == 0 else Hm
+        c &= sum(sl(A, dy * k, dx * k) for k in range(a0, a1 + 1)) >= need
+        c &= sum(sl(B, dy * k + dx * s_, dx * k + dy * s_) for k in range(a0, a1 + 1) for s_ in (-1, 1)) >= 2
+    c &= (sum(sl(V, k, 0) for k in range(-2, 3)) <= 1) & (sum(sl(Hm, 0, k) for k in range(-2, 3)) <= 1)
+    ys, xs = np.nonzero(c)
+    return [(int(x + m), int(y + m)) for y, x in zip(ys, xs)]
+
+
 def cursor_check(video, fps=5.0, t0=None, t1=None, name='take'):
     """(ok, text): no frame (sampled at fps) may show the mouse cursor. Prints the spans where it shows."""
     hits = []
@@ -144,6 +175,9 @@ def cursor_check(video, fps=5.0, t0=None, t1=None, name='take'):
     for t, f in iter_frames_full(video, fps, t0, t1):
         nfr += 1
         c = find_cursor(f)
+        if not c:   # Kenshi's own cursor anywhere but the screen centre (there it is the FP crosshair)
+            Hh, Ww = f.shape[:2]
+            c = [(x, y, 0) for x, y in find_kcursor(f) if abs(x - Ww / 2) > KC_CENTRE or abs(y - Hh / 2) > KC_CENTRE]
         if c:
             hits.append((t, c[0]))
     if not nfr:

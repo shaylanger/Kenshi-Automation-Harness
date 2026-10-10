@@ -55,6 +55,19 @@ class Cursor(unittest.TestCase):   # Shay 2026-10-10 ticket A: no mouse cursor i
             c = FR.find_cursor(cursor_frame(500, 300, sc))
             self.assertTrue(c, 'scale %g' % sc); self.assertLessEqual(abs(c[0][0] - 500), 1.5 * sc); self.assertLessEqual(abs(c[0][1] - 300), 1.5 * sc)
 
+    def test_kenshi_cursor(self):   # Misses 2026-10-10 cursor variants: Kenshi's 4-arrow target cursor
+        f = np.zeros((900, 1600, 3), int); f[...] = (40, 40, 40)
+        def kc(f, x, y):
+            for k in range(4, 13):   # 4 thin arms, gap at the centre, arrowhead near each tip
+                f[y - k, x] = f[y + k, x] = f[y, x - k] = f[y, x + k] = 140
+            for d in (-1, 1):
+                f[y - 7, x + d] = f[y + 7, x + d] = f[y + d, x - 7] = f[y + d, x + 7] = 140
+        kc(f, 1278, 719)
+        self.assertEqual(FR.find_kcursor(f), [(1278, 719)])
+        g = np.zeros((900, 1600, 3), int); g[...] = (40, 40, 40)
+        g[700:740, 1278] = 140; g[719, 1258:1300] = 140   # a plain UI grid cross (no gap, no heads): not a cursor
+        self.assertEqual(FR.find_kcursor(g), [])
+
     def test_no_cursor(self):
         f = np.zeros((900, 1600, 3), int); f[...] = (190, 150, 100)
         self.assertEqual(FR.find_cursor(f), [])
