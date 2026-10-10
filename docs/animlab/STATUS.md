@@ -130,6 +130,23 @@ Format: date | point | what the game showed | recording path | build | status
       f14/e0). (2) render.py review sheet: every Nth frame, elbow + grip trails, churn frames boxed red. (3) fix the
       candidate (elbow side continuous through the wind-up), keep arc/wb. Re-render e1-compare.mp4 + sheet, message main
       numbers + paths; send the patch to the fixer only after arc + wb + churn pass.
+   CHURN STATE (maintainer 7 stopped at context limit; work UNCOMMITTED in the harness tree: tools/animlab/metrics.py
+      churn_series/churn_check/_twist/_forearm_vis + animlab.py `churn` cmd; no unit test / regress step yet).
+      Shay add-on (via main): NO hand roll in the wind-up (roll change <= ~10 deg), small gradual roll at stroke start;
+      gate (d) total wind-up roll about the forearm > ~15 deg FAILs; arc may be gated on stroke + follow-through only.
+      Measured with `animlab.py churn` (rev = visible forearm end out-and-back px within 0.4 s with grip extent <= 250 px,
+      gate 450; windup_roll = swing-twist of the weapon-frame rotation about the forearm axis, gate 15):
+      game f14-e0 rev 276 roll 67.9 | f13-sw0 393 / 13.7 | vmq-f8c sword-z0 98 / 10.1 | vmq-f804 sword-z0 233 / 66.0 |
+      replays current solver e0 194 / 77.0, sw0 186 / 46.7 | E1 candidate kfp-e1-keys e0 556 / 159.2, sw0 545 / 144.7.
+      => rev 450 separates candidate from game/base; the CURRENT game swing already rolls 46-77 deg in the wind-up (the
+      PT17 wfix roll), so roll<=15 fails game + base too: report that to main (it is what Shay asks to remove).
+      ratio (a) is info only: game ready frames reach 8.7 (elbow off screen moves with the weapon still), not separable.
+      Next: unit test + regress step (candidate FAIL rev+roll; fixed variant PASS), variant patch: lead weight 0 for
+      u < g_vm_swk_u[1] (swlin ramp from the wind-up end) + wfix roll held at its ready value through the wind-up, then
+      arc (stroke) / wb / churn on f14-e0 + f13-sw0; render.py review sheet (every Nth frame, elbow+grip trails, churn
+      frames boxed red); re-render C:\KenshiTestRuns\animlab\e1-compare.mp4 (old: /root/animlab-work/e1/fr-e1base,
+      fr-e1k = 190 frames of f14-e0 swing 1) + sheet; message main; patch to fixer only after arc+wb+churn pass.
+      Scratch scripts: C:\Users\Shay\AppData\Local\Temp\claude\C--KenshiModding\al7 (churn*.py, runchurn.sh).
    e. New Misses rows from the fixer (agent a7ff9f30a50ed26e7) in order.
    Not yet sent to main: "C3 partly: check animlab.py bolt, f16/c3a FAIL dev95 0.82; no passing build yet".
    Gotchas: /root/animlab-kfp-src is re-synced by the fixer (kfpvm_cur drifts: pin checks with build.sh --rev; new
