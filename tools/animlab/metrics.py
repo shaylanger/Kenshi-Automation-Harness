@@ -892,3 +892,34 @@ def stroke_check(F, P, overhead=(), len_min=STK_LEN_MIN, len_u=STK_LEN_U, tilt_m
                 ok = False; parts.append('overhead n/a:BAD')
         txt.append('swing%d%s:%s' % (k, '' if stk is None else '(stroke%d)' % stk, ','.join(parts)))
     return ok, txt
+
+
+# ---- guard readability (Miss 2026-10-10 sword-z25-block.mp4, orbit 3.0: the zoom-25 block guard showed the blade hanging
+# straight down with the hilt at the face, a stick in front of the body). Judged in the world frame (camera-independent):
+# blade elevation above the horizontal per block frame; info: hilt distance from the head bone.
+GUARD_ELEV = -60.0   # deg: median blade elevation over block frames must be above this (a hanging guard is ~-80..-90)
+
+
+def guard_series(F, P):
+    """[(frame, elev_deg, hilt_head_dm)] over rendered block frames (state block / swing->block, or the recorded UI
+    state blocking: zoomed-out frames are labelled native)."""
+    out = []
+    for i, p in enumerate(P):
+        r = F[i]
+        if not p['wih'] or not (p['state'] in ('block', 'swing->block') or r['st'] == 'blocking' or r['ti'] == 3):
+            continue
+        U = nz((r['rt'][1], r['up'][1], r['fw'][1])) if r.get('rt') else (0.0, 1.0, 0.0)
+        e = math.degrees(math.asin(max(-1.0, min(1.0, dot(nz(p['mf']), U)))))
+        hd = F[i + 1].get('hd') if i + 1 < len(F) else None
+        out.append((i, e, ln(sub(p['mp'], hd)) if hd else float('nan')))
+    return out
+
+
+def guard_check(S, elev_min=GUARD_ELEV, min_n=5):
+    if len(S) < min_n:
+        return False, ['block frames=%d < %d:BAD' % (len(S), min_n)]
+    es = sorted(s[1] for s in S); med = es[len(es) // 2]; lo = min(S, key=lambda s: s[1])
+    hh = sorted(s[2] for s in S if s[2] == s[2])
+    ok = med >= elev_min
+    return ok, ['elev_med=%.0f/%.0f%s' % (med, elev_min, '' if ok else ':BAD'), 'elev_min=%.0f@frame%d' % (lo[1], lo[0]),
+                'hilt_head_med=%.1fdm(info)' % (hh[len(hh) // 2] if hh else float('nan')), 'block_frames=%d' % len(S)]

@@ -270,6 +270,15 @@ class T(unittest.TestCase):
         for k, p in enumerate(P):
             p['mp'] = (-3.0 * k / 39.0, p['mp'][1], 6.0)   # middle moves left as much as down
         ok, t = M.stroke_check(F, P, overhead=(2,)); self.assertFalse(ok, t); self.assertIn('path=', t[0]); self.assertIn(':BAD(', t[0])
+    def test_guard_check(self):
+        # miss 2026-10-10 sword-z25-block orbit 3.0: block guard with the blade hanging straight down, hilt at the face
+        def take(mf):
+            F = [dict(st='blocking', ti=3, rt=(1, 0, 0), up=(0, 1, 0), fw=(0, 0, 1), hd=(0, -1.5, -0.7)) for _ in range(11)]
+            P = [dict(state='native', wih=1, mf=M.nz(mf), mp=(0.5, -2.0, 0.0)) for _ in range(10)]
+            return M.guard_series(F, P)
+        ok, t = M.guard_check(take((0.1, -1.0, 0.05))); self.assertFalse(ok, t); self.assertIn(':BAD', t[0])
+        ok, t = M.guard_check(take((0.2, 0.6, 0.8))); self.assertTrue(ok, t)
+        ok, t = M.guard_check([]); self.assertFalse(ok)
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)
