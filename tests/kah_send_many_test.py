@@ -10,8 +10,9 @@ kah = importlib.util.module_from_spec(spec); spec.loader.exec_module(kah)
 
 
 class FakeHarness(threading.Thread):
-    def __init__(self, d, poll=0.25, per_cmd=0.01):
+    def __init__(self, d, poll=0.25, per_cmd=0.01, crlf=False):
         super().__init__(daemon=True); self.d, self.poll, self.per_cmd, self.stop, self.polls_used = d, poll, per_cmd, False, 0
+        self.crlf = crlf   # Plugin.cpp writes outbox.txt through a text-mode ofstream: CRLF on Windows
 
     def run(self):
         inbox = os.path.join(self.d, 'inbox.txt')
@@ -22,7 +23,7 @@ class FakeHarness(threading.Thread):
             os.replace(inbox, inbox + '.reading')
             lines = [x for x in open(inbox + '.reading').read().split('\n') if x]
             os.remove(inbox + '.reading'); self.polls_used += 1
-            with open(os.path.join(self.d, 'outbox.txt'), 'a') as o:
+            with open(os.path.join(self.d, 'outbox.txt'), 'a', newline='\r\n' if self.crlf else None) as o:
                 for ln in lines:
                     f = ln.split('\t'); time.sleep(self.per_cmd)
                     o.write('%s\tok\techo %s\n' % (f[0], ' '.join(f[1:])))
@@ -46,6 +47,24 @@ class SendMany(unittest.TestCase):
     def test_matches_send(self):
         ok, detail = kah.send(self.d, 'status', [])
         self.assertTrue(ok); self.assertEqual(detail, 'echo status')
+
+
+class CrlfOutbox(unittest.TestCase):
+    """rg-01 DOWN01 (2026-10-10): replies kept the trailing CR of the CRLF outbox, so ' KO$' never matched."""
+    def setUp(self):
+        self.d = tempfile.mkdtemp(); open(os.path.join(self.d, 'enabled.flag'), 'w').close()
+        self.h = FakeHarness(self.d, crlf=True); self.h.start()
+
+    def tearDown(self):
+        self.h.stop = True; self.h.join(1); shutil.rmtree(self.d, True)
+
+    def test_send_strips_cr(self):
+        ok, detail = kah.send(self.d, 'where', ['Axima'])
+        self.assertTrue(ok); self.assertEqual(detail, 'echo where Axima')
+
+    def test_send_many_strips_cr(self):
+        R = kah.send_many(self.d, [('where', ['Axima']), ('status', [])], timeout=5)
+        self.assertEqual([r[1] for r in R], ['echo where Axima', 'echo status'])
 
 
 if __name__ == '__main__':

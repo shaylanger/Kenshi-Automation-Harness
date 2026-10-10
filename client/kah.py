@@ -187,7 +187,9 @@ def send(d, cmd, args, timeout=None):
                     # flushes long replies in chunks): only complete lines count.
                     if not raw.endswith(b'\n'):
                         continue
-                    parts = raw.decode('utf-8', errors='replace').rstrip('\n').split('\t', 2)
+                    # The harness writes outbox.txt in text mode (CRLF): strip the \r too, or every reply ends
+                    # in \r and end-anchored matches (' KO$') fail (rg-01 DOWN01, 2026-10-10).
+                    parts = raw.decode('utf-8', errors='replace').rstrip('\r\n').split('\t', 2)
                     if parts[0] == cid and len(parts) == 3:
                         return parts[1] == 'ok', parts[2]
         time.sleep(0.2)
@@ -221,7 +223,7 @@ def send_many(d, cmds, timeout=20):
                 for raw in f:
                     if not raw.endswith(b'\n'):
                         continue
-                    parts = raw.decode('utf-8', errors='replace').rstrip('\n').split('\t', 2)
+                    parts = raw.decode('utf-8', errors='replace').rstrip('\r\n').split('\t', 2)
                     if len(parts) == 3 and parts[0] in cids:
                         got[parts[0]] = (parts[1] == 'ok', parts[2])
         if len(got) < len(cids):
