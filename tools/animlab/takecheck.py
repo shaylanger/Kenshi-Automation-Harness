@@ -20,7 +20,9 @@ A take = a video (optional), a labels file and one or more evidence files:
     set grace|maxgap|endslack|offset <value>
   cond = <key><op><value>, op one of = != ~ !~ >= <= > < ; `=`/`!=` take `a|b` alternatives; `~` is a regex
   search; numbers compare numerically.
-Video: the take must end at the `end` label: video length - (end + offset) within [-0.2, endslack] s, and no
+Video: the take must end at the `end` label: video length - (end + offset) within [-0.2, endslack] s (offset = the
+measured T0 sync-flash time when the take has one, else `set offset`; `set trim 1` first cuts a longer tail at
+end + 0.3 s in place, only with a measured offset), and no
 frame may show the Windows mouse cursor (frames.py cursor at 5 fps; `--no-cursor` skips it) or a foreign overlay
 (speech bar, name tag, damage number, hint list, popup: frames.py overlay at 2 fps; `--no-overlay` skips it).
 Sync (T6 label lag): when the evidence has `sync=<n>` lines (take-sample.sh take_mark, sent with every label), the
@@ -354,7 +356,38 @@ def main():
     vlen = video_len(a.video) if a.video else a.video_len
     if a.video and vlen is None:
         print('video FAIL cannot read the length of %s' % a.video); return 1
-    ok, lines, fails = check(L, S, R, cfg, vlen)
+    sync_res, t0off = None, None
+    if a.video and not a.no_sync:   # T6 label lag: every label's sync flash within synclag of the T0 offset
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import frames
+        marks = frames.syncmarks(a.video) if S.get('sync') else []
+        sync_res = sync_check(L, S, marks, cfg.get('synclag', 0.15), bool(cfg.get('sync', 0)))
+        m = re.search(r'paired=([1-9]\d*) t0_offset=([-\d.]+)', sync_res[1])
+        t0off = float(m.group(2)) if m else None
+    # E6 "stop lag" (op-e6c +2.1 s, 2026-10-10): the video starts before T0 (recorder launched first), so with no measured
+    # offset the start gap counted as a tail. With a T0 sync flash the end check uses the measured offset; `set trim 1`
+    # cuts a real tail (> endslack past the end label) at end + 0.3 s (stream copy, in place) before judging.
+    ecfg = dict(cfg, offset=t0off) if t0off is not None else cfg
+    end = next((t for t, x in L if x.lower() == 'end'), None)
+    pre = []
+    if a.video and t0off is not None:
+        pre.append('end-offset T0 at video %.2f s (sync flash 0)' % t0off)
+    if (a.video and cfg.get('trim', 0) and 'corpus' not in a.video.replace('\\', '/').lower().split('/') and t0off is not None and end is not None and vlen is not None
+            and vlen - (end + t0off) > cfg['endslack']):
+        cut = end + t0off + 0.3
+        tmp = a.video + '.trim.mp4'
+        r = subprocess.run(['ffmpeg', '-hide_banner', '-v', 'error', '-y', '-i', a.video, '-t', '%.3f' % cut, '-c', 'copy',
+                            '-f', 'mp4', tmp], capture_output=True, text=True)
+        if r.returncode == 0 and video_len(tmp):
+            import os
+            os.replace(tmp, a.video)
+            pre.append('trim video %.2f -> %.2f s (tail %+.2f s past the end label cut at end + 0.3)' % (vlen, video_len(a.video), vlen - (end + t0off)))
+            vlen = video_len(a.video)
+        else:
+            pre.append('trim FAILED (%s), judged untrimmed' % (r.stderr.strip()[-120:] or 'no output'))
+    ok, lines, fails = check(L, S, R, ecfg, vlen)
+    lines = pre + lines
     if a.video and not a.no_cursor:   # Shay 2026-10-10 ticket A: the mouse cursor must never show in a take
         import os
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -371,12 +404,8 @@ def main():
         lines.append('overlay %s %s' % ('PASS' if vok else 'FAIL', vtxt))
         if not vok:
             ok = False; fails.append('overlay')
-    if a.video and not a.no_sync:   # T6 label lag: every label's sync flash within synclag of the T0 offset
-        import os
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import frames
-        marks = frames.syncmarks(a.video) if S.get('sync') else []
-        sok, stxt, synced = sync_check(L, S, marks, cfg.get('synclag', 0.15), bool(cfg.get('sync', 0)))
+    if sync_res is not None:
+        sok, stxt, synced = sync_res
         lines.append('sync %s %s' % (('PASS' if sok else 'FAIL') if not stxt.startswith('SKIP') else 'SKIP', stxt))
         if not sok:
             ok = False; fails.append('sync')
