@@ -939,8 +939,8 @@ def zoomband_series(F, head_show=ZB_HEAD_SHOW, eye=ZB_EYE, near=ZB_NEAR):
     out = []
     for i, r in enumerate(F):
         d = r.get('zoom', 0.0)
-        if not (eye < d < head_show) or r.get('nk') is None:
-            continue
+        if not (eye < d < head_show) or r.get('nk') is None or r.get('band_hidden'):
+            continue   # band_hidden: KenshiFP hides the whole character + weapon in the band (joints still move, nothing drawn)
         pts = dict(nk=r['nk'], sp=r['sp'], Lsh=r['Lsh'], Rsh=r['Rsh'], Lel=r['Lel'], Rel=r['Rel'], Lwr=r['Lwr'], Rwr=r['Rwr'])
         pts['chest'] = mul(add(add(r['Lsh'], r['Rsh']), r['sp']), 1.0 / 3.0)
         seen = []

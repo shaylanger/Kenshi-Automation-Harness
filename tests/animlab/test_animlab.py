@@ -289,6 +289,7 @@ class T(unittest.TestCase):
         self.assertIn('body_in_frame=3/0:BAD', ' '.join(t)); self.assertIn('nk(', t[-1])
         far = dict(fr(1.0), nk=(0, -50, 1), sp=(0, -50, 1), Lsh=(0, -50, 1), Rsh=(0, -50, 1), Lel=(0, -50, 1), Rel=(0, -50, 1), Lwr=(0, -50, 1), Rwr=(0, -50, 1))
         ok, t = M.zoomband_check(M.zoomband_series([far] * 4)); self.assertTrue(ok, t)   # band frames with nothing in view pass
+        ok, t = M.zoomband_check(M.zoomband_series([dict(fr(8.0), band_hidden=1)] * 3)); self.assertTrue(ok, t)   # hidden body: nothing drawn
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)
