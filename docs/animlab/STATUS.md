@@ -191,6 +191,16 @@ Format: date | point | what the game showed | recording path | build | status
       draw always starts from B, current solver e0 swing 2 too; game recordings f14-e0 / vmq85a7 are always A. With no
       wind-up roll allowed, a swing from B cannot line the edge up (stroke roll ~120). ev.py scores branch-A swings and
       penalises B readies (the recovery decides the next ready branch).
+   #11 RESUME (maintainer #11 since 2026-10-09, copied from #10's temp handoff): kfp-e1-inline.py (untracked by design, from
+      al10/mkpatch.py on /root/animlab-work/al10-c3b.best) + renders C:\KenshiTestRuns\animlab\e1-compare.mp4, e1-sheet.png,
+      e1-vs-chivalry.png are WITH SHAY via main: never replace that script; variants go into separate pending-fixes scripts.
+      Patch goes to the fixer (#21, agent a37dcef1911e6c866, owns the 5090 + lock fixer-pt30) only after Shay OKs via main.
+      If rejected: re-climb with al10 tools (ev.py score, climb.py, mkpatch.py, vid.sh). Order for #11: (1) reduce the
+      candidate's ulnar wrist bend (wb ~47) keeping inline/arc/churn/roll; (2) lab check for ready branch B (must FAIL f13-sw0
+      swing 1); (3) crossbow READY 0.69 dm miss (kfpvm_replay --set-at 400:state); (4) other open Misses. al10-*.png in
+      C:\KenshiTestRuns\animlab are deletable review crops. Gotchas: detached WSL jobs die with wsl.exe (Bash
+      run_in_background + `wait`); `pkill -f al10/climb.py` inside `bash -c` kills its own shell (use `bash -s`); ev.py
+      scores branch-A swings, each B ready costs 3; climb ~1.5 min/gen at POP 100 / NP 15.
 
 ## How to resume
 Read this file, `git log -- tools/animlab docs/animlab tests/animlab` in the harness repo and
