@@ -41,6 +41,11 @@ regression tests run before every commit.
   ffmpeg, `--weapons R,L`), tests `tests/animlab/test_visual.py` (8, synthetic binaries), USAGE.md "Phase 3", regress.sh
   steps 7-8; workspace `components/KenshiFP/animlab/visual.json` (prop_roll_deg 60 = g_vm_groll, prop_mirror L = adapter left grip,
   quat x,y negated + roll 180 - groll). Tag `animlab-p3`.
+- [x] P4 native: DONE (builder 2026-10-10): `tools/animlab/native.py` (list/sample/render incl. z25 view/traj/adapt/run/catalog/fists),
+  `visual/ogre.py` skeleton animations + Ogre sampling, tests `tests/animlab/test_native.py`, USAGE.md "Phase 4", regress step P4,
+  workspace `components/KenshiFP/animlab/native.json`. Not exact game blending. Tag `animlab-p4`. Open: fist candidates (NA1) do not
+  pass yet (wrist fold 80-110 deg after the guard map; next: forearm-aligned hand orientation that converges, finger curl in the
+  visual lab for fists); STATUS Next steps history (#7-#12 blocks) still to be condensed.
 
 ## Components
 - Adapter `kfpvm_replay <rec> <out> [--calib L1R,L2R,L1L,L2L,K] [--set k=v] [--set-at f:k=v] [--cold] [--quiet]`
