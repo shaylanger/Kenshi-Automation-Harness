@@ -9,6 +9,8 @@ Line format (groups separated by '|'):
   4  wb mh mfx zf head neck spine [hy hz]   (wrist bend deg, hand X axis, forearm X axis, zoom fade, head/neck/spine)
   5  [nok natLsh natLel natLwr natRsh natRel natRwr nhxL nhyL nhxR nhyR nlpL nlqL nlpR nlqR]  native (pre-IK) pose of
      this frame's apply, camera numbers of this record (KenshiFP builds with the rec-native patch); r['nat'] = joints
+  6  [H hinge_upperarm hinge_forearm]  E5: rendered elbow-hinge axis of the weapon-arm upper arm / forearm bone, camera
+     numbers (KenshiFP builds with the E5 hinge patch); r['hua'], r['hfa'] (None in older recordings)
 Measured values in record n are what frame n-1 rendered (the camera callback runs before the next apply).
 Comment lines `# set <frame> <key> <value>` / `# build ...` (newer KenshiFP builds) are kept in Rec.meta.
 """
@@ -74,6 +76,11 @@ def parse(path):
                 x = pa[5].split()
                 if len(x) >= 15 and x[0] == '1':
                     r['nat'] = dict(zip(JOINTS, [v3(t) for t in x[1:7]]))
+            r['hua'] = r['hfa'] = None   # E5: rendered weapon-arm elbow-hinge axes (upper arm, forearm bone), group 'H'
+            for g in pa[5:]:
+                x = g.split()
+                if len(x) >= 3 and x[0] == 'H':
+                    r['hua'], r['hfa'] = v3(x[1]), v3(x[2])
             frames.append(r)
     return Rec(frames, meta)
 

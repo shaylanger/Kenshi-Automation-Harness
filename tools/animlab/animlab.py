@@ -180,6 +180,13 @@ def cmd_churn(a):
     print('churn %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
 
 
+def cmd_hinge(a):
+    """E5 arm roll: same swing input -> same upper-arm / forearm roll; measured roll on the bend plane (see metrics.hinge_check)."""
+    rec = recfmt.parse(a.rec); P = M.frame_metrics(rec)
+    ok, txt, _ = M.hinge_check(M.hinge_series(rec.frames, P), P, a.dev, a.abs)
+    print('hinge %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
+
+
 def cmd_inline(a):
     """E1 inline: blade in line with the forearm, arm-driven arc (see metrics.inline_table / inline_check)."""
     rec = recfmt.parse(a.rec)
@@ -294,6 +301,8 @@ def main():
     p = sp.add_parser('churn'); p.add_argument('rec'); p.add_argument('--rev', type=float, default=M.CHURN_REV)
     p.add_argument('--grip', type=float, default=M.CHURN_GRIP); p.add_argument('--roll', type=float, default=M.ROLL_MAX)
     p.add_argument('--stroke', action='store_true', help='also gate the stroke-start roll (E1 fix: small + gradual)')
+    p = sp.add_parser('hinge'); p.add_argument('rec'); p.add_argument('--dev', type=float, default=M.HINGE_DEV)
+    p.add_argument('--abs', type=float, default=M.HINGE_ABS)
     p = sp.add_parser('inline'); p.add_argument('rec'); p.add_argument('--phases', default=','.join(M.INL_GATE))
     p.add_argument('--fb-med', type=float, default=M.INL_FB_MED); p.add_argument('--fb-max', type=float, default=M.INL_FB_MAX)
     p.add_argument('--sc-max', type=float, default=M.INL_SC_MAX); p.add_argument('--wr', type=float, default=M.INL_WR)
@@ -320,7 +329,7 @@ def main():
     a = ap.parse_args()
     if not a.cmd:
         ap.print_help(); return 2
-    return {'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'inline': cmd_inline, 'stock': cmd_stock, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
+    return {'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':

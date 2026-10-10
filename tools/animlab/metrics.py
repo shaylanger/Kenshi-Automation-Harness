@@ -614,3 +614,115 @@ def fmt(v):
     if v != v:
         return '-'
     return '%.2f' % v
+
+
+# E5 arm roll (Shay 2026-10-09, anim-sword-z0 swing 3: the forearm rolled ~180 deg mid-stroke, bracer on top, hand palm-under,
+# while swings 2/4 with the same input looked right). Cause: the IK rotated the NATIVE upper arm / forearm minimally onto the
+# target, so the bones' roll came from whichever native attack variant played. Per weapon-arm (right) frame: roll of each bone
+# about itself = signed angle (deg) from the bend-plane normal (shoulder->elbow x elbow->wrist) to the bone's elbow-hinge axis.
+#   recordings with group H (E5 builds): measured hinge axes (rendered pose); gate upper-arm |roll| <= HINGE_ABS (elbow bent)
+#   older recordings: estimated by carrying the native pose's hinge onto the target with the minimal rotation (what the old
+#   IK did; assumes the native anim bends about the hinge)
+# Gate (both): swings from ready get identical input, so at equal swing u each bone's roll must match the median of the
+# swings within HINGE_DEV deg.
+HINGE_ABS, HINGE_DEV, HINGE_BENT = 25.0, 45.0, 0.4   # deg, deg, min sin(elbow bend) for a defined bend plane
+HINGE_U = tuple(i / 20.0 for i in range(1, 20))
+
+
+def _rot_about(axis, a, b):
+    """signed angle (deg) about axis from a to b (both taken perpendicular to the axis); None if degenerate"""
+    ax = nz(axis)
+    a = sub(a, mul(ax, dot(a, ax))); b = sub(b, mul(ax, dot(b, ax)))
+    if ln(a) < 1e-4 or ln(b) < 1e-4:
+        return None
+    a, b = nz(a), nz(b)
+    return math.degrees(math.atan2(dot(cross(a, b), ax), dot(a, b)))
+
+
+def hinge_series(F, P):
+    """per frame: dict(st, swu, ua, fa, src) = upper-arm / forearm roll vs the bend plane (deg), or None"""
+    S = []
+    for i in range(len(P)):
+        r, b = F[i], (F[i + 1] if i + 1 < len(F) else None)
+        out = None
+        if r['cls'] == 0 and r['on'] and r['w'] >= 0.99:
+            if b is not None and b.get('hua') and ln(b['hua']) > 0.5:   # measured: record i+1 holds what frame i rendered
+                J = P[i]['J']; S_, E_, H_ = J[3], J[4], J[5]
+                u1, u2 = sub(E_, S_), sub(H_, E_); n = cross(u2, u1)   # camera numbers are left-handed: bend normal sign flips
+                if ln(n) > HINGE_BENT * ln(u1) * ln(u2):
+                    hu, hf = nz(remap(b['hua'], r, b, 0)), nz(remap(b['hfa'], r, b, 0))
+                    ua, fa = _rot_about(u1, n, hu), _rot_about(u2, n, hf)
+                    if ua is not None and fa is not None:
+                        out = dict(ua=ua, fa=fa, src='meas')
+            elif r.get('nat'):   # estimate from the native pose of this apply (old IK: minimal rotation native -> target)
+                n_ = r['nat']; S_, E_, H_ = r['Rsh'], r['Rel'], r['Rwr']; Sn, En, Hn = n_['Rsh'], n_['Rel'], n_['Rwr']
+                u1, u2, v1, v2 = sub(E_, S_), sub(H_, E_), sub(En, Sn), sub(Hn, En)
+                hn, ht = cross(v1, v2), cross(u1, u2)
+                if ln(hn) > HINGE_BENT * ln(v1) * ln(v2) and ln(ht) > HINGE_BENT * ln(u1) * ln(u2):
+                    h1 = _rot_min(nz(v1), nz(u1), nz(hn))
+                    h2 = _rot_min(nz(_rot_min(nz(v1), nz(u1), v2)), nz(u2), h1)
+                    ua, fa = _rot_about(u1, ht, h1), _rot_about(u2, ht, h2)
+                    if ua is not None and fa is not None:
+                        out = dict(ua=ua, fa=fa, src='est')
+        if out:
+            out.update(i=i, st=P[i]['state'], swu=r.get('swu', 0.0))
+        S.append(out)
+    return S
+
+
+def _wrap(d):
+    return (d + 180.0) % 360.0 - 180.0
+
+
+def hinge_check(S, P, dev_max=HINGE_DEV, abs_max=HINGE_ABS, grid=HINGE_U):
+    """E5 gate: (1) per swing from ready, at each u of the grid, upper-arm and forearm roll within dev_max deg of the median of
+    all swings from ready; (2) measured upper-arm roll (group H) within abs_max deg of the bend plane in every swing frame
+    (the forearm also carries its share of the wrist twist: gated by (1) only).
+    Returns (ok, [text], detail)."""
+    N = len(P)
+    sw, i = [], 0
+    while i < N:
+        if P[i]['state'] == 'swing' and i > 0 and P[i - 1]['state'] == 'ready':
+            j = i
+            while j + 1 < N and P[j + 1]['state'] == 'swing':
+                j += 1
+            sw.append((i, j)); i = j + 1
+        else:
+            i += 1
+    samp = []   # per swing: {u: (ua, fa)}
+    for a, b in sw:
+        d = {}
+        for u in grid:
+            best = None
+            for k in range(a, b + 1):
+                s = S[k]
+                if s and (best is None or abs(s['swu'] - u) < abs(S[best]['swu'] - u)):
+                    best = k
+            if best is not None and abs(S[best]['swu'] - u) <= 0.04:
+                d[u] = (S[best]['ua'], S[best]['fa'])
+        samp.append(d)
+    worst = (0.0, None)
+    for u in grid:
+        for bone in (0, 1):
+            vals = [(n, d[u][bone]) for n, d in enumerate(samp) if u in d]
+            if len(vals) < 3:
+                continue
+            ref = vals[0][1]
+            md = _med([ref + _wrap(v - ref) for _, v in vals])
+            for n, v in vals:
+                e = abs(_wrap(v - md))
+                if e > worst[0]:
+                    worst = (e, (n + 1, sw[n][0], u, 'ua' if bone == 0 else 'fa', v, md))
+    meas = [s for s in S if s and s['src'] == 'meas' and s['st'] == 'swing']
+    am = max(meas, key=lambda s: abs(s['ua'])) if meas else None   # forearm: + its share of the wrist twist, consistency only
+    amv = abs(am['ua']) if am else 0.0
+    ok_dev = len(sw) >= 3 and worst[0] <= dev_max
+    ok_abs = amv <= abs_max
+    src = 'meas' if meas else 'est'
+    txt = ['src=%s swings_from_ready=%d' % (src, len(sw))]
+    txt.append('dev=%.0f/%.0f%s' % (worst[0], dev_max, '' if ok_dev else ':BAD') +
+               ('@swing%d(frame%d),u=%.2f,%s=%.0f,median=%.0f' % worst[1] if worst[1] else ''))
+    if len(sw) < 3:
+        txt.append('need>=3 swings from ready:BAD')
+    txt.append(('abs=%.0f/%.0f%s@%d' % (amv, abs_max, '' if ok_abs else ':BAD', am['i'])) if am else 'abs=n/a(no group H)')
+    return ok_dev and ok_abs, txt, dict(swings=sw, samples=samp)
