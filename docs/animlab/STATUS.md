@@ -84,6 +84,17 @@ gives L == R exactly (regress step 9); dualwield-alternate now L wb_max 14.9 vs 
 Also: the source copy /root/animlab-kfp-src was re-synced at 19:03 (new vm_bolt_measure): prelude.h got stubs for
 g_ent_getvisible and the node setters; the current-source sword drive gate still PASSES.
 
+## Misses (game found, lab missed)
+Standing order (Shay via coordinator, 2026-10-09): every miss gets a lab check that FAILS on the recording that showed
+it (and passes on the fixed build where one exists), or a written reason it is out of reach. The FP fixer appends rows.
+Format: date | point | what the game showed | recording path | build | status
+- 2026-10-09 | C1 aim | aim pose did not play in background: the combat layer read only real keys, the viewmodel read harness input | none (input layer) | - | open: outside the solver; lab can assert every expected state appears and moves
+- 2026-10-09 | X1 crossbow jitter | game jitter p95 5-6 px vs replay ~0: bone-world map quantised at the floating origin (fixed in game by the node map, e948f86) | C:\KenshiTestRuns\vmq-f8c\vmrec-q-crossbow-z0.txt | 419D164F (6c9516b) | open: try an optional quantised-map mode
+- 2026-10-09 | jitter under-reported | lab jitter generally below the game's | vmq-f8c recordings | 419D164F | open
+- 2026-10-09 | sword elbow branch drift | elbow switches branch on long replays/drives (e.g. drive @6c9516b sword-z0-a 83-232: elbow on the right branch, game low; no S2 re-seed + no elbow warm start in the drive) | C:\KenshiTestRuns\vmq-f8c\vmrec-q-sword-z0-a.txt | 419D164F (6c9516b) | open: drive elbow warm start in progress
+- 2026-10-09 | E1 edge leads | game swing led with the back of the blade (edge_arc -0.9 in the main stroke) | C:\KenshiTestRuns\f14\e0.txt | build Oct 9 18:21:44 | open: check the lab's edge_arc reproduces it
+- 2026-10-09 | C2 stock height / C3 bolt jitter on walk | bolt is a separate node, not in the lab's skeleton | tbd | - | open: can the lab measure it?
+
 ## Key findings / gotchas
 - Camera numbers are a MIRRORED frame (rt = fw x up): recorded hand axes mh/hy/hz are left-handed
   there. Use dot products for hand-local coords; c2w() maps back to a right-handed world.
@@ -99,7 +110,8 @@ g_ent_getvisible and the node setters; the current-source sword drive gate still
 - Useful for P3: /root/KenshiFP/client/kfp_meshray.h parses Ogre .mesh triangles (read-only reference).
 
 ## Next steps
-1. Open (phase 2): sword drive @6c9516b mismatch (see Results).
+1. Standing lab maintainer (coordinator order 2026-10-09): work through "Misses" (a failing check per miss or a reason),
+   report one line per closed miss to main. Then: sword drive @6c9516b (= the elbow-branch miss; drive warm start).
 
 ## How to resume
 Read this file, `git log -- tools/animlab docs/animlab tests/animlab` in the harness repo and

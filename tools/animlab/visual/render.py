@@ -356,7 +356,7 @@ def cmd_frames(a):
     print('%d frames -> %s' % (len(sel), a.o))
     if a.mp4:
         fps = a.fps or max(1, round(len(sel) / max(1e-3, P[sel[-1]]['t'] - P[sel[0]]['t']))) if len(sel) > 1 else 30
-        r = subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-framerate', str(fps), '-i', os.path.join(a.o, 'f%05d.png'),
+        r = subprocess.run(['ffmpeg', '-nostdin', '-y', '-loglevel', 'error', '-framerate', str(fps), '-i', os.path.join(a.o, 'f%05d.png'),
                             '-pix_fmt', 'yuv420p', '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2', a.mp4])
         print('mp4 %s (%s fps) rc=%d' % (a.mp4, fps, r.returncode))
         return r.returncode
