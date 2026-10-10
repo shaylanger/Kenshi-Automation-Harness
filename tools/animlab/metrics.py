@@ -755,6 +755,7 @@ def hinge_check(S, P, dev_max=HINGE_DEV, abs_max=HINGE_ABS, grid=HINGE_U):
 # frame). Judged per frame / per video-frame window instead.
 SNAP_WIN, SNAP_U, SNAP_MAX = 0.034, 0.10, 22.0   # s (one 30 fps video frame), u after the wind-up top, deg
 SEE_L, SEE_U0, SEE_U1, SEE_MIN = 7.0, 0.45, 0.95, 0.05   # dm blade seen past the grip, gated u range, min visible blade
+# seen counts an edge-on crossing between two frames as 0 (sampling-independent: a 30 fps video catches it at random)
 
 
 def _bframe(p):
@@ -777,8 +778,8 @@ def blade_seen(p, L=SEE_L, zn=3.0, n=40):
         if c[2] >= zn and abs(c[1] / c[2]) <= .85 and abs(c[0] / c[2]) <= 1.5:
             pts.append((c[0] / c[2], c[1] / c[2]))
     sl = sum(math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) for i in range(1, len(pts)))
-    w = abs(dot(nz(cross(mf, p['mu'])), nz(add(mp, mul(mf, L / 2)))))
-    return sl * w, sl, w
+    w = dot(nz(cross(mf, p['mu'])), nz(add(mp, mul(mf, L / 2))))   # signed: a sign change = the blade rolled through edge-on
+    return sl * abs(w), sl, w
 
 
 def swings(F, P):
@@ -812,7 +813,10 @@ def blade_check(F, P, snap_max=SNAP_MAX, see_min=SEE_MIN, win=SNAP_WIN, snap_u=S
             mx = max((r for r in rate if ut <= r[0] <= ut + snap_u), key=lambda r: r[1])
             if ws is None or mx[1] > ws[1]:
                 ws = (k, mx[1], mx[0], mx[2], ut)
-        seen = [(blade_seen(P[i])[0], F[i]['swu'], i) for i in idx if u0 <= F[i]['swu'] <= u1]
+        g = [(blade_seen(P[i]), F[i]['swu'], i) for i in idx if u0 <= F[i]['swu'] <= u1]
+        seen = [(x[0][0], x[1], x[2]) for x in g]
+        # between frames: a flat-facing sign change means the blade passed edge-on (seen 0) whatever frames were sampled
+        seen += [(0.0, g[n + 1][1], g[n + 1][2]) for n in range(len(g) - 1) if g[n][0][2] * g[n + 1][0][2] < 0]
         if seen:
             mn = min(seen)
             if wv is None or mn[0] < wv[1]:
