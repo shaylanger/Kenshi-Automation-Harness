@@ -59,6 +59,16 @@ in `--overhead`: blade tilt from screen vertical <= 35 deg over u .28-.78 (`--ti
 stroke within 20 deg of straight down (`--path`). The tip leaving the top edge at an overhead's wind-up top is not gated
 (a raised sword is expected to leave the frame).
 
+## Take checks (labelled video takes)
+`tools/animlab/takecheck.py --labels <lab> --ev <ev> [--ev ...] --rules <rules> [--video <mp4> | --video-len <s>]` judges a
+labelled video take against game state sampled while it was recorded (formats in the script header): every `claim` must
+hold over the label's WHOLE segment with no unsampled gap > `maxgap` (a label true for 1 s of a 5 s segment fails), `pre`
+= setup state at the label start (e.g. loaded before an aim), `forbid` = nothing may happen in the take (combat messages,
+bystanders, KO), `cover` = keys sampled across the whole take, and the video must end at the `end` label (`endslack`).
+Prints one line per check and `RESULT <name> PASS|FAIL <failed checks>`. A take without sampled evidence fails (unproven).
+KenshiFP adapter: sampler `components/KenshiFP/animlab/take-sample.sh` (source it in the take script:
+`take_sample_start <ev> "$T0" <fp char> ["<allowed>|..."]` ... `take_sample_stop`) + rules `take-rules.txt`.
+
 ## Metrics (per state)
 
 States: `ready`, `swing`, `block`, `swing->block`, `aim`, `reload` (crossbow), `settle` (gate only: 0.3 s after a
