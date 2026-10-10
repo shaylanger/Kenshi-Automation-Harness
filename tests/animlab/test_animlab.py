@@ -229,6 +229,23 @@ class T(unittest.TestCase):
         self.assertEqual(M.swing_phase('swing', 0.3), 'stroke'); self.assertEqual(M.swing_phase('swing', 0.1), 'windup')
         self.assertEqual(M.swing_phase('block', 0.3), 'block')
 
+    def test_ready_branch(self):   # sword ready elbow branch (lab 2026-10-09): replays found a 2nd ready solution, edge rolled ~100 deg
+        A = ((1.4, -4.4, 3.0), (-0.35, 0.85, 0.40), (0.42, -0.24, 0.88)); B = ((5.1, -4.1, 5.0), (-0.35, 0.85, 0.40), (0.79, 0.50, -0.37))
+        def runs(seq, n=20, gap=10):
+            F, P = [], []
+            for br, nxt in seq:
+                for k in range(n + gap):
+                    st = 'ready' if k < n else nxt
+                    F.append(dict(cls=0)); P.append(dict(state=st, elb=br[0], mf=M.nz(br[1]), mu=M.nz(br[2])))
+            return M.ready_runs(F, P)
+        R = runs([(A, 'swing'), (A, 'block'), (A, 'swing')])
+        self.assertEqual(len(R), 3); ok, txt = M.ready_branch(R); self.assertTrue(ok, txt)
+        R = runs([(B, 'swing'), (A, 'swing'), (A, 'block'), (A, 'lower')])   # first swing from B (f13-sw0 replay); the lowering run is left out
+        self.assertEqual(len(R), 3); ok, txt = M.ready_branch(R); self.assertFalse(ok)
+        self.assertTrue(txt[2].endswith(':BAD') and not txt[3].endswith(':BAD'), txt)   # majority reference = A
+        ok, txt = M.ready_branch(runs([(B, 'swing'), (B, 'swing')]), runs([(A, 'swing')]))   # all on B, game reference on A
+        self.assertFalse(ok)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)

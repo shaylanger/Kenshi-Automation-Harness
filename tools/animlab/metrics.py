@@ -509,6 +509,54 @@ def inline_check(T, phases=INL_GATE, fb_med=INL_FB_MED, fb_max=INL_FB_MAX, sc_ma
     return ok, ['limits fb<=%.0f/%.0f,sc<=%.0f,wr<=%.2f(%s)' % (fb_med, fb_max, sc_max, wr, '+'.join(wr_phases))] + txt
 
 
+BR_ROLL, BR_ELB, BR_TAIL = 45.0, 2.0, 5   # sword ready branch gate: edge roll about the blade (deg), elbow (dm), frames before exit
+
+
+def ready_runs(F, P, tail=BR_TAIL, min_n=3):
+    """Sword ready runs (contiguous melee 'ready' frames, >= min_n) that end in a swing or block: per run the pose that state
+    starts from (median of the last `tail` frames): elbow, blade mf, edge mu. [(first, last, elb, mf, mu)]. Runs ending in
+    lower/off/end of recording are left out (the tail is the lowering, not a ready pose)."""
+    out, i, N = [], 0, len(P)
+    while i < N:
+        if P[i]['state'] != 'ready' or F[i]['cls'] != 0:
+            i += 1; continue
+        j = i
+        while j + 1 < N and P[j + 1]['state'] == 'ready' and F[j + 1]['cls'] == 0:
+            j += 1
+        if j - i + 1 >= min_n and j + 1 < N and P[j + 1]['state'] in ('swing', 'block', 'swing->block'):
+            ps = [p for p in P[max(i, j - tail + 1):j + 1] if p.get('elb') and p.get('mu')]
+            if ps:
+                md = lambda key: tuple(_med([p[key][k] for p in ps]) for k in range(3))
+                out.append((i, j, md('elb'), nz(md('mf')), nz(md('mu'))))
+        i = j + 1
+    return out
+
+
+def _roll(f, u0, u1):
+    """Angle (deg) between two edge directions about the blade axis f (components along f removed)."""
+    return _ang(sub(u0, mul(f, dot(u0, f))), sub(u1, mul(f, dot(u1, f))))
+
+
+def ready_branch(R, ref=None, roll_max=BR_ROLL, elb_max=BR_ELB):
+    """Sword ready elbow branch (lab 2026-10-09: replays found a second ready solution B, elbow far right + edge rolled ~100
+    deg vs A, which the game recordings never show; a swing from B cannot line the edge up without a wind-up roll).
+    Every ready run a swing/block starts from must match the reference pose: the majority branch of `ref` (ready runs of a
+    known-good recording) when given, else of this recording (self-consistency: all runs on one branch; ties -> earliest).
+    FAIL when the edge roll about the blade differs by > roll_max deg or the elbow by > elb_max dm. Returns (ok, [text])."""
+    if not R:
+        return False, ['ready:MISSING']
+    Q = ref or R
+    near = lambda x, y: _roll(nz(add(x[3], y[3])), x[4], y[4]) <= roll_max and ln(sub(x[2], y[2])) <= elb_max
+    r0 = max(Q, key=lambda x: (sum(1 for y in Q if near(x, y)), -x[0]))
+    ok, txt = True, ['ref %s run@%d elb=%.1f,%.1f,%.1f' % ('given' if ref else 'self', r0[0], r0[2][0], r0[2][1], r0[2][2])]
+    for (a, b, el, f, u) in R:
+        ro, de = _roll(nz(add(f, r0[3])), u, r0[4]), ln(sub(el, r0[2]))
+        good = ro <= roll_max and de <= elb_max
+        ok = ok and good
+        txt.append('%d-%d:roll=%.0f,elb=%.1f%s' % (a, b, ro, de, '' if good else ':BAD'))
+    return ok, ['limits roll<=%.0f,elb<=%.1f' % (roll_max, elb_max)] + txt
+
+
 STOCK_H, STOCK_BACK, STOCK_NEAR = 1.45, 8.0, 1.5   # C2: stock top above the bolt axis, stock length behind the grip, near clip (dm)
 STOCK_MAX, ORI_MAX = 25.0, 3.0                     # C2 gate: stock top <= % of the screen from the bottom; ready orientation drift (deg)
 
