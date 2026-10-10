@@ -194,6 +194,40 @@ def send(d, cmd, args, timeout=None):
     sys.exit('no answer within %ds (Kenshi not running or stuck loading?)' % timeout)
 
 
+def send_many(d, cmds, timeout=20):
+    """Several commands in ONE inbox write ([(cmd, [args]), ...]): the harness runs them in the same poll (it takes one
+    inbox per 250 ms), so N commands cost one round trip instead of N. Returns [(ok, detail) or (False, 'no answer')]
+    in order. For tight polling loops (take samplers) that must not starve other clients of poll cycles."""
+    flag, outbox = (os.path.join(d, n) for n in ('enabled.flag', 'outbox.txt'))
+    if not os.path.exists(flag):
+        sys.exit('harness is off: run "kah on" (before launching Kenshi)')
+    for cmd, args in cmds:
+        if any('\t' in a or '\n' in a for a in [cmd] + list(args)):
+            sys.exit('arguments may not contain tabs or newlines')
+    deadline = time.time() + timeout
+    base = 'k%d_%d_%d' % (int(time.time() * 1000), os.getpid(), _sent[0] + 1)
+    cids = ['%s_%d' % (base, i) for i in range(len(cmds))]
+    try:
+        start = os.path.getsize(outbox)
+    except OSError:
+        start = 0
+    write_command(d, '\n'.join('\t'.join([c, cmd] + list(args)) for c, (cmd, args) in zip(cids, cmds)), deadline)
+    got = {}
+    while time.time() < deadline and len(got) < len(cids):
+        if os.path.exists(outbox):
+            with open(outbox, 'rb') as f:
+                f.seek(0, 2)
+                f.seek(start if f.tell() >= start else 0)
+                for raw in f:
+                    if not raw.endswith(b'\n'):
+                        continue
+                    parts = raw.decode('utf-8', errors='replace').rstrip('\n').split('\t', 2)
+                    if len(parts) == 3 and parts[0] in cids:
+                        got[parts[0]] = (parts[1] == 'ok', parts[2])
+        if len(got) < len(cids):
+            time.sleep(0.05)
+    return [got.get(c, (False, 'no answer')) for c in cids]
+
 def wait_world(d, limit):
     end = time.time() + limit
     detail = ''
