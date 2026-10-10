@@ -13,7 +13,7 @@ solved_*.txt) or an `fp_vm state` dump (key=value line, one frame); the format i
 CFG (JSON, solver/game specific; KenshiFP's is components/KenshiFP/animlab/visual.json):
   game_dir, skeleton, body_mesh, weapon_mesh {"R": path, "L": path}, weapon_sides ["R"], prop_axes [[f,u] per class]
   (prop-local axis codes 1..3 = X,Y,Z, negative = flipped), prop_local_q {"0": [w,x,y,z], "1": [...]} (hand -> prop
-  rotation per weapon class), prop_roll_deg {"0": deg} (extra roll about the blade axis), weapon_offset {"R": [x,y,z]}
+  rotation per weapon class), prop_roll_deg {"0": deg} (extra roll about the blade axis), prop_mirror {"L": {q_sign, roll_sign, roll_add}} (off hand: prop local q * q_sign, roll -> roll * roll_sign + roll_add), weapon_offset {"R": [x,y,z]}
   (weapon mesh origin in prop-local dm), bones {"L": [clavicle, upperarm, forearm, hand, prop], "R": [...]}, fov [tan_x, tan_y],
   near (dm), colors.
 Posing: upper arm / forearm X along the solved bone, roll from the elbow hinge (sign from the bind pose: flexion
@@ -205,7 +205,8 @@ class Rig:
                 roll = math.radians(float((cfg.get("prop_roll_deg") or {}).get(str(c), 0.0)))
                 mq = (cfg.get("prop_mirror") or {}).get(s)   # off side: biped mirror of the prop local
                 if mq:
-                    q = q * np.array(mq.get("q_sign", [1, 1, 1, 1]), float); roll *= float(mq.get("roll_sign", 1))
+                    q = q * np.array(mq.get("q_sign", [1, 1, 1, 1]), float)
+                    roll = roll * float(mq.get("roll_sign", 1)) + math.radians(float(mq.get("roll_add", 0)))
                 Rl = ogre.qmat(q)
                 if roll:   # grip roll about the blade axis, applied after the prop local (prop = hand * local * roll)
                     k = axis(ax[0]); Kx = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])

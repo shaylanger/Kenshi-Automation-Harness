@@ -136,6 +136,15 @@ that starts there (report rows). `preroll` seconds hold key 0 first (solver smoo
 Example: `components/KenshiFP/animlab/motions/dualwield-alternate.json` (guard, right cut, guard, left cut).
 
 **Dual wielding:** each armed side is its own run (`--side L` solves the left hand as the weapon hand with the prop
+**Left-hand mirror (exact):** mirrored (f,u) targets flip the prop axis perpendicular to both, the bone mirror flips z,
+so the adapter uses prop local q -> (w,-x,-y,z) AND grip roll groll -> 180 - groll (sword; -groll when that axis is z);
+`--set groll` takes the RIGHT-hand value. The solver's melee elbow pick also has three right-hand-only rules
+(`g_vm_elbd`, the coarse-search bound `e.x < -0.25`, the `g_vm_rbe` f x u term): variant patch
+`components/KenshiFP/animlab/patches/left-hand-mirror.py` makes them side-aware (for KenshiFP only if dual wielding goes
+ahead). With both, `motions/dualwield-sync-mirror.json` on a symmetric body (sword-z0 frame 541) gives L == R in every
+segment (regress.sh step 9). L/R differences that remain on a ready-stance body come from the stance itself: Kenshi's
+sword stance twists the torso (frame 100: R shoulder 1.1 dm further back than L), so a camera-mirrored motion is not
+body-mirrored.
 local mirrored, `fp_vm set hand_m 0`); the other arm rests. `pose.txt` merges each side's own arm (input for phase 3).
 
 **Report columns** (per side and segment, `*all*` = whole motion): `wb` wrist fold deg (forearm vs hand X),
@@ -192,7 +201,7 @@ and the solver's measured one (convention check; 0-0.5 deg on all validated fram
 Config (KenshiFP: `components/KenshiFP/animlab/visual.json`): skeleton, body mesh (arm = triangles weighted >= 0.5 to
 upper arm / forearm / hand), weapon meshes per hand, prop axes and prop-local rotation per weapon class
 (`g_vm_ax` / `g_vm_pldq`), `prop_roll_deg` (the grip roll `g_vm_groll`; without it the hand is 45 deg off),
-`prop_mirror` (off hand: quaternion x,y negated = the drive adapter's biped mirror), fov tangents, near plane, colours.
+`prop_mirror` (off hand: quaternion x,y negated, grip roll 180 - groll = the drive adapter's left grip), fov tangents, near plane, colours.
 
 Validation (game frames from `C:\KenshiTestRuns\opt`, copied): e-flatA, e-h90, e-h-90 (three different katana poses,
 1600x900): hand X error 0.3 / 0.5 / 0.4 deg; the rendered blade outline lies on the game's blade (incl. the curved tip

@@ -39,8 +39,8 @@ regression tests run before every commit.
 - [x] P3 visual lab: DONE (builders #4 + #5): harness `tools/animlab/visual/ogre.py` (Ogre .mesh v1.100 / .skeleton
   v1.80 reader; skeleton bone chunk size excludes the name string), `visual/render.py` (`still|frames|compare`, MP4 via
   ffmpeg, `--weapons R,L`), tests `tests/animlab/test_visual.py` (8, synthetic binaries), USAGE.md "Phase 3", regress.sh
-  steps 7-8; workspace `components/KenshiFP/animlab/visual.json` (prop_roll_deg 60 = g_vm_groll, prop_mirror L =
-  biped mirror quat x,y negated). Tag `animlab-p3`.
+  steps 7-8; workspace `components/KenshiFP/animlab/visual.json` (prop_roll_deg 60 = g_vm_groll, prop_mirror L = adapter left grip,
+  quat x,y negated + roll 180 - groll). Tag `animlab-p3`.
 
 ## Components
 - Adapter `kfpvm_replay <rec> <out> [--calib L1R,L2R,L1L,L2L,K] [--set k=v] [--set-at f:k=v] [--cold] [--quiet]`
@@ -76,6 +76,13 @@ P3 visual validation (game frames C:\KenshiTestRuns\opt e-flatA / e-h90 / e-h-90
 err 0.3 / 0.5 / 0.4 deg, rendered blade outline on the game blade (curved tip matched in e-h-90), arm outline around the
 gauntlet. MP4s: /root/animlab-work/p3/sword-z0-replay.mp4 (702 fr, 34 s render), dualwield-alternate.mp4 (145 fr; L hand
 X err 0.0 deg with prop_mirror, 98 deg without). Frames 499+ of sword-z0 render black = holster (arms out of view).
+Asymmetry SOLVED (builder #5): (1) adapter bug: the left grip mirror missed a 180 deg roll about the blade and the grip
+roll sign (fixed: groll_L = 180 - groll, kfpvm_drive.c); (2) solver: 3 right-hand-only rules in the melee elbow pick
+(variant patch patches/left-hand-mirror.py, not in the game); (3) the ready stance twists the torso (frame 100: R
+shoulder 1.1 dm back), so camera-mirrored != body-mirrored. With (1)+(2) the sync mirror motion on a symmetric body
+gives L == R exactly (regress step 9); dualwield-alternate now L wb_max 14.9 vs R 13.0 (was 24.1).
+Also: the source copy /root/animlab-kfp-src was re-synced at 19:03 (new vm_bolt_measure): prelude.h got stubs for
+g_ent_getvisible and the node setters; the current-source sword drive gate still PASSES.
 
 ## Key findings / gotchas
 - Camera numbers are a MIRRORED frame (rt = fw x up): recorded hand axes mh/hy/hz are left-handed
@@ -92,7 +99,7 @@ X err 0.0 deg with prop_mirror, 98 deg without). Frames 499+ of sword-z0 render 
 - Useful for P3: /root/KenshiFP/client/kfp_meshray.h parses Ogre .mesh triangles (read-only reference).
 
 ## Next steps
-1. Open (phase 2): sword drive @6c9516b mismatch (see Results); L/R asymmetry in dualwield-alternate (L wb_max 24 vs R 13).
+1. Open (phase 2): sword drive @6c9516b mismatch (see Results).
 
 ## How to resume
 Read this file, `git log -- tools/animlab docs/animlab tests/animlab` in the harness repo and
