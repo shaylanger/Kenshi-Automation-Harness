@@ -563,7 +563,7 @@ def main():
         if name == 'sweep':
             p.add_argument('--variant', action='append', help="'name[@adapter cmd]: adapter args'")
             p.add_argument('--metrics', default='wb_p95,wb_max,elb_h_max,st_max,edge_mean,jit_p95')
-            p.add_argument('-j', type=int, default=os.cpu_count() or 4); p.add_argument('--keep')
+            p.add_argument('-j', type=int, default=int(os.environ.get('LABNICE_J') or min(16, os.cpu_count() or 4))); p.add_argument('--keep')
         if name == 'gate':
             p.add_argument('--tol'); p.add_argument('--quiet', action='store_true')
     p = sp.add_parser('pool'); p.add_argument('rec', nargs='+', help='recordings with native swings (or @listfile)')
@@ -574,9 +574,9 @@ def main():
     p.add_argument('--args', help='extra adapter args'); p.add_argument('--overhead', help='overhead stroke ids (stroke check)')
     p.add_argument('--checks', default='arc,blade,stroke,churn'); p.add_argument('--take', type=int, default=M.POOL_TAKE)
     p.add_argument('--rate', type=float, default=M.POOL_RATE, help='min predicted take pass rate')
-    p.add_argument('-j', type=int, default=os.cpu_count() or 4); p.add_argument('--keep'); p.add_argument('-v', dest='verbose', action='store_true')
+    p.add_argument('-j', type=int, default=int(os.environ.get('LABNICE_J') or min(16, os.cpu_count() or 4))); p.add_argument('--keep'); p.add_argument('-v', dest='verbose', action='store_true')
     p = sp.add_parser('agree'); p.add_argument('manifest', help='lines `<game rec> <adapter of its build> [adapter args]`')
-    p.add_argument('--status', help='STATUS.md to write the summary into'); p.add_argument('--keep'); p.add_argument('-j', type=int, default=os.cpu_count() or 4)
+    p.add_argument('--status', help='STATUS.md to write the summary into'); p.add_argument('--keep'); p.add_argument('-j', type=int, default=int(os.environ.get('LABNICE_J') or min(16, os.cpu_count() or 4)))
     ap.add_argument('--only-stroke', dest='only_stroke', type=int, help='E6: judge only swings of this scripted stroke (others -> swing_x)')
     p = sp.add_parser('weapons', help='weapon catalogue (base + mods) / per-weapon check matrix (weapons.py)')
     p.add_argument('--config', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'components', 'KenshiFP', 'animlab', 'native.json'))
