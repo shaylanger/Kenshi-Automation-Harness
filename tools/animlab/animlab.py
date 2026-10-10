@@ -183,7 +183,11 @@ def cmd_churn(a):
 def cmd_hinge(a):
     """E5 arm roll: same swing input -> same upper-arm / forearm roll; measured roll on the bend plane (see metrics.hinge_check)."""
     rec = recfmt.parse(a.rec); P = M.frame_metrics(rec)
-    ok, txt, _ = M.hinge_check(M.hinge_series(rec.frames, P), P, a.dev, a.abs)
+    S = M.hinge_series(rec.frames, P)
+    ok, txt, _ = M.hinge_check(S, P, a.dev, a.abs)
+    if a.vs:   # replay faithfulness vs the game recording (same frames)
+        g = recfmt.parse(a.vs); okf, t = M.hinge_faith(M.hinge_series(g.frames, M.frame_metrics(g)), S, a.faith)
+        ok = ok and okf; txt.append(t)
     print('hinge %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
 
 
@@ -303,6 +307,8 @@ def main():
     p.add_argument('--stroke', action='store_true', help='also gate the stroke-start roll (E1 fix: small + gradual)')
     p = sp.add_parser('hinge'); p.add_argument('rec'); p.add_argument('--dev', type=float, default=M.HINGE_DEV)
     p.add_argument('--abs', type=float, default=M.HINGE_ABS)
+    p.add_argument('--vs', help='game recording this rec replays: also gate the per-frame bone roll error (metrics.hinge_faith)')
+    p.add_argument('--faith', type=float, default=M.HINGE_FAITH)
     p = sp.add_parser('inline'); p.add_argument('rec'); p.add_argument('--phases', default=','.join(M.INL_GATE))
     p.add_argument('--fb-med', type=float, default=M.INL_FB_MED); p.add_argument('--fb-max', type=float, default=M.INL_FB_MAX)
     p.add_argument('--sc-max', type=float, default=M.INL_SC_MAX); p.add_argument('--wr', type=float, default=M.INL_WR)

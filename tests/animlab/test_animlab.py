@@ -246,6 +246,14 @@ class T(unittest.TestCase):
         ok, txt = M.ready_branch(runs([(B, 'swing'), (B, 'swing')]), runs([(A, 'swing')]))   # all on B, game reference on A
         self.assertFalse(ok)
 
+    def test_hinge_faith(self):
+        # E5 hinge replay miss: replay forearm roll a constant ~60 deg off the game = FAIL; within a few deg (+ one outlier) = PASS
+        G = [dict(i=i, fa=10.0 * math.sin(i / 7.0), ua=0.0) for i in range(100)] + [None]
+        ok, t = M.hinge_faith(G, [dict(g, fa=g['fa'] + 60) if g else None for g in G]); self.assertFalse(ok, t)
+        R = [dict(g, fa=g['fa'] + (90 if g['i'] == 50 else 1)) if g else None for g in G]
+        ok, t = M.hinge_faith(G, R); self.assertTrue(ok, t); self.assertIn('fa_max=90@50', t)
+        ok, t = M.hinge_faith(G, [None] * len(G)); self.assertFalse(ok)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)

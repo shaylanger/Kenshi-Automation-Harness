@@ -674,6 +674,22 @@ def _wrap(d):
     return (d + 180.0) % 360.0 - 180.0
 
 
+HINGE_FAITH = 5.0   # deg: replay vs game, median per-frame bone roll error (E5 hinge replay miss: 58 deg before the rig roll model)
+
+
+def hinge_faith(Sg, Sr, lim=HINGE_FAITH):
+    """replay faithfulness of the bone roll: per frame where both have a roll, |game - replay| (deg) of forearm / upper arm.
+    Gate: forearm median <= lim (p95 / max: info; isolated blade-roll divergences show there). Returns (ok, text)."""
+    d = [(abs(_wrap(g['fa'] - r['fa'])), abs(_wrap(g['ua'] - r['ua'])), g['i']) for g, r in zip(Sg, Sr) if g and r]
+    if not d:
+        return False, 'faith n=0:BAD'
+    fa, ua = sorted(x[0] for x in d), sorted(x[1] for x in d); w = max(d)
+    q = lambda a, p: a[min(len(a) - 1, int(p * len(a)))]
+    ok = q(fa, 0.5) <= lim
+    return ok, 'faith n=%d fa_med=%.1f/%.0f%s fa_p95=%.1f fa_max=%.0f@%d ua_med=%.1f' % (
+        len(d), q(fa, 0.5), lim, '' if ok else ':BAD', q(fa, 0.95), w[0], w[2], q(ua, 0.5))
+
+
 def hinge_check(S, P, dev_max=HINGE_DEV, abs_max=HINGE_ABS, grid=HINGE_U):
     """E5 gate: (1) per swing from ready, at each u of the grid, upper-arm and forearm roll within dev_max deg of the median of
     all swings from ready; (2) measured upper-arm roll (group H) within abs_max deg of the bend plane in every swing frame

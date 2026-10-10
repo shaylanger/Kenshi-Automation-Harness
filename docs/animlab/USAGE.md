@@ -41,6 +41,11 @@ lines), `--set-at frame:k=v`, `--calib L1R,L2R,L1L,L2L,K` (sweep passes the base
 `--no-native` (ignore the recorded native pose), `--no-rec-sets`, `--apply-all` (apply on every frame instead of
 only where the recording's `napply` counter moved), `--cold` (start from a draw instead of record 0's state),
 `--bw-lag` (experiment: bone-world queries inside the apply see the previous frame's pose), `--quiet`.
+Arm bone roll (not recorded): the fake upper arm / forearm get local Y = -(native bend normal) like the game rig
+(in game `fp_vm hinge` captures 0,-1,0 for all four bones) and the E5 hinge starts captured as in the game;
+`--up-roll` = the old synthetic roll (Y nearest camera up, replay captures its own hinge: ~60 deg forearm-roll error),
+`--hinge-capture` = capture the hinge from the replayed frames. `animlab.py hinge <replay> --vs <game rec>` adds the
+per-frame bone-roll faithfulness gate (forearm median <= 5 deg, `--faith`).
 
 ## Metrics (per state)
 
