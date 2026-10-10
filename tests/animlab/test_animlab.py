@@ -251,7 +251,7 @@ class T(unittest.TestCase):
         ok, txt, d = M.churn_check(series(big, 0.0))
         self.assertFalse(ok); self.assertTrue(txt[0].startswith('rev=600px/450:BAD@10-20-30'), txt[0])
         ok, txt, d = M.churn_check(series(still, 0.0, stroke_step=20.0))   # wind-up still, 20 deg/frame at the stroke start
-        self.assertTrue(ok, txt); self.assertTrue(txt[2].endswith('(info)'), txt[2])
+        self.assertTrue(ok, txt); self.assertTrue(txt[2].endswith('(info:over,gate off)'), txt[2])   # over the limit, not gated: says so (E6-e6r5 review)
         ok, txt, d = M.churn_check(series(still, 0.0, stroke_step=20.0), sroll_gate=True)
         self.assertFalse(ok); self.assertTrue(txt[2].startswith('stroke_roll=') and txt[2].endswith(':BAD'), txt[2])
         self.assertTrue(M.churn_check(series(still, 0.0, stroke_step=3.0), sroll_gate=True)[0])   # 3 deg/frame: small + gradual

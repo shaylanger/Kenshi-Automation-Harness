@@ -442,7 +442,8 @@ def churn_check(S, rev_max=CHURN_REV, grip_max=CHURN_GRIP, tw=CHURN_T, win=CHURN
         txt[-1] += '@%d-%d-%d,grip=%.0fpx,%s' % rev[1]
     txt.append('windup_roll=%s/%.0f%s' % ('%.1fdeg@%d-%d' % worst_roll if worst_roll else 'none', roll_max, '' if ok_roll else ':BAD'))
     txt.append('stroke_roll=%s/%.0f,step=%s/%.0f%s' % ('%.1fdeg@%d-%d' % (ws[0], ws[2], ws[3]) if ws else 'none', sroll_max,
-               '%.1f@%d' % (wstep[1], wstep[2]) if wstep else '-', sroll_step, ('' if ok_sroll else ':BAD') if sroll_gate else '(info)'))
+               '%.1f@%d' % (wstep[1], wstep[2]) if wstep else '-', sroll_step,
+               ('' if ok_sroll else ':BAD') if sroll_gate else ('(info)' if ok_sroll else '(info:over,gate off)')))
     txt.append('ratio=%.2f(info)' % ratio[0] + ('@%d-%d,arm=%.0f,wep=%.0f,%s' % ratio[1] if ratio[1] else ''))
     return ok_rev and ok_roll and (ok_sroll or not sroll_gate), txt, dict(rev=rev, ratio=ratio, rolls=rolls, srolls=srolls)
 
@@ -1210,7 +1211,10 @@ def check_suite(rec, overhead=(2,)):
             if 'swing' not in T:
                 continue
             run('arc' + tag, lambda: arc_gate(T, {'swing': ARC_SHARE}))   # arc_each not wired: taste R8 FP on accepted f28 (swings 0.75/0.62)
-            run('churn' + tag, lambda: churn_check(churn_series(F, P))[:2])
+            # scripted E6 strokes are fitted to the stroke-start roll limit (R3 no sudden wrist/blade roll): gated there
+            # (Misses 2026-10-10 E6-e6r5: stroke 1 rolled 51 deg in 4 frames, printed "(info)" and passed); the native
+            # swing (s None, rolls ~150 deg) keeps it as info
+            run('churn' + tag, lambda: churn_check(churn_series(F, P), sroll_gate=s is not None)[:2])
             run('inline' + tag, lambda: _both(inline_check(inline_table(inline_series(F, P))), inline_each(F, P)))
             run('blade' + tag, lambda: blade_check(F, P))
             run('stroke' + tag, lambda: stroke_check(F, P, overhead))
