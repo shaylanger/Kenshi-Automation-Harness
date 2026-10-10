@@ -178,10 +178,10 @@ class T(unittest.TestCase):
         self.assertTrue(M.jitter_faithful(g, dict(r, ready=dict(n=50, jit_p95=1.0)))[0])   # reload below 1 px, swing skipped
 
     def test_churn_check(self):   # E1: forearm out-and-back with the grip still fails; wind-up hand roll > 15 deg fails
-        def series(vx, roll_step, n=40):
+        def series(vx, roll_step, n=40, stroke_step=0.0):
             S = []
             for i in range(n):
-                a = math.radians(roll_step * max(0, i - 15))   # blade up rolls about the forearm axis x in the wind-up
+                a = math.radians(roll_step * max(0, i - 15) + stroke_step * max(0, i - 26))   # blade up rolls about the forearm axis x
                 f, u = (1.0, 0.0, 0.0), (0.0, math.cos(a), math.sin(a))
                 B = (f, u, M.cross(f, u))
                 x = vx(i); st = 'swing' if i >= 15 else 'ready'
@@ -199,6 +199,11 @@ class T(unittest.TestCase):
         big = lambda i: 600.0 + 60.0 * (10 - abs(i - 20)) if 10 <= i <= 30 else 600.0   # 600 px out and back
         ok, txt, d = M.churn_check(series(big, 0.0))
         self.assertFalse(ok); self.assertTrue(txt[0].startswith('rev=600px/450:BAD@10-20-30'), txt[0])
+        ok, txt, d = M.churn_check(series(still, 0.0, stroke_step=20.0))   # wind-up still, 20 deg/frame at the stroke start
+        self.assertTrue(ok, txt); self.assertTrue(txt[2].endswith('(info)'), txt[2])
+        ok, txt, d = M.churn_check(series(still, 0.0, stroke_step=20.0), sroll_gate=True)
+        self.assertFalse(ok); self.assertTrue(txt[2].startswith('stroke_roll=') and txt[2].endswith(':BAD'), txt[2])
+        self.assertTrue(M.churn_check(series(still, 0.0, stroke_step=3.0), sroll_gate=True)[0])   # 3 deg/frame: small + gradual
         self.assertAlmostEqual(M._twist((0, 0, 1.0), ((1, 0, 0), (0, 1, 0), (0, 0, 1)), ((1, 0, 0), (0, 0, 1), (0, -1, 0))), 0.0)   # roll about x, not z
 
 

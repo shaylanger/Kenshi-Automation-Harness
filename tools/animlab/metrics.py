@@ -290,6 +290,7 @@ def bolt_ok(T, dev=BOLT_DEV, step=BOLT_STEP, min_n=10):
 
 CHURN_REV, CHURN_GRIP, CHURN_T, CHURN_WIN, CHURN_SKIP = 450.0, 250.0, 0.4, 0.15, 10   # E1 arm churn (px, px, s, s, frames)
 ROLL_MAX = 15.0   # E1: hand roll about the forearm axis during the wind-up (deg)
+SROLL_DU, SROLL_MAX, SROLL_STEP = 0.15, 45.0, 12.0   # E1: stroke start (u0..u0+DU): max roll (deg), max step (deg per 1/60 s)
 
 
 def _scr(c):
@@ -352,13 +353,16 @@ def _twist(a, B0, B1):
     return math.degrees(2 * math.atan2(dot(v, a), 1.0))
 
 
-def churn_check(S, rev_max=CHURN_REV, grip_max=CHURN_GRIP, tw=CHURN_T, win=CHURN_WIN, skip=CHURN_SKIP, roll_max=ROLL_MAX, u0=ARC_U0):
+def churn_check(S, rev_max=CHURN_REV, grip_max=CHURN_GRIP, tw=CHURN_T, win=CHURN_WIN, skip=CHURN_SKIP, roll_max=ROLL_MAX, u0=ARC_U0,
+                sroll_max=SROLL_MAX, sroll_step=SROLL_STEP, sroll_du=SROLL_DU, sroll_gate=False):
     """E1 arm churn (Shay: the arm moves around a ton while the sword barely moves).
     (b) gate: the visible forearm end goes out and comes back by more than rev_max px within tw s while the grip stays
         within grip_max px; worst window = rev px @ frames start-turn-end, grip extent.
     (a) info: (visible forearm end + forearm mid) screen path / (grip + tip) path over win s (arm path >= 150 px).
     (d) gate: hand roll about the forearm axis in each swing's wind-up (first swing frame .. swu < u0): max |cumulative
-        twist| of the blade up vector <= roll_max deg."""
+        twist| of the blade up vector <= roll_max deg.
+    (e) gate with sroll_gate (else info; the current game swing rolls ~150 deg here): stroke start (u0 .. u0+sroll_du): the hand may roll only a little and gradually: max |cumulative twist|
+        <= sroll_max deg, largest step <= sroll_step deg per 1/60 s."""
     n = len(S); rev = (0.0, None); ratio = (0.0, None)
     for i in range(skip, n):
         if not S[i]:
@@ -383,7 +387,7 @@ def churn_check(S, rev_max=CHURN_REV, grip_max=CHURN_GRIP, tw=CHURN_T, win=CHURN
             arm += _d2(a['vm'], b['vm']) + _d2(mid(a), mid(b)); wep += _d2(a['g'], b['g']) + _d2(a['tip'], b['tip']); q += 1
         if arm >= 150 and arm / max(wep, 100.0) > ratio[0]:
             ratio = (arm / max(wep, 100.0), (S[i]['i'], S[q]['i'], arm, wep, S[i]['st']))
-    rolls = []
+    rolls, srolls = [], []
     for i in range(1, n):
         if S[i] and S[i]['st'] == 'swing' and S[i - 1] and S[i - 1]['st'] != 'swing':
             cum, mx, k = 0.0, 0.0, i
@@ -392,15 +396,25 @@ def churn_check(S, rev_max=CHURN_REV, grip_max=CHURN_GRIP, tw=CHURN_T, win=CHURN
                 mx = max(mx, abs(cum)); k += 1
             if k > i:
                 rolls.append((mx, S[i]['i'], S[k - 1]['i']))
+            cum, smx, stp, k0 = 0.0, 0.0, 0.0, k
+            while k < n and S[k] and S[k - 1] and S[k]['st'] == 'swing' and S[k]['swu'] < u0 + sroll_du:
+                t = _twist(S[k]['ax'], S[k - 1]['B'], S[k]['B']); cum += t; smx = max(smx, abs(cum))
+                stp = max(stp, abs(t) / max(S[k]['t'] - S[k - 1]['t'], 1e-3) / 60.0); k += 1
+            if k > k0:
+                srolls.append((smx, stp, S[k0]['i'], S[k - 1]['i']))
     worst_roll = max(rolls) if rolls else None
     ok_rev = rev[0] <= rev_max
     ok_roll = worst_roll is None or worst_roll[0] <= roll_max
+    ws = max(srolls) if srolls else None; wstep = max(srolls, key=lambda r: r[1]) if srolls else None
+    ok_sroll = ws is None or (ws[0] <= sroll_max and wstep[1] <= sroll_step)
     txt = ['rev=%.0fpx/%.0f%s' % (rev[0], rev_max, '' if ok_rev else ':BAD')]
     if rev[1]:
         txt[-1] += '@%d-%d-%d,grip=%.0fpx,%s' % rev[1]
     txt.append('windup_roll=%s/%.0f%s' % ('%.1fdeg@%d-%d' % worst_roll if worst_roll else 'none', roll_max, '' if ok_roll else ':BAD'))
+    txt.append('stroke_roll=%s/%.0f,step=%s/%.0f%s' % ('%.1fdeg@%d-%d' % (ws[0], ws[2], ws[3]) if ws else 'none', sroll_max,
+               '%.1f@%d' % (wstep[1], wstep[2]) if wstep else '-', sroll_step, ('' if ok_sroll else ':BAD') if sroll_gate else '(info)'))
     txt.append('ratio=%.2f(info)' % ratio[0] + ('@%d-%d,arm=%.0f,wep=%.0f,%s' % ratio[1] if ratio[1] else ''))
-    return ok_rev and ok_roll, txt, dict(rev=rev, ratio=ratio, rolls=rolls)
+    return ok_rev and ok_roll and (ok_sroll or not sroll_gate), txt, dict(rev=rev, ratio=ratio, rolls=rolls, srolls=srolls)
 
 
 STOCK_H, STOCK_BACK, STOCK_NEAR = 1.45, 8.0, 1.5   # C2: stock top above the bolt axis, stock length behind the grip, near clip (dm)

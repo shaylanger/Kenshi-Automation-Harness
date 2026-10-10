@@ -176,7 +176,7 @@ def cmd_bolt(a):
 def cmd_churn(a):
     """E1 arm churn + wind-up hand roll (see metrics.churn_check)."""
     rec = recfmt.parse(a.rec); P = M.frame_metrics(rec)
-    ok, txt, _ = M.churn_check(M.churn_series(rec.frames, P), a.rev, a.grip, roll_max=a.roll)
+    ok, txt, _ = M.churn_check(M.churn_series(rec.frames, P), a.rev, a.grip, roll_max=a.roll, sroll_gate=a.stroke)
     print('churn %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
 
 
@@ -274,6 +274,7 @@ def main():
     p.add_argument('--source', choices=('sl', 'bl'), help='sidecar column group: sl = post-IK Prop2 frame (default when present), bl = weapon frame')
     p = sp.add_parser('churn'); p.add_argument('rec'); p.add_argument('--rev', type=float, default=M.CHURN_REV)
     p.add_argument('--grip', type=float, default=M.CHURN_GRIP); p.add_argument('--roll', type=float, default=M.ROLL_MAX)
+    p.add_argument('--stroke', action='store_true', help='also gate the stroke-start roll (E1 fix: small + gradual)')
     p = sp.add_parser('stock'); p.add_argument('rec'); p.add_argument('--ref', help='known-good recording for the orientation check')
     p.add_argument('--max', type=float, default=M.STOCK_MAX); p.add_argument('--ori', type=float, default=M.ORI_MAX)
     p.add_argument('--h', type=float, default=M.STOCK_H, help='stock top above the bolt axis (dm)')

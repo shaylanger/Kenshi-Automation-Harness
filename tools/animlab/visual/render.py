@@ -363,6 +363,62 @@ def cmd_frames(a):
     return 0
 
 
+def churn_flags(path, rev_max=None, roll_max=None):
+    """per recording frame: screen trails (visible forearm end, grip) and the frames the churn check flags (worst arm
+    out-and-back window over rev_max, each swing wind-up whose hand roll exceeds roll_max). Recordings only."""
+    import recfmt, metrics as M
+    rec = recfmt.parse(path); P = M.frame_metrics(rec); S = M.churn_series(rec.frames, P)
+    rev_max = M.CHURN_REV if rev_max is None else rev_max; roll_max = M.ROLL_MAX if roll_max is None else roll_max
+    ok, txt, d = M.churn_check(S, rev_max, roll_max=roll_max)
+    bad = set()
+    if d['rev'][0] > rev_max and d['rev'][1]:
+        bad.update(range(d['rev'][1][0], d['rev'][1][2] + 1))
+    for mx, i0, i1 in d['rolls']:
+        if mx > roll_max:
+            bad.update(range(i0, i1 + 1))
+    return S, bad, ' '.join(txt[:2])
+
+
+def cmd_sheet(a):
+    """review sheet: one row per recording (e.g. current vs fix), every Nth frame; elbow (visible forearm end, green)
+    and grip (yellow) screen trails since --from; frames the churn check flags boxed red; title = churn result."""
+    from PIL import Image, ImageDraw
+    rig = Rig(load_cfg(a.config, a.weapons)); tw, th = parse_size(a.size)
+    labels = a.labels.split(',') if a.labels else [os.path.basename(p) for p in a.poses]
+    rows = []
+    for pi, path in enumerate(a.poses):
+        P = load_pose(path); S, bad, txt = churn_flags(path, a.rev, a.roll)
+        end = min(len(P), a.end if a.end is not None else len(P))
+        sel = list(range(a.start, end, a.every)); tiles = []
+        sx, sy = tw / 1600.0, th / 900.0
+        for i in sel:
+            img, _, _ = render_frame(rig, P[i], (tw, th))
+            im = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8)); dr = ImageDraw.Draw(im)
+            for key, col in (('vm', (0, 230, 0)), ('g', (255, 220, 0))):
+                pts = [(s[key][0] * sx, s[key][1] * sy) for s in S[a.start:i + 1] if s]
+                if len(pts) > 1:
+                    dr.line(pts, fill=col, width=2)
+                if pts:
+                    x, y = pts[-1]; dr.ellipse((x - 4, y - 4, x + 4, y + 4), outline=col, width=2)
+            s = S[i] if i < len(S) else None
+            dr.text((4, 4), '%s f%d %s u=%.2f' % (labels[pi], i, s['st'] if s else '-', s['swu'] if s else 0), fill=(255, 255, 255))
+            if i in bad:
+                dr.rectangle((0, 0, tw - 1, th - 1), outline=(255, 0, 0), width=5)
+            tiles.append(im)
+        rows.append((tiles, '%s: %s' % (labels[pi], txt)))
+    cols = a.cols or max(len(t) for t, _ in rows); hdr = 16
+    nr = sum((len(t) + cols - 1) // cols for t, _ in rows)
+    sheet = Image.new('RGB', (cols * tw, nr * th + len(rows) * hdr), (30, 30, 30)); dr = ImageDraw.Draw(sheet); y = 0
+    for tiles, title in rows:
+        dr.text((4, y + 2), title, fill=(255, 255, 255)); y += hdr
+        for k, im in enumerate(tiles):
+            sheet.paste(im, ((k % cols) * tw, y + (k // cols) * th))
+        y += ((len(tiles) + cols - 1) // cols) * th
+    sheet.save(a.o)
+    print('sheet %s: %s' % (a.o, ' | '.join(t for _, t in rows)))
+    return 0
+
+
 def cmd_compare(a):
     """left: game frame, middle: render, right: game frame with the render's outlines (arm green, weapon red)."""
     from PIL import Image
@@ -396,10 +452,15 @@ def main():
     p.add_argument('--size', default='800x450')
     p = sp.add_parser('compare'); p.add_argument('state'); p.add_argument('game'); p.add_argument('--config', required=True)
     p.add_argument('-o', required=True); p.add_argument('--scale', type=float, default=0.5)
+    p = sp.add_parser('sheet'); p.add_argument('poses', nargs='+', help='recordings, one sheet row each'); p.add_argument('--config', required=True)
+    p.add_argument('-o', required=True); p.add_argument('--every', type=int, default=4); p.add_argument('--from', dest='start', type=int, default=0)
+    p.add_argument('--to', dest='end', type=int); p.add_argument('--size', default='400x225', help='tile size')
+    p.add_argument('--cols', type=int, help='tiles per line (default: all frames on one line per recording)')
+    p.add_argument('--labels', help='row labels, comma separated'); p.add_argument('--rev', type=float); p.add_argument('--roll', type=float)
     for p in sp.choices.values():
         p.add_argument("--weapons", help="override weapon_sides, e.g. R,L (dual wield)")
     a = ap.parse_args()
-    return dict(still=cmd_still, frames=cmd_frames, compare=cmd_compare)[a.cmd](a)
+    return dict(still=cmd_still, frames=cmd_frames, compare=cmd_compare, sheet=cmd_sheet)[a.cmd](a)
 
 
 if __name__ == '__main__':
