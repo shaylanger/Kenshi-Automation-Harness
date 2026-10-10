@@ -198,7 +198,7 @@ def moves_ok(table, required):
     return ok, txt
 
 
-ARC_OK, ARC_SHARE, ARC_WB = 0.7, 0.85, 30.0   # E1 gate: per-frame edge_arc >= ARC_OK on >= ARC_SHARE of fast frames, wrist bend <= ARC_WB
+ARC_OK, ARC_SHARE, ARC_WB = 0.7, 0.85, 50.0   # E1 gate: per-frame edge_arc >= ARC_OK on >= ARC_SHARE of fast frames, wrist bend <= ARC_WB (50 = vmcheck wrist limit; Shay accepted E1 wb36, 2026-10-09)
 
 
 def arc_gate(table, spec, wb_lim=ARC_WB):

@@ -287,7 +287,7 @@ def main():
     p = sp.add_parser('metrics'); p.add_argument('rec'); p.add_argument('--skip', type=int, default=0)
     p.add_argument('--require', help='states that must move visibly from ready, comma list (default: aim,reload or block,swing by the states seen)')
     p.add_argument('--arc', help="E1 edge-leads-the-arc gate, 'state[:share],...' (default swing:0.85 when a swing is seen; '' = off)")
-    p.add_argument('--wb-max', type=float, default=30.0, help='wrist bend limit (deg) for the arc gate')
+    p.add_argument('--wb-max', type=float, default=M.ARC_WB, help='wrist bend limit (deg) for the arc gate (default %(default)s)')
     p = sp.add_parser('bolt'); p.add_argument('rec'); p.add_argument('--bolt', help='sidecar (default <rec>.bolt)')
     p.add_argument('--dev', type=float, default=0.1); p.add_argument('--step', type=float, default=0.05)
     p.add_argument('--source', choices=('sl', 'bl'), help='sidecar column group: sl = post-IK Prop2 frame (default when present), bl = weapon frame')
