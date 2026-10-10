@@ -172,6 +172,17 @@ def cmd_bolt(a):
     print('bolt %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
 
 
+def cmd_stock(a):
+    """C2: crossbow stock low on screen (stock top <= --max % from the bottom in ready) and, with --ref, ready orientation
+    within --ori deg of a known-good recording."""
+    F = recfmt.parse(a.rec).frames; lab = M.label_states(F)
+    ref = None
+    if a.ref:
+        RF = recfmt.parse(a.ref).frames; ref = M.pose_dirs(RF, M.label_states(RF))
+    ok, txt = M.stock_ok(M.stock_table(F, lab, a.h), M.pose_dirs(F, lab), ref, a.max, a.ori)
+    print('stock %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
+
+
 def cmd_compare(a):
     fails, n = compare(a.real, a.sim, a.skip)
     print('GATE %s frames=%d %s' % ('PASS' if not fails else 'FAIL', n, '; '.join(fails[:8])))
@@ -252,6 +263,9 @@ def main():
     p.add_argument('--wb-max', type=float, default=30.0, help='wrist bend limit (deg) for the arc gate')
     p = sp.add_parser('bolt'); p.add_argument('rec'); p.add_argument('--bolt', help='sidecar (default <rec>.bolt)')
     p.add_argument('--dev', type=float, default=0.1); p.add_argument('--step', type=float, default=0.05)
+    p = sp.add_parser('stock'); p.add_argument('rec'); p.add_argument('--ref', help='known-good recording for the orientation check')
+    p.add_argument('--max', type=float, default=M.STOCK_MAX); p.add_argument('--ori', type=float, default=M.ORI_MAX)
+    p.add_argument('--h', type=float, default=M.STOCK_H, help='stock top above the bolt axis (dm)')
     p = sp.add_parser('compare'); p.add_argument('real'); p.add_argument('sim'); p.add_argument('--skip', type=int, default=0)
     for name in ('replay', 'sweep', 'gate'):
         p = sp.add_parser(name)
@@ -270,7 +284,7 @@ def main():
     a = ap.parse_args()
     if not a.cmd:
         ap.print_help(); return 2
-    return {'bolt': cmd_bolt, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
+    return {'bolt': cmd_bolt, 'stock': cmd_stock, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':

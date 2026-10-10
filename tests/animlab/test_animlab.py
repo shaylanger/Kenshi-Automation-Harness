@@ -151,6 +151,21 @@ class T(unittest.TestCase):
         finally:
             os.unlink(f.name)
 
+    def test_stock_check(self):   # C2: stock high on screen fails; a rotated ready pose fails against the reference
+        T = {'ready': dict(n=40, p50=20.0, p95=24.0, max=26.0)}
+        self.assertTrue(M.stock_ok(T)[0])
+        ok, txt = M.stock_ok({'ready': dict(T['ready'], p95=67.0)})
+        self.assertFalse(ok); self.assertTrue(txt[0].endswith(':BAD'))
+        ref = ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0)); c, s = math.cos(math.radians(24.5)), math.sin(math.radians(24.5))
+        self.assertTrue(M.stock_ok(T, ref, ref)[0])
+        ok, txt = M.stock_ok(T, ((0.0, -s, c), (0.0, c, s)), ref)
+        self.assertFalse(ok); self.assertIn('fwd=24.5', txt[-1])
+        self.assertEqual(M.stock_ok({}), (False, ['ready:NO_FRAMES']))
+        lab = ['ready'] * 12   # stock behind a grip low in view: top below mid-screen
+        F = [dict(cls=1, on=1, w=1.0, mp=(0.0, -2.0, 6.0), mf=(0.0, 0.0, 1.0), mu=(0.0, 1.0, 0.0))] * 12
+        t = M.stock_table(F, lab)['ready']
+        self.assertEqual(t['n'], 12); self.assertLess(t['p95'], 50.0)
+
     def test_jitter_faithful(self):   # X1: game jitter the replay does not show = noise from outside the solver
         g = {'ready': dict(n=50, jit_p95=1.74), 'reload': dict(n=50, jit_p95=0.8), 'swing': dict(n=50, jit_p95=60.0)}
         r = {'ready': dict(n=50, jit_p95=0.42), 'reload': dict(n=50, jit_p95=0.1), 'swing': dict(n=50, jit_p95=10.0)}

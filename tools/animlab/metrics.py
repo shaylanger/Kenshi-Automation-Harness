@@ -285,6 +285,57 @@ def bolt_ok(T, dev=BOLT_DEV, step=BOLT_STEP, min_n=10):
     return ok and bool(txt), txt or ['no visible bolt frames']
 
 
+STOCK_H, STOCK_BACK, STOCK_NEAR = 1.45, 8.0, 1.5   # C2: stock top above the bolt axis, stock length behind the grip, near clip (dm)
+STOCK_MAX, ORI_MAX = 25.0, 3.0                     # C2 gate: stock top <= % of the screen from the bottom; ready orientation drift (deg)
+
+
+def stock_table(F, labels, h=STOCK_H, back=STOCK_BACK, near=STOCK_NEAR):
+    """C2 (ranged weapon, cls 1) per state: highest visible point of the stock top line mp - k*mf + h*mu (k 0..back dm
+    behind the grip) as % of the screen height from the bottom (-1 = stock not on screen); p50/p95/max, n."""
+    S = {}
+    for r, s in zip(F, labels):
+        if r['cls'] != 1 or not r['on'] or r['w'] < 0.99:
+            continue
+        best = -1.0
+        for i in range(int(back * 10) + 1):
+            q = add(sub(r['mp'], mul(r['mf'], i * 0.1)), mul(r['mu'], h))
+            if q[2] <= near or abs(q[0] / q[2]) > TX:
+                continue
+            best = max(best, 50 + 50 * (q[1] / q[2]) / TY)
+        S.setdefault(s, []).append(best)
+    return {s: dict(n=len(v), p50=pct(v, .5), p95=pct(v, .95), max=max(v)) for s, v in S.items()}
+
+
+def pose_dirs(F, labels, state='ready'):
+    """Median weapon forward/up (camera numbers, normalised) over a state's frames, or None."""
+    P = [r for r, s in zip(F, labels) if s == state and r['on'] and r['w'] >= 0.99]
+    if not P:
+        return None
+    return tuple(nz(tuple(_med([r[k][i] for r in P]) for i in range(3))) for k in ('mf', 'mu'))
+
+
+def stock_ok(T, dirs=None, ref=None, lim=STOCK_MAX, ori=ORI_MAX, states=('ready',), min_n=10):
+    """C2 gate: stock top p95 <= lim % in each gated state; with a reference pose (ref = pose_dirs of a known-good
+    recording) the ready forward/up must also stay within ori deg of it (C2 fixes must not rotate the weapon)."""
+    ok, txt = True, []
+    for s in states:
+        t = T.get(s)
+        if not t or t['n'] < min_n:
+            ok = False; txt.append('%s:NO_FRAMES' % s); continue
+        good = t['p95'] <= lim
+        ok = ok and good
+        txt.append('%s:p95=%.0f%%/%.0f,n=%d%s' % (s, t['p95'], lim, t['n'], '' if good else ':BAD'))
+    if ref is not None:
+        if dirs is None:
+            ok = False; txt.append('ori:NO_FRAMES')
+        else:
+            df, du = _ang(dirs[0], ref[0]), _ang(dirs[1], ref[1])
+            good = max(df, du) <= ori
+            ok = ok and good
+            txt.append('ori:fwd=%.1f,up=%.1fdeg/%.0f%s' % (df, du, ori, '' if good else ':BAD'))
+    return ok, txt
+
+
 def fmt(v):
     if isinstance(v, int):
         return '%d' % v

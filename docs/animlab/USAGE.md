@@ -25,6 +25,10 @@ python3 tools/animlab/animlab.py replay rec.txt --adapter /root/animlab-build/kf
 python3 tools/animlab/animlab.py sweep rec.txt --adapter /root/animlab-build/kfpvm_cur --args=--quiet \
     --variant 'st1: --set stretch=1 --quiet' --variant 'noelb: --set elb=0 --quiet' \
     --variant 'fix@/root/animlab-build/kfpvm_fix: --quiet' --metrics wb_p95,st_max,elb_h_max,jit_p95
+# game-only checks (no replay): C3 bolt rigid on the weapon (<rec>.bolt sidecar); C2 stock top <= 25% from the screen
+# bottom in ready + ready orientation within 3 deg of a known-good recording
+python3 tools/animlab/animlab.py bolt rec.txt
+python3 tools/animlab/animlab.py stock rec.txt --ref good.txt [--max 25 --ori 3 --h 1.45]
 # faithfulness gate (exit 0 = PASS)
 python3 tools/animlab/animlab.py gate rec1.txt rec2.txt --adapter /root/animlab-build/kfpvm_6c9516b --args=--quiet --quiet
 ```
