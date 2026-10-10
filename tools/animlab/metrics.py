@@ -1124,10 +1124,18 @@ POOL_RATE, POOL_TAKE, POOL_MIN_ARC_N = 0.95, 2, 6   # min predicted take pass ra
 
 
 def swing_verdicts(F, P, overhead=()):
-    """per swing of a recording: arc counts, wrist bend, blade + stroke checks judged on that swing alone."""
+    """per swing of a recording: arc counts, wrist bend, blade + stroke checks judged on that swing alone; churn = the
+    swing's wind-up roll (<= ROLL_MAX) and stroke-start roll (<= SROLL_MAX, step <= SROLL_STEP; R3, gated like the
+    scripted-stroke check_suite: Misses 2026-10-10 "pool does not run every gated per-stroke rule", e6r5 s1 51 deg passed
+    the pool). The arm-churn reversal (rev) is not per swing and stays in the recording checks."""
     out = []
+    _, _, cd = churn_check(churn_series(F, P), sroll_gate=True)
     for k, idx in enumerate(swings(F, P)):
         keep = set(idx)
+        rl = [r for r in cd['rolls'] if r[1] in keep]; sr = [r for r in cd['srolls'] if r[2] in keep]
+        cok = all(r[0] <= ROLL_MAX for r in rl) and all(r[0] <= SROLL_MAX and r[1] <= SROLL_STEP for r in sr)
+        ctxt = 'windup_roll=%s stroke_roll=%s' % ('%.0f' % max(r[0] for r in rl) if rl else '-',
+                                                 '%.0f/step%.1f' % (max(r[0] for r in sr), max(r[1] for r in sr)) if sr else '-')
         Pm = [p if p['state'] != 'swing' or i in keep else dict(p, state='swing_x') for i, p in enumerate(P)]
         ar = [P[i]['arc'] for i in idx if P[i].get('arc') is not None]
         wb = [P[i]['wb'] for i in idx if P[i]['wb'] is not None]
@@ -1135,12 +1143,12 @@ def swing_verdicts(F, P, overhead=()):
         sok, stxt = stroke_check(F, Pm, overhead)
         us = [F[i]['swu'] for i in idx]
         out.append(dict(k=k, frame=idx[0], stroke=F[idx[0]].get('stroke'), arc_good=sum(1 for x in ar if x >= 0.7), arc_n=len(ar),
-                        wb_max=max(wb) if wb else 0.0, ok=dict(blade=bok, stroke=sok), btxt=btxt, stxt=stxt,
+                        wb_max=max(wb) if wb else 0.0, ok=dict(blade=bok, stroke=sok, churn=cok), btxt=btxt, stxt=stxt, ctxt=ctxt,
                         full=us[0] <= 0.1 and us[-1] >= 0.9 and len(ar) >= POOL_MIN_ARC_N))
     return out
 
 
-def pool_predict(V, checks=('arc', 'blade', 'stroke'), take=POOL_TAKE, rate=POOL_RATE, share=0.85, wb_lim=None):
+def pool_predict(V, checks=('arc', 'blade', 'stroke', 'churn'), take=POOL_TAKE, rate=POOL_RATE, share=0.85, wb_lim=None):
     """V = swing_verdicts rows (+ 'rec'). A take of `take` swings draws native variants at random: predicted take pass rate =
     share of all `take`-combinations of full pool swings that pass (arc pooled over the take like the game's arc gate,
     blade/stroke = every swing passes). PASS when every check's rate >= `rate`."""

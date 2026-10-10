@@ -338,12 +338,14 @@ class T(unittest.TestCase):
         ok, t = M.guard_table_check([('a', 59.6, '228c60'), ('b', 45.7, '223cc0')]); self.assertTrue(ok, t)
     def test_pool_predict(self):
         # miss 2026-10-10 E6 kfx-b2: one swing per stroke predicted PASS; the game's random native variants failed the take
-        def sw(g, n=12, wb=40.0, blade=True): return dict(frame=0, arc_good=g, arc_n=n, wb_max=wb, full=True, ok=dict(blade=blade, stroke=True))
+        def sw(g, n=12, wb=40.0, blade=True, churn=True): return dict(frame=0, arc_good=g, arc_n=n, wb_max=wb, full=True, ok=dict(blade=blade, stroke=True, churn=churn))
         good = [sw(12) for _ in range(9)]
         ok, t = M.pool_predict(good); self.assertTrue(ok, t)
         ok, t = M.pool_predict([sw(12)] + [sw(5)] * 3); self.assertFalse(ok, t); self.assertIn('arc:take=0.00', ' '.join(t))
         ok, t = M.pool_predict(good + [sw(12, blade=False)]); self.assertFalse(ok, t)   # 9/45 takes hold the bad swing
         ok, t = M.pool_predict([sw(12)]); self.assertFalse(ok, t)                       # fewer full swings than a take
+        ok, t = M.pool_predict(good + [sw(12, churn=False)]); self.assertFalse(ok, t)   # Misses 2026-10-10: stroke-start roll (R3) pooled too
+        self.assertIn('churn:', ' '.join(t))
         # free block: per-press guard over the native techniques (f059 z25: press 0 hanging -75)
         S = [(i, 40.0, 3.0) for i in range(0, 12)] + [(i, -78.0, 3.0) for i in range(30, 40)]
         V = M.guard_press_verdicts(S); self.assertEqual([v['ok']['guard'] for v in V], [True, False])
