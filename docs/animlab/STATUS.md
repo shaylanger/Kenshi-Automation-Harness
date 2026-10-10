@@ -122,6 +122,14 @@ Format: date | point | what the game showed | recording path | build | status
    c. (DONE) C2: gate in metrics: stock top <= 25% from the screen bottom (port C:\KenshiTestRuns\f16\c2.py, mp/mf/mu) AND
       crossbow orientation within ~3 deg of the d40b6ad-era pose (Shay: C2 rotated the crossbow); fail on an f16 c2 rec.
    d. (DONE) Sword elbow drift: faithful --commanded (regress step 16).
+   TOP (main 2026-10-09, Shay rejected e1-compare.mp4): kfp-e1-keys candidate wind-up (source frames ~12-22) swings
+      the forearm far out right (elbow off-screen) and back while the sword barely moves. (1) new check "arm churn":
+      (a) elbow + forearm-mid screen path / grip+tip screen path over ~0.15 s windows, threshold calibrated on game vmq
+      sword-z0 ready/swing/block; (b) elbow screen-x out-and-back > X within 0.4 s while grip moves < Y; (c) print the
+      worst window. Regress step: FAIL on current candidate, PASS on the fix. Run it on game recordings too (vmq sword,
+      f14/e0). (2) render.py review sheet: every Nth frame, elbow + grip trails, churn frames boxed red. (3) fix the
+      candidate (elbow side continuous through the wind-up), keep arc/wb. Re-render e1-compare.mp4 + sheet, message main
+      numbers + paths; send the patch to the fixer only after arc + wb + churn pass.
    e. New Misses rows from the fixer (agent a7ff9f30a50ed26e7) in order.
    Not yet sent to main: "C3 partly: check animlab.py bolt, f16/c3a FAIL dev95 0.82; no passing build yet".
    Gotchas: /root/animlab-kfp-src is re-synced by the fixer (kfpvm_cur drifts: pin checks with build.sh --rev; new
