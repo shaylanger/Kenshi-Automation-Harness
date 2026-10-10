@@ -65,5 +65,66 @@ class Cursor(unittest.TestCase):   # Shay 2026-10-10 ticket A: no mouse cursor i
         self.assertEqual(FR.find_cursor(f), [])
 
 
+
+def scene(seed=0):
+    """1600x900 textured desert scene (sky band + noisy sand): no flat cells, no text."""
+    r = np.random.RandomState(seed)
+    f = np.zeros((900, 1600, 3), int); f[...] = (190, 150, 100); f[:300] = (90, 140, 200)
+    return np.clip(f + r.randint(-14, 15, (900, 1600, 1)), 0, 255)
+
+
+def tag(f, x, y, word='[Malzin]', dark_panel=False):
+    """draw outlined thin text (a Kenshi name tag) or light text on a flat dark panel (a speech bar) at x, y."""
+    from PIL import Image, ImageDraw, ImageFont
+    im = Image.fromarray(f.astype(np.uint8)); d = ImageDraw.Draw(im)
+    try:
+        fn = ImageFont.load_default(size=15)   # game UI text height (~15 px at 1600x900)
+    except TypeError:
+        fn = ImageFont.load_default()
+    if dark_panel:
+        d.rectangle([x - 10, y - 6, x + 9 * len(word) + 10, y + 18], fill=(20, 20, 20))
+        d.text((x, y), word, fill=(200, 200, 200), font=fn)
+    else:
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            d.text((x + dx, y + dy), word, fill=(0, 0, 0), font=fn)
+        d.text((x, y), word, fill=(235, 235, 235), font=fn)
+    return np.asarray(im).astype(int)
+
+
+class Overlay(unittest.TestCase):   # class of the cursor miss: nothing foreign drawn over the scene (2026-10-10)
+    def run_(self, fs):
+        return FR.overlay_check(None, frames=[(k * 0.5, f) for k, f in enumerate(fs)])
+
+    def test_clean_take_passes(self):
+        ok, txt = self.run_([scene(k) for k in range(6)])
+        self.assertTrue(ok, txt)
+
+    def test_name_tag_and_speech_fail(self):
+        fs = [scene(k) for k in range(8)]
+        fs[3] = tag(fs[3], 700, 350, '[Malzin] [Axima]')
+        ok, txt = self.run_(fs)
+        self.assertFalse(ok, txt); self.assertIn('1.5-1.5s', txt)
+        fs = [scene(k) for k in range(8)]
+        fs[5] = tag(fs[5], 600, 400, 'Still chewing on that bandit, or is it something else', dark_panel=True)
+        ok, txt = self.run_(fs)
+        self.assertFalse(ok, txt); self.assertIn('2.5-2.5s', txt)
+
+    def test_popup_panel_fails(self):   # mutation vid-popup-overlay: flat grey dialog box, no text
+        fs = [scene(k) for k in range(10)]
+        for k in range(3, 7):
+            fs[k][270:585, 480:1120] = 64; fs[k][270:315, 480:1120] = 200
+        ok, txt = self.run_(fs)
+        self.assertFalse(ok, txt); self.assertIn('panel', txt)
+
+    def test_hud_and_label_zones_pass(self):
+        fs = [tag(scene(k), 1300, 400, 'LOADED') for k in range(6)]   # the take's own HUD in every frame = baseline
+        fs = [tag(f, 700, 30, 'Katana ready, zoom 0') for f in fs]    # title label band
+        fs[2] = tag(fs[2], 700, 120, 'stroke 0')                        # centred label down to 0.2 H
+        ok, txt = self.run_(fs)
+        self.assertTrue(ok, txt)
+        fs[4] = tag(fs[4], 40, 40, 'debug: x=12')                       # stray string in the top-left corner stays checked
+        self.assertFalse(self.run_(fs)[0])
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=1)

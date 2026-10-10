@@ -21,12 +21,13 @@ A take = a video (optional), a labels file and one or more evidence files:
   cond = <key><op><value>, op one of = != ~ !~ >= <= > < ; `=`/`!=` take `a|b` alternatives; `~` is a regex
   search; numbers compare numerically.
 Video: the take must end at the `end` label: video length - (end + offset) within [-0.2, endslack] s, and no
-frame may show the Windows mouse cursor (frames.py cursor at 5 fps; `--no-cursor` skips it).
+frame may show the Windows mouse cursor (frames.py cursor at 5 fps; `--no-cursor` skips it) or a foreign overlay
+(speech bar, name tag, damage number, hint list, popup: frames.py overlay at 2 fps; `--no-overlay` skips it).
 
 KenshiFP log (`--kfplog LOG [--log-t0 HH:MM:SS.ms]`): every free block / free swing in the take must have run its native
 animation (`... end: ... live=1`); a press whose progress never went live (fb_lives 0, p 1.010) fails `animlive`.
 
-Usage: takecheck.py --labels L --ev E [--ev E2 ...] --rules R [--video V [--no-cursor] | --video-len S] [--kfplog LOG
+Usage: takecheck.py --labels L --ev E [--ev E2 ...] --rules R [--video V [--no-cursor] [--no-overlay] | --video-len S] [--kfplog LOG
        [--log-t0 T]] [--name take]
 Exit 0 = PASS. Prints one line per check, then `RESULT <name> PASS|FAIL <failed checks>`.
 """
@@ -272,6 +273,7 @@ def main():
     ap.add_argument('--rules', required=True); ap.add_argument('--video'); ap.add_argument('--video-len', type=float, help='known video length (s) instead of --video (archived takes)'); ap.add_argument('--name', default='take')
     ap.add_argument('--set', action='append', default=[], help='name=value, overrides a rules-file `set`')
     ap.add_argument('--no-cursor', action='store_true', help='skip the mouse-cursor frame check on --video')
+    ap.add_argument('--no-overlay', action='store_true', help='skip the foreign-overlay frame check on --video')
     ap.add_argument('--kfplog', help='KenshiFP.log of the take: every free block / free swing must have run its native animation (live=1)')
     ap.add_argument('--log-t0', help='wall clock HH:MM:SS[.ms] of take t=0 in the log (default: judge the whole log)')
     a = ap.parse_args()
@@ -290,6 +292,14 @@ def main():
         lines.append('cursor %s %s' % ('PASS' if cok else 'FAIL', ctxt))
         if not cok:
             ok = False; fails.append('cursor')
+    if a.video and not a.no_overlay:   # class of the cursor miss: nothing foreign drawn over the scene (2026-10-10)
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import frames
+        vok, vtxt = frames.overlay_check(a.video)
+        lines.append('overlay %s %s' % ('PASS' if vok else 'FAIL', vtxt))
+        if not vok:
+            ok = False; fails.append('overlay')
     if a.kfplog:
         t0 = wall(a.log_t0) if a.log_t0 else None
         t1 = t0 + (L[-1][0] if L else 0) + 1.0 if t0 is not None else None
