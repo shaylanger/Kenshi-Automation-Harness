@@ -360,5 +360,25 @@ class T(unittest.TestCase):
         ok, t = M.zoomband_check(M.zoomband_series([far] * 4)); self.assertTrue(ok, t)   # band frames with nothing in view pass
         ok, t = M.zoomband_check(M.zoomband_series([dict(fr(8.0), band_hidden=1)] * 3)); self.assertTrue(ok, t)   # hidden body: nothing drawn
 
+    def test_spike_check(self):
+        # Misses 2026-10-10 PT30 follow-through edge roll spike + mutations rec-one-frame-snap / -jump
+        import math as _m
+        def pose(i, roll=0.0, dx=0.0):
+            a = _m.radians(i * 2.0 + roll)   # edge turns 2 deg per frame about the blade (+z)
+            return dict(mf=(0.0, 0.0, 1.0), mu=(_m.sin(a), _m.cos(a), 0.0), mp=(2.0 + dx + 0.01 * i, -1.5, 4.4), wih=1,
+                        tpx=(800.0, 450.0), state='swing')
+        def run(P):
+            F = [dict(dt=0.016, w=1.0, zf=1.0, st='swinging') for _ in P]
+            return M.spike_check(F, P)
+        ok, t = run([pose(i) for i in range(30)]); self.assertTrue(ok, t)
+        P = [pose(i) for i in range(30)]; P[15] = pose(15, roll=50.0)            # one-frame flick out and back
+        ok, t = run(P); self.assertFalse(ok, t); self.assertIn('flick', ' '.join(t))
+        P = [pose(i, roll=(70.0 if i >= 15 else 0.0)) for i in range(30)]        # one 70 deg step that stays
+        ok, t = run(P); self.assertFalse(ok, t); self.assertIn('step', ' '.join(t))
+        P = [pose(i) for i in range(30)]; P[10] = pose(10, dx=1.5)                # grip jumps 1.5 dm for one frame
+        ok, t = run(P); self.assertFalse(ok, t); self.assertIn('pos', ' '.join(t))
+        P = [pose(i, roll=(40.0 if i >= 15 else 0.0)) for i in range(30)]        # 40 deg step: below the limit
+        ok, t = run(P); self.assertTrue(ok, t)
+
 if __name__ == '__main__':
     unittest.main(verbosity=1)

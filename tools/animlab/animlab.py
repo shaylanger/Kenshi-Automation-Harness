@@ -298,6 +298,14 @@ def cmd_reload(a):
     return 0 if ok is not False else 1
 
 
+def cmd_spike(a):
+    """one-frame weapon snap / flick / grip jump on every viewmodel frame (Misses 2026-10-10 PT30 roll spikes)."""
+    rec = recfmt.parse(a.rec)
+    ok, txt = M.spike_check(rec.frames, M.frame_metrics(rec), a.flick, a.step)
+    print('spike %s %s' % ('n/a' if ok is None else 'PASS' if ok else 'FAIL', ' '.join(txt)))
+    return 0 if ok is not False else 1
+
+
 def cmd_compare(a):
     fails, n = compare(a.real, a.sim, a.skip)
     print('GATE %s frames=%d %s' % ('PASS' if not fails else 'FAIL', n, '; '.join(fails[:8])))
@@ -535,6 +543,8 @@ def main():
     p.add_argument('--h', type=float, default=M.STOCK_H, help='stock top above the bolt axis (dm)')
     p = sp.add_parser('reload'); p.add_argument('rec'); p.add_argument('--up', type=float, default=M.RELOAD_UP_MIN)
     p.add_argument('--elev', type=float, default=M.RELOAD_ELEV_MIN)
+    p = sp.add_parser('spike'); p.add_argument('rec'); p.add_argument('--flick', type=float, default=M.SPK_FLICK)
+    p.add_argument('--step', type=float, default=M.SPK_STEP)
     p = sp.add_parser('compare'); p.add_argument('real'); p.add_argument('sim'); p.add_argument('--skip', type=int, default=0)
     for name in ('replay', 'sweep', 'gate'):
         p = sp.add_parser(name)
@@ -568,7 +578,7 @@ def main():
     if not a.cmd:
         ap.print_help(); return 2
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))   # SIGTERM -> SystemExit: atexit removes the temp dirs
-    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'reload': cmd_reload, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool, 'agree': cmd_agree}[a.cmd](a) or 0
+    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'reload': cmd_reload, 'spike': cmd_spike, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool, 'agree': cmd_agree}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':

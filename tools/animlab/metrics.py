@@ -796,6 +796,55 @@ def blade_rot(a, b):
     return math.degrees(math.acos(max(-1.0, min(1.0, (tr - 1) / 2))))
 
 
+# ---- one-frame weapon snap / flick (Misses 2026-10-10 "PT30 follow-through edge roll spikes" + mutation gaps
+# rec-one-frame-snap / rec-one-frame-jump; class: roll spike / one-frame pose jump). Per rendered frame of the viewmodel
+# (w >= .99, weapon in hand, not zoom-faded / band-hidden, on screen; hitch frames and their neighbours skipped):
+#   flick: frame i shows a weapon orientation its neighbours skip: rot(i-1,i) + rot(i,i+1) - rot(i-1,i+1) > SPK_FLICK
+#   step:  one rendered frame turns the weapon > SPK_STEP deg and > SPK_RATIO x both neighbour steps (per animation step
+#          min(dt, maxdt), PT30-FLIP time base)
+#   pos:   the grip jumps out and back in one frame (both steps > SPK_POS dm, the two-frame step < half of them)
+# Calibrated on the corpus 2026-10-10: Shay/coordinator-accepted recs (f28, f23, e6-anim, spec-swing-A, e6fix, crossbow
+# recs) flick <= 37 (f28 164), step <= 36 (e6-anim 989), pos 0; game pt30-sword frame 284 step 77; taste rejects f14-e0 /
+# e1k-cand / vmq85a7-sw step 93-104, f13-sw0 flick 257; mutants: snap flick 69, jump pos 1.5.
+SPK_FLICK, SPK_STEP, SPK_RATIO, SPK_POS, SPK_MAXDT = 45.0, 60.0, 2.5, 0.5, 0.05
+
+
+def spike_check(F, P, flick=SPK_FLICK, step=SPK_STEP, ratio=SPK_RATIO, pos=SPK_POS, maxdt=SPK_MAXDT):
+    """(ok|None, parts): one-frame snap/flick of the rendered weapon pose (see SPK_* above)."""
+    N = len(P)
+    if N < 5:
+        return None, ['spike n/a (short rec)']
+    dts = sorted(F[i]['dt'] for i in range(N))
+    dth = max(0.045, 3 * dts[N // 2])   # hitch: > 3x the median frame time (vmcheck DTH)
+    up = [F[i]['w'] >= 0.99 and P[i]['wih'] and F[i].get('zf', 1.0) > 0.99 and not F[i].get('band_hidden')
+          and P[i]['tpx'] is not None for i in range(N)]
+    adt = lambda i: max(min(F[i]['dt'], maxdt), 1e-4)
+    rs, ps = [None] * N, [None] * N
+    for i in range(1, N):
+        if up[i] and up[i - 1]:
+            rs[i] = blade_rot(P[i - 1], P[i]); ps[i] = sub(P[i]['mp'], P[i - 1]['mp'])
+    bad, n, mx = [], 0, dict(flick=(0.0, -1), step=(0.0, -1), pos=(0.0, -1))
+    for i in range(2, N - 1):
+        if rs[i] is None or rs[i - 1] is None or rs[i + 1] is None or max(F[j]['dt'] for j in (i - 1, i, i + 1)) > dth:
+            continue
+        n += 1
+        st = P[i].get('state') or F[i]['st']
+        d = rs[i] + rs[i + 1] - blade_rot(P[i - 1], P[i + 1])
+        nb = max(rs[i - 1] * adt(i) / adt(i - 1), rs[i + 1] * adt(i) / adt(i + 1))
+        pa, pb = ln(ps[i]), ln(ps[i + 1])
+        pd = min(pa, pb) if ln(add(ps[i], ps[i + 1])) < 0.5 * min(pa, pb) else 0.0
+        for k, v, b_ in (('flick', d, d > flick), ('step', rs[i], rs[i] > step and rs[i] > ratio * nb), ('pos', pd, pd > pos)):
+            if v > mx[k][0]:
+                mx[k] = (v, i)
+            if b_:
+                bad.append('%s@%d:%s=%.1f' % (st, i, k, v))
+    if not n:
+        return None, ['spike n/a (no viewmodel frames)']
+    txt = ['%d frames flick_max=%.0f@%d/%.0f step_max=%.0f@%d/%.0f pos_max=%.2f@%d/%.2f' % (
+        n, mx['flick'][0], mx['flick'][1], flick, mx['step'][0], mx['step'][1], step, mx['pos'][0], mx['pos'][1], pos)]
+    return not bad, txt + bad[:6]
+
+
 def blade_seen(p, L=SEE_L, zn=3.0, n=40):
     """visible blade proxy: on-screen length (x/z units) of grip..grip+L*blade (samples nearer than zn dm or outside the
     view dropped) times |flat normal . view ray| (an edge-on katana is a hairline: the 3.68 s / 13.67 s anim-e6 frames)."""
@@ -1150,6 +1199,9 @@ def check_suite(rec, overhead=(2,)):
         G = guard_series(F, P)
         if G:
             run('guard', lambda: guard_check(G))
+        sk = spike_check(F, P)
+        if sk[0] is not None:
+            run('spike', lambda: sk)
         for s in (strokes or [None]):
             STROKE_ONLY = s
             P = frame_metrics(rec)
