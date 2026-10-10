@@ -162,6 +162,26 @@ Format: date | point | what the game showed | recording path | build | status
    `def cmd_compare`); STATUS.md is edited by others (edit by anchors); ffmpeg needs -nostdin in heredocs;
    untracked *.obj/vc100.pdb are not ours. pending-fixes/kfp-e1-*.py untracked by design (regress -> INFO if missing).
    Scratch /root/animlab-work (f14-e0, f13-sw0, f14-xb0, f16-c3a*, e1/ renders).
+   E1 INLINE STATE (maintainer #10 since 2026-10-09, copied from #9's temp handoff). NEW DIRECTION (Shay via main, overrides
+      the churn-era brief): (1) blade roughly IN LINE with the forearm through wind-up + stroke; the arc comes from shoulder/elbow,
+      little wrist. Checks: forearm-blade angle per phase + wrist share of tip motion; current E1 must FAIL them. Miss row:
+      E1 | blade ~90 deg to forearm, wrist-driven | C:\KenshiModding\reference photos (e1.PNG, e1 part 2.png vs Chivalry
+      "right to left swing reference 1/2.png", "swing swing2.png"). (2) Edge must line up from the STROKE START and lead through
+      it (wind-up may be off; old version overcorrected): edge-lead gate on stroke frames only. No wind-up hand roll, no churn.
+      (3) Keep framing/camera; NO screen-coverage check. (4) Deliverables: patch in pending-fixes (not installed),
+      C:\KenshiTestRuns\animlab\e1-compare.mp4 (labelled, 1x, current vs candidate), e1-sheet.png (elbow/grip trails), still of
+      candidate mid-stroke next to the Chivalry refs; review at full res, message main with paths + numbers; to fixer only after Shay OKs.
+      Prototype metric (#9): %TEMP%\claude\C--KenshiModding\al9\inline.py: phases windup u<0.28, stroke <0.58, follow <0.78, recov;
+      fb = 3D angle forearm (Rel->Rwr) vs blade mf (median/max), sc = same on screen, wr = sum|tip - tip-if-blade-rigid-with-forearm|
+      / sum|dtip|. Numbers: game f14-e0 stroke fb 51/62 sc 50/65 wr 1.11 | f13-sw0 47/62 wr 0.88 | current replay 50/62 0.88 |
+      kfp-e1-keys 56/71 0.75. Ready fb 35-42 (grip angle, g_vm_hcos 0.64). Gate idea: stroke fb med <= 25-30, max <= 40, wr <= ~0.4.
+      Root cause: PT17 wfix elbow pick puts the elbow on a cone of half-angle acos(g_vm_hcos) ~50 deg around the blade.
+      Candidate pending-fixes/kfp-e1-inline.py (runs noroll -> keys -> swlead/rollcap first): cone th*(1-e1inl*w), w smoothstep
+      0->1 over u [0,e1ia], 1->0 over [e1ib,1]; keys e1inl 0.6, e1ia 0.2, e1ib 0.8; build /root/animlab-build/kfpvm_e1i. f14-e0:
+      windup fb 18/41, stroke 36/44, wr 0.73. Next: e1inl 0.8-0.9, climb sw1..sw4 keys (al8/climb2.py, runp.py) on stroke fb, wr,
+      arc (stroke only), wb <= 50, churn rev <= 450, windup_roll <= 15, stroke roll <= 45 / step 12. climb1 BEST (kfpvm_e1n) passed
+      arc/wb/rev/windup roll but stroke roll 100 deg (59 deg steps). Current game (kfpvm_cur): arc 0.56/0.58, windup roll 77/47,
+      stroke roll 75/73 (all FAIL). Rigid-pivot keys (al9 rig.py) dead end (fb 69); planar keys (al9 plane.py) fail arc.
 
 ## How to resume
 Read this file, `git log -- tools/animlab docs/animlab tests/animlab` in the harness repo and
