@@ -26,6 +26,7 @@ ARC_MID, ARC_SPEED = 4.0, 8.0   # edge_arc: point on the blade (dm from the grip
 ARC_U0 = 0.28                   # edge_arc: swing u where the wind-up ends (KenshiFP swing key 1, g_vm_swk_u[1])
 ARC_U1 = 0.58                   # edge_arc: swing u where the stroke ends (key 4); Shay 2026-10-09: only the stroke is gated
 STATE_ORDER = ('ready', 'swing', 'block', 'swing->block', 'aim', 'reload', 'settle', 'draw', 'lower', 'native')
+STROKE_ONLY = None   # E6: set (animlab --stroke n) -> swings of other strokes are labelled 'swing_x' (out of every swing gate)
 NATIVE_ZF = 0.99   # zoom fade below this = the body plays the native animation (viewmodel faded, PT29)
 
 
@@ -38,7 +39,7 @@ def label_states(F):
             s = 'draw' if r['phase'] == 1 else 'lower' if r['phase'] == 2 else 'off'
         elif r['cls'] == 0:
             if r['swing']:
-                s = 'swing'
+                s = 'swing' if STROKE_ONLY is None or r.get('stroke') in (None, -1, STROKE_ONLY) else 'swing_x'
             elif r['st'] == 'blocking' or r['ti'] == 3:
                 if not swb and prev_sw:
                     swb = True
@@ -665,7 +666,7 @@ def hinge_series(F, P):
                     if ua is not None and fa is not None:
                         out = dict(ua=ua, fa=fa, src='est')
         if out:
-            out.update(i=i, st=P[i]['state'], swu=r.get('swu', 0.0))
+            out.update(i=i, st=P[i]['state'], swu=r.get('swu', 0.0), stk=r.get('stroke'))
         S.append(out)
     return S
 
@@ -717,10 +718,15 @@ def hinge_check(S, P, dev_max=HINGE_DEV, abs_max=HINGE_ABS, grid=HINGE_U):
             if best is not None and abs(S[best]['swu'] - u) <= 0.04:
                 d[u] = (S[best]['ua'], S[best]['fa'])
         samp.append(d)
+    stk = []   # E6: stroke of each swing (first frame with one); medians are per stroke
+    for a, b in sw:
+        ks = [S[k]['stk'] for k in range(a, b + 1) if S[k] and S[k].get('stk') is not None and S[k]['stk'] >= 0]
+        stk.append(ks[0] if ks else None)
     worst = (0.0, None)
     for u in grid:
         for bone in (0, 1):
-            vals = [(n, d[u][bone]) for n, d in enumerate(samp) if u in d]
+          for g in sorted(set(stk), key=lambda x: -1 if x is None else x):
+            vals = [(n, d[u][bone]) for n, d in enumerate(samp) if u in d and stk[n] == g]
             if len(vals) < 3:
                 continue
             ref = vals[0][1]
@@ -735,7 +741,7 @@ def hinge_check(S, P, dev_max=HINGE_DEV, abs_max=HINGE_ABS, grid=HINGE_U):
     ok_dev = len(sw) >= 3 and worst[0] <= dev_max
     ok_abs = amv <= abs_max
     src = 'meas' if meas else 'est'
-    txt = ['src=%s swings_from_ready=%d' % (src, len(sw))]
+    txt = ['src=%s swings_from_ready=%d' % (src, len(sw)) + ('' if set(stk) <= {None} else ' strokes=%s' % ','.join('-' if x is None else str(x) for x in stk))]
     txt.append('dev=%.0f/%.0f%s' % (worst[0], dev_max, '' if ok_dev else ':BAD') +
                ('@swing%d(frame%d),u=%.2f,%s=%.0f,median=%.0f' % worst[1] if worst[1] else ''))
     if len(sw) < 3:

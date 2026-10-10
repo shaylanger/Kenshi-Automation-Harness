@@ -77,10 +77,13 @@ def parse(path):
                 if len(x) >= 15 and x[0] == '1':
                     r['nat'] = dict(zip(JOINTS, [v3(t) for t in x[1:7]]))
             r['hua'] = r['hfa'] = None   # E5: rendered weapon-arm elbow-hinge axes (upper arm, forearm bone), group 'H'
+            r['stroke'] = None           # E6: scripted stroke of the current swing (H 4th token, -1 = no swing)
             for g in pa[5:]:
                 x = g.split()
                 if len(x) >= 3 and x[0] == 'H':
                     r['hua'], r['hfa'] = v3(x[1]), v3(x[2])
+                    if len(x) >= 4 and x[3].lstrip('-').isdigit():
+                        r['stroke'] = int(x[3])
             frames.append(r)
     return Rec(frames, meta)
 

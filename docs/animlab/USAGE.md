@@ -47,6 +47,9 @@ Arm bone roll (not recorded): the fake upper arm / forearm get local Y = -(nativ
 `--hinge-capture` = capture the hinge from the replayed frames. `animlab.py hinge <replay> --vs <game rec>` adds the
 per-frame bone-roll faithfulness gate (forearm median <= 5 deg, `--faith`).
 
+E6 swing variety: `animlab.py --only-stroke N <cmd> <rec>` judges only swings of scripted stroke N (rec group H 4th token;
+other strokes are labelled `swing_x` and skip every swing gate); `hinge` compares swings of the same stroke only.
+
 ## Metrics (per state)
 
 States: `ready`, `swing`, `block`, `swing->block`, `aim`, `reload` (crossbow), `settle` (gate only: 0.3 s after a

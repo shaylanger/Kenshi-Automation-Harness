@@ -332,7 +332,10 @@ def main():
             p.add_argument('-j', type=int, default=os.cpu_count() or 4); p.add_argument('--keep')
         if name == 'gate':
             p.add_argument('--tol'); p.add_argument('--quiet', action='store_true')
+    ap.add_argument('--only-stroke', dest='only_stroke', type=int, help='E6: judge only swings of this scripted stroke (others -> swing_x)')
     a = ap.parse_args()
+    if a.only_stroke is not None:
+        M.STROKE_ONLY = a.only_stroke
     if not a.cmd:
         ap.print_help(); return 2
     return {'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
