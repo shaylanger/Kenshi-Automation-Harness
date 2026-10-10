@@ -147,7 +147,11 @@ class T(unittest.TestCase):
         with tempfile.NamedTemporaryFile('w', suffix='.bolt', delete=False) as f:
             f.write('# n ok vis | o | x | y | z\n0 1 1 | 5.9 1.0 0.0 | 0 0 -1 | 0 -1 0 | 1 0 0\n1 0 1 | 0 0 0 | 0 0 0 | 0 0 0 | 0 0 0\n')
         try:
-            self.assertEqual(M.read_bolt(f.name), {0: (5.9, 1.0, 0.0)})
+            self.assertEqual(M.read_bolt(f.name), {0: (5.9, 1.0, 0.0)}); self.assertEqual(M.read_bolt.used, 'bl')
+            with open(f.name, 'a') as g:
+                g.write('2 1 1 | 5.7 1.0 0.3 | 0 0 -1 | 0 -1 0 | 1 0 0 | -1.0 5.9 0.0 120.0' + chr(10))
+            self.assertEqual(M.read_bolt(f.name), {2: (-1.0, 5.9, 0.0)}); self.assertEqual(M.read_bolt.used, 'sl')
+            self.assertEqual(M.read_bolt(f.name, 'bl')[2], (5.7, 1.0, 0.3))
         finally:
             os.unlink(f.name)
 

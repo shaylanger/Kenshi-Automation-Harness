@@ -168,8 +168,9 @@ def compare(real, sim, skip=0, tol=None, quiet=False):
 def cmd_bolt(a):
     """C3: the loaded bolt must stay rigid on the crossbow (game recording + its <rec>.bolt sidecar)."""
     labels = M.label_states(recfmt.parse(a.rec).frames)
-    ok, txt = M.bolt_ok(M.bolt_table(M.read_bolt(a.bolt or a.rec + '.bolt'), labels), a.dev, a.step)
-    print('bolt %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
+    B = M.read_bolt(a.bolt or a.rec + '.bolt', a.source)
+    ok, txt = M.bolt_ok(M.bolt_table(B, labels), a.dev, a.step)
+    print('bolt %s %s src=%s' % ('PASS' if ok else 'FAIL', ' '.join(txt), M.read_bolt.used))
 
 
 def cmd_stock(a):
@@ -263,6 +264,7 @@ def main():
     p.add_argument('--wb-max', type=float, default=30.0, help='wrist bend limit (deg) for the arc gate')
     p = sp.add_parser('bolt'); p.add_argument('rec'); p.add_argument('--bolt', help='sidecar (default <rec>.bolt)')
     p.add_argument('--dev', type=float, default=0.1); p.add_argument('--step', type=float, default=0.05)
+    p.add_argument('--source', choices=('sl', 'bl'), help='sidecar column group: sl = post-IK Prop2 frame (default when present), bl = weapon frame')
     p = sp.add_parser('stock'); p.add_argument('rec'); p.add_argument('--ref', help='known-good recording for the orientation check')
     p.add_argument('--max', type=float, default=M.STOCK_MAX); p.add_argument('--ori', type=float, default=M.ORI_MAX)
     p.add_argument('--h', type=float, default=M.STOCK_H, help='stock top above the bolt axis (dm)')
