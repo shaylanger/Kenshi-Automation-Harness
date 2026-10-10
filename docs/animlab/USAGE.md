@@ -68,6 +68,9 @@ bystanders, KO), `cover` = keys sampled across the whole take, and the video mus
 Prints one line per check and `RESULT <name> PASS|FAIL <failed checks>`. A take without sampled evidence fails (unproven).
 KenshiFP adapter: sampler `components/KenshiFP/animlab/take-sample.sh` (source it in the take script:
 `take_sample_start <ev> "$T0" <fp char> ["<allowed>|..."]` ... `take_sample_stop`) + rules `take-rules.txt`.
+Frames of the video itself: `tools/animlab/frames.py openground <mp4> [--from s --to s]` = judgeable open ground on the
+RECORDED frames (sky share of the scene band between the title label and the UI panel >= 0.08 on >= 90% of frames at
+2 fps; prints the closed spans); a setup check before recording is not enough (sword-z25-block: slope for 17 s). Night/fog fails.
 
 ## Metrics (per state)
 
