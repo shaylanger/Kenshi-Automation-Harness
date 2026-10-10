@@ -136,6 +136,21 @@ class T(unittest.TestCase):
         self.assertFalse(M.arc_gate({'swing': dict(good, wb_max=107.0)}, {'swing': 0.85})[0])   # lead by wrist fold
         self.assertEqual(M.arc_gate({}, {'swing': 0.85}), (False, ['swing:NO_FAST_FRAMES']))
 
+    def test_bolt_check(self):   # C3: a bolt that moves on the weapon fails, a rigid one passes
+        lab = ['ready'] * 40
+        rigid = {n: (5.9, 1.0, 0.0) for n in range(40)}
+        self.assertTrue(M.bolt_ok(M.bolt_table(rigid, lab))[0])
+        loose = {n: (5.9 + (0.3 if n % 2 else 0.0), 1.0, 0.0) for n in range(40)}
+        ok, txt = M.bolt_ok(M.bolt_table(loose, lab))
+        self.assertFalse(ok); self.assertTrue(txt[0].endswith(':BAD'))
+        self.assertEqual(M.bolt_ok({}), (False, ['no visible bolt frames']))
+        with tempfile.NamedTemporaryFile('w', suffix='.bolt', delete=False) as f:
+            f.write('# n ok vis | o | x | y | z\n0 1 1 | 5.9 1.0 0.0 | 0 0 -1 | 0 -1 0 | 1 0 0\n1 0 1 | 0 0 0 | 0 0 0 | 0 0 0 | 0 0 0\n')
+        try:
+            self.assertEqual(M.read_bolt(f.name), {0: (5.9, 1.0, 0.0)})
+        finally:
+            os.unlink(f.name)
+
     def test_jitter_faithful(self):   # X1: game jitter the replay does not show = noise from outside the solver
         g = {'ready': dict(n=50, jit_p95=1.74), 'reload': dict(n=50, jit_p95=0.8), 'swing': dict(n=50, jit_p95=60.0)}
         r = {'ready': dict(n=50, jit_p95=0.42), 'reload': dict(n=50, jit_p95=0.1), 'swing': dict(n=50, jit_p95=10.0)}

@@ -3,6 +3,7 @@
 report the in-game metrics per pose state, compare variants side by side. Docs: docs/animlab/USAGE.md.
 
   animlab.py metrics <rec> [--require S,..] [--arc S:share]  per-state metrics + moves (C1) / arc (E1) gates
+  animlab.py bolt    <rec> [--dev D --step S]                 C3: loaded bolt rigid on the crossbow (<rec>.bolt sidecar)
   animlab.py compare <real> <sim> [--skip N]                 per-frame replay error + metrics side by side
   animlab.py replay  <rec> --adapter CMD [--set k=v]... [-o out.txt] [--skip N]
   animlab.py sweep   <rec> --adapter CMD [--variant 'name[@CMD]: adapter args']... [--metrics a,b] [-j N] [--keep DIR]
@@ -164,6 +165,13 @@ def compare(real, sim, skip=0, tol=None, quiet=False):
     return fails, nfull
 
 
+def cmd_bolt(a):
+    """C3: the loaded bolt must stay rigid on the crossbow (game recording + its <rec>.bolt sidecar)."""
+    labels = M.label_states(recfmt.parse(a.rec).frames)
+    ok, txt = M.bolt_ok(M.bolt_table(M.read_bolt(a.bolt or a.rec + '.bolt'), labels), a.dev, a.step)
+    print('bolt %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
+
+
 def cmd_compare(a):
     fails, n = compare(a.real, a.sim, a.skip)
     print('GATE %s frames=%d %s' % ('PASS' if not fails else 'FAIL', n, '; '.join(fails[:8])))
@@ -242,6 +250,8 @@ def main():
     p.add_argument('--require', help='states that must move visibly from ready, comma list (default: aim,reload or block,swing by the states seen)')
     p.add_argument('--arc', help="E1 edge-leads-the-arc gate, 'state[:share],...' (default swing:0.85 when a swing is seen; '' = off)")
     p.add_argument('--wb-max', type=float, default=30.0, help='wrist bend limit (deg) for the arc gate')
+    p = sp.add_parser('bolt'); p.add_argument('rec'); p.add_argument('--bolt', help='sidecar (default <rec>.bolt)')
+    p.add_argument('--dev', type=float, default=0.1); p.add_argument('--step', type=float, default=0.05)
     p = sp.add_parser('compare'); p.add_argument('real'); p.add_argument('sim'); p.add_argument('--skip', type=int, default=0)
     for name in ('replay', 'sweep', 'gate'):
         p = sp.add_parser(name)
@@ -260,7 +270,7 @@ def main():
     a = ap.parse_args()
     if not a.cmd:
         ap.print_help(); return 2
-    return {'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
+    return {'bolt': cmd_bolt, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':

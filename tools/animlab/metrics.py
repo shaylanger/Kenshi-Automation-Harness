@@ -241,6 +241,50 @@ METRIC_COLS = ('n', 'wb_p95', 'wb_max', 'elb_h_max', 'elb_h_mean', 'st_max', 'ed
                'move_dm', 'move_deg', "arc_ok", "arc_p05")
 
 
+BOLT_DEV, BOLT_STEP = 0.1, 0.05   # C3: the loaded bolt is rigid on the weapon: drift from its median / per-frame step (dm)
+
+
+def read_bolt(path):
+    """`fp_vm rec dump` sidecar <rec>.bolt (KenshiFP C3): per record n ok vis | bolt origin in the weapon frame (f u r) | ...
+    Returns {n: (f, u, r)} for frames with a measured, visible bolt."""
+    out = {}
+    for l in open(path):
+        if l.startswith('#') or not l.strip():
+            continue
+        g = [x.split() for x in l.split('|')]
+        n, ok, vis = (int(x) for x in g[0][:3])
+        if ok and vis:
+            out[n] = tuple(float(x) for x in g[1][:3])
+    return out
+
+
+def bolt_table(B, labels):
+    """C3 per state: dev95 = p95 distance of the bolt origin from the state's median (weapon frame, dm), step95 = p95
+    frame-to-frame move, n. Rigid bolt = ~0; a bolt node updated out of step with the weapon drifts/jitters."""
+    S = {}
+    for n in sorted(B):
+        if n < len(labels):
+            S.setdefault(labels[n], []).append(n)
+    T = {}
+    for s, ns in S.items():
+        m = [_med([B[n][k] for n in ns]) for k in range(3)]
+        d = [math.dist(B[n], m) for n in ns]
+        st = [math.dist(B[n], B[n - 1]) for n in ns if n - 1 in B and labels[n - 1] == s]
+        T[s] = dict(n=len(ns), dev95=pct(d, .95), step95=pct(st, .95) if st else float('nan'))
+    return T
+
+
+def bolt_ok(T, dev=BOLT_DEV, step=BOLT_STEP, min_n=10):
+    ok, txt = True, []
+    for s, t in T.items():
+        if t['n'] < min_n:
+            continue
+        good = t['dev95'] <= dev and not t['step95'] > step
+        ok = ok and good
+        txt.append('%s:dev95=%.3f,step95=%.3f,n=%d%s' % (s, t['dev95'], t['step95'], t['n'], '' if good else ':BAD'))
+    return ok and bool(txt), txt or ['no visible bolt frames']
+
+
 def fmt(v):
     if isinstance(v, int):
         return '%d' % v
