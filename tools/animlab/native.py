@@ -1007,16 +1007,20 @@ def vp(p, f, u):
 # Geometry for the game's unarmed FP body (vmrec-fist-z0-a.txt frame 100, 4080 2026-10-10: the unarmed stance turns the
 # torso, R shoulder 2.4 dm / L 1.4 dm behind the eye; arm reach 7.1 dm): strikes at <= 6.8 dm from the shoulder, guards
 # on screen (y/z >= -.62) and bent (~5.1-5.7 dm). The sword-ready proxy used guard z 4.2 / strike z 5.5 (out of reach here).
-FIST_DEFAULTS = dict(guard={'R': [1.7, -2.0, 3.3], 'L': [-1.7, -2.1, 3.7]},     # FP guard wrists (camera numbers, dm)
-                     strike={'R': [0.5, -1.1, 4.1], 'L': [-0.5, -1.0, 4.8]},    # where a full punch puts the wrist
+# v5 (FIST-shoteiL op-b6, 2026-10-10): the v4 guard (R 1.7,-2.0,3.3 / L -1.7,-2.1,3.7) sat under the game's bottom HUD
+# (spec U23); guards raised ~0.7 dm, R further out (its fist turns in ~1.1 dm and met the L strike: warm/U21), strikes a
+# little higher (R wind-up must stay below the strike, U6), native residual/off-hand motion smaller (U9 churn, U23).
+FIST_DEFAULTS = dict(guard={'R': [1.9, -1.25, 3.7], 'L': [-1.75, -1.35, 3.9]},     # FP guard wrists (camera numbers, dm)
+                     strike={'R': [0.55, -0.85, 4.1], 'L': [-0.7, -0.8, 4.8]},    # where a full punch puts the wrist
                      # full wind-up offset from the guard. R: back only (v3 pulled it down + back = below the screen edge for
                      # u.07-.41 of ma 2strike: the R guard sits at y/z -.61 at z 3.3, the edge is -.70; review 2026-10-10).
                      # L: down + back stays on screen (L guard z 3.7) and keeps the jab's on-screen travel (an L chamber
                      # level with the guard made the ma chudan jab fail spec U9 churn: fist ~240 px, forearm 450-560 px)
-                     chamber={'R': [0.1, 0.0, -0.3], 'L': [-0.3, -0.7, -0.3]},
+                     # v5: L chamber none (with the raised guard any L chamber churned the forearm, U9; down = under the HUD)
+                     chamber={'R': [0.1, 0.0, -0.3], 'L': [0.0, 0.0, 0.0]},
                      chamber_e=0.25,   # native extension (fraction of the strike, negative = pulled back) that maps to the full chamber
-                     res_scale=0.35, res_max=0.5,   # native off-line wrist motion kept (scale, clamp dm), turned onto the FP strike line
-                     off_scale=0.4, off_max=0.6,   # non-striking hand: its native motion scaled + clamped (dm) about its guard
+                     res_scale=0.15, res_max=0.3,   # native off-line wrist motion kept (scale, clamp dm), turned onto the FP strike line
+                     off_scale=0.25, off_max=0.4,   # non-striking hand: its native motion scaled + clamped (dm) about its guard
                      end_blend=0.15,   # share of the clip over which the path eases back onto the guard
                      # fist roll: palm normal (-hand Z) at the guard / at full extension. Native reference: the unarmed
                      # stances hold the palms down (badpunch, ma 2strike, shoteiL start -y .83-.97) and the one straight
@@ -1033,10 +1037,20 @@ FIST_DEFAULTS = dict(guard={'R': [1.7, -2.0, 3.3], 'L': [-1.7, -2.1, 3.7]},     
                      strike_min=1.5, stab='pelvis', guard_anim='ma idle1', guard_t=0.0,
                      nearclip=1.5,   # the game's FP near plane in fist mode (sheets render with it)
                      near=2.0,   # KenshiFP fist mode lowers the camera near clip to 1.5 while the fists are shown (as the crossbow, X2 g_vm_nc); 0.5 margin
-                     nkeys=[4, 12],
+                     nkeys=[5, 14],
                      sets=['wroll=0', 'edgeclamp=0', 'wfix=0', 'hroll=0', 'e1inl=0', 'hinge=0', 'elb=0'],
                      offrun=0.05, offshare=0.08,   # each fist on screen: longest off-screen stretch / total share of the clip (spec U22)
                      center=[0.30, 0.35], wb_max=30.0, wr_err_max=0.35, path_err_max=0.5, eye_min=2.5, above_max=0.5,
+                     # reach compensation (FIST-shoteiL op-b6, 2026-10-10): the game's IK caches a short native upper arm
+                     # (l1fix, lab model l1k 0.871) and so over-reaches near full extension: the fists landed ~0.6 dm past
+                     # their targets. With a --l1 drive adapter (build.sh --drive --l1 = the game model) the targets are
+                     # pulled back until the SOLVED wrist sits on the intended one (iterations; 0 = off). 'solver' then
+                     # ignores the prop-vs-target error (terr: off by design); 'reach' judges solved vs intended wrists.
+                     reach_comp=3, reach_comp_max=1.2,
+                     # HUD (spec U23, FIST-shoteiL op-b6: the game's bottom HUD hid the guard and the off hand): every path
+                     # wrist is lifted until it and a point hud_margin dm below it are clear of spec.HUD_RECTS (a lowered
+                     # off hand / chamber then pulls back rather than down out of view)
+                     hud_lift=True, hud_margin=0.25,
                      y_max=0.0, z_min=3.0)   # path clamps: wrist never above y_max (eye level), never nearer than z_min
 
 
@@ -1088,8 +1102,15 @@ def fist_path(tr, ref, fc, s, force=None):
             w = (u - (1.0 - fc['end_blend'])) / fc['end_blend']; w = w * w * (3 - 2 * w)
             P[i] = (1 - w) * P[i] + w * G
             E[i] *= 1 - w
-        P[i][1] = min(P[i][1], fc['y_max'])
         P[i][2] = max(P[i][2], fc['z_min'])
+        if fc.get('hud_lift'):   # spec U23: the wrist stays above the game HUD (+ hud_margin dm below it clear too)
+            import spec as _spec
+            for _ in range(80):
+                q = P[i] - np.array([0.0, fc['hud_margin'], 0.0])
+                if not (_spec._hud(P[i], fc['near']) or _spec._hud(q, fc['near'])) or P[i][1] >= fc['y_max']:
+                    break
+                P[i][1] += 0.02
+        P[i][1] = min(P[i][1], fc['y_max'])
     return P, striker, info, E
 
 
@@ -1194,8 +1215,9 @@ def fist_checks(fc, solved, frames, n0, key_wr, dense_err, ku, strikers, mvrows,
     wb = {r['side']: r['wb_max'] for r in mvrows if r['seg'] == '*all*'}
     res.append(('wrist', 'PASS' if all(v <= fc['wb_max'] for v in wb.values()) else 'FAIL',
                 'wb_max %s (<= %.0f, PT30)' % (' '.join('%s %.1f' % kv for kv in sorted(wb.items())), fc['wb_max'])))
-    res.append(('solver', 'PASS' if verdict['ok'] else 'FAIL', 'metricslab limits (terr, reach, ikfail, wb, fist/arm clearance)%s' % (
-        (' fails=' + ','.join(verdict.get('fails', []))) if not verdict['ok'] else '')))
+    vf = [x for x in verdict.get('fails', []) if not (fc.get('reach_comp') and 'terr' in x)]   # reach comp: terr off by design
+    res.append(('solver', 'PASS' if not vf else 'FAIL', 'metricslab limits (terr%s, reach, ikfail, wb, fist/arm clearance)%s' % (
+        ' ignored: reach comp' if fc.get('reach_comp') else '', (' fails=' + ','.join(vf)) if vf else '')))
     # fidelity: solved wrist vs the keyed target wrist at the same clip time; keyed path vs the dense adapted path
     we = []
     for k in range(n):
@@ -1245,6 +1267,20 @@ def _crosshair(img):
     return img
 
 
+def _hud_overlay(img):
+    """the game's bottom HUD (spec.HUD_RECTS, 1600x900) drawn half-opaque on an FP tile: what the HUD hides in game
+    shows dimmed (FIST-shoteiL op-b6: the HUD-less sheets showed fists the game hid half under the HUD)"""
+    import spec as _spec
+    img = np.array(img, copy=True)
+    h, w = img.shape[:2]
+    sx, sy = w / float(_spec.W), h / float(_spec.H)
+    for x0, y0, x1, y1 in _spec.HUD_RECTS:
+        a0, b0, a1, b1 = int(x0 * sx), int(y0 * sy), int(min(x1 * sx, w)), int(min(y1 * sy, h))
+        img[b0:b1, a0:a1] = img[b0:b1, a0:a1] * 0.45 + 20
+        img[b0:b0 + 2, a0:a1] = 200
+    return img
+
+
 def fist_render(a, cfg, N, an, pose_path, fc, ku, t_end, out, tag, n=12, orbit=60.0):
     """labelled sheets, full-resolution 800x450 tiles (no downscale): FP zoom 0 (visual lab, both arms solved, crosshair =
     screen centre) and zoom 25 (what the game shows zoomed out: KenshiFP fades the viewmodel out beyond zf1 = 8 dm, so
@@ -1269,7 +1305,7 @@ def fist_render(a, cfg, N, an, pose_path, fc, ku, t_end, out, tag, n=12, orbit=6
         img, _, _ = VR.render_frame(rig, Pf[i], (800, 450), np.full((450, 800, 3), 40, np.float32))
         u = t / max(t_end, 1e-9)
         kmark = ' KEY' if any(abs(u - k) < 0.5 / (n - 1) for k in ku) else ''
-        z0.append(label(_crosshair(img), ['%s  FP zoom 0 (lab: KenshiFP solver, both arms)' % an.name, 't %.2f s  u %.2f%s' % (t, u, kmark), tag]))
+        z0.append(label(_crosshair(_hud_overlay(img)), ['%s  FP zoom 0 (lab: KenshiFP solver, both arms; dimmed = game HUD)' % an.name, 't %.2f s  u %.2f%s' % (t, u, kmark), tag]))
         z25.append(R3.frame(t * an.length / max(t_end, 1e-9), ['zoom 25: viewmodel faded out, native 3P clip', 'camera orbit %.0f deg' % orbit, tag]))
     sheet(z0, 4, os.path.join(out, 'sheet-z0.png'), 1.0)
     sheet(z25, 4, os.path.join(out, 'sheet-z25.png'), 1.0)
@@ -1320,6 +1356,28 @@ def cmd_fists(a):
                 A = sv[s][0][k][s]
                 out[s].append(nz(np.asarray(A['wr'], float) - np.asarray(A['el'], float)))
         return out
+    def compensate(dk, tag):
+        """dk {s: [(t, p, f, u)]} -> same with p moved so the solved wrist lands on the intended wrist p + grip_vec
+        (reach compensation, fc reach_comp iterations); returns (new dk, worst residual dm)"""
+        cur = {s: [(t, np.asarray(p, float), f, u) for t, p, f, u in dk[s]] for s in 'RL'}
+        want = {s: [p + grip_vec(f, u, grip[s]) for t, p, f, u in cur[s]] for s in 'RL'}
+        res_ = 0.0
+        for it in range(int(fc.get('reach_comp', 0))):
+            _, sv_, frm_ = solve(motion('comp-' + tag, {s: [key(t, p, f, u) for t, p, f, u in cur[s]] for s in 'RL'}),
+                                 os.path.join(a.out, '_comp'))
+            n0_ = sum(1 for x in frm_['R'] if x[0] < -1e-9)
+            Ta = np.array([x[0] for x in frm_['R']])
+            res_ = 0.0
+            for s in 'RL':
+                for i, (t, p, f, u) in enumerate(cur[s]):
+                    k = max(int(np.argmin(np.abs(Ta - t))), n0_)
+                    err = np.asarray(sv_[s][0][k][s]['wr'], float) - want[s][i]
+                    res_ = max(res_, float(np.linalg.norm(err)))
+                    pn = p - err
+                    sh_ = pn - (want[s][i] - grip_vec(f, u, grip[s]))
+                    cur[s][i] = (t, (want[s][i] - grip_vec(f, u, grip[s])) + _clampn(sh_, fc['reach_comp_max']), f, u)
+        shutil.rmtree(os.path.join(a.out, '_comp'), ignore_errors=True)
+        return cur, res_
     # 1. the solver's grip offset (one calibration solve on the guard clip, then fixed)
     gts = times_of(ga.length, 10, gt, min(ga.length, gt + 0.5))
     gtr = traj(ga, gts, None)
@@ -1338,6 +1396,11 @@ def cmd_fists(a):
     for s in 'RL':
         f, u, _ = fist_hand(gref, s, fa[s][0], fc, 0.0)
         gpose[s] = pose_norm(G[s] - grip_vec(f, u, grip[s]), f, u)
+    gpose0 = dict(gpose)
+    if fc.get('reach_comp'):
+        gc, gres = compensate({s: [(t,) + tuple(gpose[s]) for t in (0.0, 0.2)] for s in 'RL'}, 'guard')
+        gpose = {s: pose_norm(*gc[s][0][1:]) for s in 'RL'}
+        print('  reach comp guard: residual %.2f dm, shift %s' % (gres, ' '.join('%s %.2f' % (s, float(np.linalg.norm(np.asarray(gpose[s][0]) - np.asarray(gpose0[s][0])))) for s in 'RL')))
     summary = []
     tables = ['/* KenshiFP fist key tables (candidate, NOT installed): animlab native.py fists, %s.' % ', '.join(names),
               ' * Poses VP(p, f, u) in camera numbers (dm), KenshiFP prop target convention for the weapon class 0 path; L rows',
@@ -1379,11 +1442,17 @@ def cmd_fists(a):
                 f, u, _ = fist_hand(r, s, fa[s][i], fc, info[s]['ew'][i])
                 p = paths[s][i] - grip_vec(f, u, grip[s])
                 dense[s].append(((r['t'] - ts[0]) / dur,) + tuple(pose_norm(p, f, u)))
+        dense0 = dense
+        if fc.get('reach_comp'):
+            dc, dres = compensate({s: [(d[0] * dur,) + tuple(d[1:]) for d in dense[s]] for s in 'RL'}, tag)
+            dense = {s: [(t / dur,) + tuple(pose_norm(p, f, u)) for t, p, f, u in dc[s]] for s in 'RL'}
+            print('  reach comp %s: residual %.2f dm' % (tag, dres))
         for nk in range(fc['nkeys'][0], fc['nkeys'][1] + 1):
             idx, ku, e95, emax = fit_keys(dense, gpose, gpose, nkeys=nk)
             if e95 <= fc['path_err_max'] * 0.8:
                 break
         kp = {s: [dense[s][k][1:] for k in idx] for s in 'RL'}
+        kp0 = {s: [dense0[s][k][1:] for k in idx] for s in 'RL'}   # the intended (uncompensated) keys: 'reach' target
         # keyed path as the game would play it, dense at 60 fps over the clip length
         nfr = max(2, int(round(dur * 60)))
         mkeys, key_wr = {s: [] for s in 'RL'}, {s: [] for s in 'RL'}
@@ -1392,7 +1461,8 @@ def cmd_fists(a):
             for s in 'RL':
                 p, f, uu = keyed_at(gpose[s], kp[s], gpose[s], ku, u)
                 mkeys[s].append(dict(t=round(u * dur, 5), p=[round(x, 4) for x in p], f=[round(x, 5) for x in f], u=[round(x, 5) for x in uu]))
-                key_wr[s].append(p + grip_vec(f, uu, grip[s]))
+                p0, f0, u0 = keyed_at(gpose0[s], kp0[s], gpose0[s], ku, u)
+                key_wr[s].append(p0 + grip_vec(f0, u0, grip[s]))
         m, solved, frames = solve(motion('fist-' + tag, mkeys), od)
         P, rows, v = ML.evaluate(m, solved, frames)
         with open(os.path.join(od, 'report.txt'), 'w') as f:

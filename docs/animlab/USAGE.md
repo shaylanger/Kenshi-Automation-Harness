@@ -308,7 +308,9 @@ python3 $L/native.py adapt --config $A/native.json "chop down" --weapon katana -
 python3 $L/native.py run   --config $A/native.json "chop down" --weapon katana --adapter /root/animlab-build/kfpvm_drive_cur \
         --body vmrec-q-sword-z0-a.txt --body-frame 100 --out run --visual $A/visual.json      # + native-vs-fp.mp4 / sheet
 python3 $L/native.py fists --config $A/native.json "ma chudan,ma 2strike" --adapter /root/animlab-build/kfpvm_drive_cur \
-        --body vmrec-q-sword-z0-a.txt --body-frame 100 --out fists --visual $A/visual.json     # key tables + NA1 checks
+        --body vmrec-q-sword-z0-a.txt --body-frame 100 --out fists --visual $A/visual.json     # key tables + NA1 checks# fist tables that ship: solve on the game model (L1, the game over-reaches near full extension) and the unarmed body:
+bash $A/build.sh --drive --l1 --src /root/KenshiFP/client --out /root/animlab-build/kfpvm_drive_fistl1
+python3 $L/native.py fists --config $A/native.json "badpunch,ma chudan,ma 2strike,shoteiL" --adapter /root/animlab-build/kfpvm_drive_fistl1         --body vmrec-fist-z0-a.txt --body-frame 100 --out fists --visual $A/visual.json  # reach comp + HUD lift (spec U23)
 ```
 
 **Trajectories** (`traj`/`adapt`/`run`): per sample the grip p, blade/hand f, edge/up u, both shoulders/elbows/wrists and
