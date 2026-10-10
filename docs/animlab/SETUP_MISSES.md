@@ -8,6 +8,8 @@ with `RESULT <row> FAIL setup: <reason>`, or, when it can only be seen after fil
 frames.py) named here. Review flaws of the setup class are appended automatically by
 `tools/automation/review-verdict.ps1` (KenshiModding) as `PENDING (review)` rows.
 
+Installed 2026-10-10 (KenshiModding 8352239/19d4b25); wired into fp-zoom-sweep.sh, fp-block-guard.sh, fp-e6-strokes.sh.
+
 Format: date | point | what the take showed | take / evidence | build | status (check that catches it now) found:lab|review|shay|game
 (`found:` = who saw it first, read by the catch-rate ledger `components/KenshiFP/animlab/ledger.py`).
 
@@ -24,3 +26,4 @@ Format: date | point | what the take showed | take / evidence | build | status (
 
 Wiring: `pf_all <me> <x> <z> sword|crossbow [allow]` runs rig, display, day, clean, area, weapon, open in that order.
 Take scripts call `pf_begin <row>` + `pf_outdir <out>` first and `pf_all` right before the recorder starts.
+- 2026-10-10 | 4080 takes with no capture | the 4080 had no Active user session (Shay not logged in / RDP closed): gdigrab grabbed nothing or black, takes could not film | 4080-filming handoff | - | CHECK: `pf_rig` calls `rig_preflight` (tools/automation/rig-env.sh: quser Active + C:\KAH\display-check.ps1 LIVE) -> `RESULT <row> FAIL setup: 4080 session not active` found:game
