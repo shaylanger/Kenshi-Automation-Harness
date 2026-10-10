@@ -144,5 +144,26 @@ class Overlay(unittest.TestCase):   # class of the cursor miss: nothing foreign 
         self.assertFalse(ok, txt); self.assertIn('overlay_frames=6', txt)
 
 
+def flash(w=1600, h=900):   # harness sync_flash after yuv420p: magenta, slightly off
+    f = np.zeros((h, w, 3), int); f[..., 0] = 250; f[..., 1] = 12; f[..., 2] = 246
+    return f
+
+
+class SyncMarks(unittest.TestCase):   # T6 label lag 2026-10-10
+    def test_onsets(self):
+        fs = [scene(0)] * 3 + [flash()] * 4 + [scene(1)] * 5 + [flash()] * 3 + [scene(2)]
+        m = FR.syncmarks(None, frames=[(k / 30.0, f) for k, f in enumerate(fs)])
+        self.assertEqual(m, [round(3 / 30.0, 3), round(12 / 30.0, 3)])
+
+    def test_scene_is_not_a_flash(self):
+        self.assertFalse(any(FR.is_flash(scene(k)) for k in range(6)))
+        half = scene(0).copy(); half[:450] = flash()[:450]   # half-frame magenta (not the full-view marker)
+        self.assertFalse(FR.is_flash(half))
+
+    def test_overlay_skips_flash_frames(self):   # a flat full-view panel would otherwise be a foreign UI panel
+        ok, txt = FR.overlay_check(None, frames=[(k * 0.5, f) for k, f in enumerate([scene(0), flash(), scene(1)])])
+        self.assertTrue(ok, txt); self.assertIn('frames=2', txt)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=1)

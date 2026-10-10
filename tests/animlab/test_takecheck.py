@@ -101,5 +101,39 @@ class TakeCheck(unittest.TestCase):
             os.unlink(f.name)
 
 
+class Sync(unittest.TestCase):   # T6 label lag 2026-10-10: labels led the screen by 0.4-1.3 s, not constant (turret-fp)
+    LAB = [(0.0, 'start'), (2.0, 'aim'), (6.0, 'ready back'), (9.0, 'end')]
+
+    def ev(self, sends):
+        return {'sync': [(t, str(n)) for n, t in enumerate(sends)]}
+
+    def test_constant_offset_passes(self):
+        ok, t, synced = T.sync_check(self.LAB, self.ev([0.0, 2.0, 6.0, 9.0]), [0.80, 2.85, 6.78, 9.83])
+        self.assertTrue(ok, t); self.assertIn('t0_offset=0.80', t)
+        self.assertEqual([round(x, 2) for x, _ in synced], [0.80, 2.85, 6.78, 9.83])
+
+    def test_late_label_fails(self):   # one state reached the screen 0.4 s later than the rest
+        ok, t, _ = T.sync_check(self.LAB, self.ev([0.0, 2.0, 6.0, 9.0]), [0.80, 3.20, 6.80, 9.80])
+        self.assertFalse(ok); self.assertIn('lag>0.15s at n=1(+0.40)', t)
+
+    def test_missing_flash_and_unmarked_label_fail(self):
+        ok, t, _ = T.sync_check(self.LAB, self.ev([0.0, 2.0, 6.0, 9.0]), [0.80, 2.80, 9.80])
+        self.assertFalse(ok); self.assertIn('no flash for n=2', t); self.assertIn('label without flash: ready back', t)
+        ok, t, _ = T.sync_check(self.LAB, self.ev([0.0, 2.0, 9.0]), [0.80, 2.80, 9.80])
+        self.assertFalse(ok); self.assertIn('label without flash: ready back', t)
+
+    def test_stray_flash_fails(self):
+        ok, t, _ = T.sync_check(self.LAB, self.ev([0.0, 2.0, 6.0, 9.0]), [0.80, 2.80, 4.10, 6.80, 9.80])
+        self.assertFalse(ok); self.assertIn('flash without take_mark at 4.10', t)
+
+    def test_no_take_mark_skips_unless_required(self):
+        ok, t, _ = T.sync_check(self.LAB, {}, [])
+        self.assertTrue(ok); self.assertTrue(t.startswith('SKIP'))
+        ok, t, _ = T.sync_check(self.LAB, {'sync_off': [(0.0, 'harness-without-sync_flash')]}, [], require=True)
+        self.assertFalse(ok); self.assertIn('take_mark off', t)
+        ok, t, _ = T.sync_check(self.LAB, self.ev([0.0, 2.0]), [])
+        self.assertFalse(ok); self.assertIn('flashes=0', t)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=1)

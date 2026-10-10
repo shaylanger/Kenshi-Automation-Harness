@@ -103,6 +103,12 @@ RECORDED frames (sky share of the scene band between the title label and the UI 
 2 fps; prints the closed spans); a setup check before recording is not enough (sword-z25-block: slope for 17 s). Night/fog fails.
 `frames.py cursor <mp4>`: no Windows mouse cursor in any frame (arrow shape, any cursor size, full-res frames at 5 fps;
 prints the spans). `takecheck.py --video` runs it on every take (`--no-cursor` skips).
+Label lag (T6): `frames.py syncmarks <mp4>` = onsets of the harness `sync_flash` frames (full-view magenta). KenshiFP
+`take-sample.sh` shows flash 0 at T0 and one per label (`take_mark "$*"` in the take script's lab(), none for `end`),
+each with a `<t> mark sync=<n>` evidence line; `takecheck.py --video` pairs sends and flashes and FAILs `sync` when a
+label's flash is missing or reaches the screen > 0.15 s (`set synclag`) earlier/later than the T0 flash, or a flash has
+no send; `--synced-out <file>` writes the labels at their measured video times for the burn-in. Without take_mark (old
+takes, harness without sync_flash) it is SKIP unless the rules say `set sync 1`. openground/cursor/overlay skip flash frames.
 
 ## Metrics (per state)
 

@@ -20,6 +20,11 @@
       own HUD (baseline); text has NO baseline (a name tag shown in every frame is still foreign, Misses 2026-10-10
       persistent tag); expected zones: centred label band (x .15-.85, top 20%), Kenshi's bottom UI panel (bottom 30%) and
       the KenshiFP HUD text box (at W/2-90, H/2+20: LOADED / RELOAD n / NO POWER). takecheck.py runs it on every take given with --video.
+  syncmarks <video> [--fps 30] [--from s] [--to s]
+      Sync flashes (harness `sync_flash`, sent by take-sample.sh take_mark with every label; T6 label lag 2026-10-10):
+      frames where >= 85% of the pixels are flash magenta (r, b > 170, g < 90). Prints `marks=<n> at=<onset s>,...`
+      (onset = first flash frame of each run). takecheck.py pairs them with the take's `sync` evidence lines. The other
+      frame checks (openground, cursor, overlay) skip flash frames.
 Needs ffmpeg on PATH. Exit 0 = PASS. Last line: `RESULT <name> PASS|FAIL ...`.
 """
 import argparse, subprocess, sys
@@ -38,6 +43,29 @@ def read_frames(video, fps, t0=None, t1=None):
     cmd += ['-vf', 'fps=%g,scale=%d:%d' % (fps, W, H), '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']
     raw = subprocess.run(cmd, capture_output=True).stdout
     return np.frombuffer(raw, np.uint8).reshape(-1, H, W, 3).astype(int)
+
+
+FLASH_SHARE = 0.85
+
+
+def is_flash(f, share=FLASH_SHARE):
+    """True when the frame is a harness sync_flash (flat magenta over >= share of the pixels)."""
+    r, g, b = f[..., 0], f[..., 1], f[..., 2]
+    return float(((r > 170) & (b > 170) & (g < 90)).mean()) >= share
+
+
+def syncmarks(video, fps=30.0, t0=None, t1=None, frames=None):
+    """Onset times (s) of the sync flashes in the video: first frame of each run of flash frames.
+    `frames` = iterable of (t, frame) instead of reading the video (tests)."""
+    if frames is None:
+        frames = iter_frames_full(video, fps, t0, t1, size=(W, H))
+    marks, prev = [], False
+    for t, f in frames:
+        fl = is_flash(f)
+        if fl and not prev:
+            marks.append(round(t, 3))
+        prev = fl
+    return marks
 
 
 def sky_share(f, band=(0.08, 0.62)):
@@ -174,6 +202,8 @@ def cursor_check(video, fps=5.0, t0=None, t1=None, name='take'):
     hits = []
     nfr = 0
     for t, f in iter_frames_full(video, fps, t0, t1):
+        if is_flash(f):   # harness sync_flash marker frame
+            continue
         nfr += 1
         c = find_cursor(f)
         if not c:   # Kenshi's own cursor anywhere but the screen centre (there it is the FP crosshair)
@@ -318,6 +348,8 @@ def overlay_check(video, fps=2.0, t0=None, t1=None, zones=OV_ZONES, frames=None)
     Z = zone_mask(zones)
     ts, TX, AX, PX = [], [], [], []
     for t, f in frames:
+        if is_flash(f):   # harness sync_flash marker frame
+            continue
         T, A, _ = text_cells(f)
         P = np.zeros_like(T)
         for x0, y0, x1, y1 in panel_rects(*flat_cells(f)):
@@ -365,7 +397,15 @@ def main():
     p = sp.add_parser('overlay'); p.add_argument('video'); p.add_argument('--fps', type=float, default=2.0)
     p.add_argument('--from', dest='t0', type=float); p.add_argument('--to', dest='t1', type=float)
     p.add_argument('--name', default='take')
+    p = sp.add_parser('syncmarks'); p.add_argument('video'); p.add_argument('--fps', type=float, default=30.0)
+    p.add_argument('--from', dest='t0', type=float); p.add_argument('--to', dest='t1', type=float)
+    p.add_argument('--name', default='take')
     a = ap.parse_args()
+    if a.cmd == 'syncmarks':
+        m = syncmarks(a.video, a.fps, a.t0, a.t1)
+        print('RESULT %s %s syncmarks marks=%d at=%s' % (a.name, 'PASS' if m else 'FAIL', len(m),
+                                                          ','.join('%.3f' % x for x in m) or '-'))
+        return 0 if m else 1
     if a.cmd == 'overlay':
         ok, txt = overlay_check(a.video, a.fps, a.t0, a.t1)
         print('RESULT %s %s overlay %s' % (a.name, 'PASS' if ok else 'FAIL', txt))
@@ -378,7 +418,7 @@ def main():
         ap.print_help(); return 2
     band = tuple(float(x) for x in a.band.split(','))
     fr = read_frames(a.video, a.fps, a.t0, a.t1)
-    ok, txt = openground([sky_share(f, band) for f in fr], a.fps, a.t0 or 0.0, a.min_sky, a.share)
+    ok, txt = openground([sky_share(f, band) for f in fr if not is_flash(f)], a.fps, a.t0 or 0.0, a.min_sky, a.share)
     print('RESULT %s %s openground %s' % (a.name, 'PASS' if ok else 'FAIL', txt))
     return 0 if ok else 1
 

@@ -23,6 +23,10 @@ A take = a video (optional), a labels file and one or more evidence files:
 Video: the take must end at the `end` label: video length - (end + offset) within [-0.2, endslack] s, and no
 frame may show the Windows mouse cursor (frames.py cursor at 5 fps; `--no-cursor` skips it) or a foreign overlay
 (speech bar, name tag, damage number, hint list, popup: frames.py overlay at 2 fps; `--no-overlay` skips it).
+Sync (T6 label lag): when the evidence has `sync=<n>` lines (take-sample.sh take_mark, sent with every label), the
+video's sync flashes (frames.py syncmarks) are paired with them: every label needs its flash and no flash may reach the
+screen more than `synclag` (default 0.15 s) earlier/later than the take's T0 flash; `set sync 1` makes take_mark
+mandatory; `--synced-out F` writes the labels at their measured video times (burn-in); `--no-sync` skips it.
 
 KenshiFP log (`--kfplog LOG [--log-t0 HH:MM:SS.ms]`): every free block / free swing in the take must have run its native
 animation (`... end: ... live=1`); a press whose progress never went live (fb_lives 0, p 1.010) fails `animlive`.
@@ -142,6 +146,71 @@ def coverage(samples, a, b):
         return b - a
     pts = [a] + ts + [b]
     return max(pts[i + 1] - pts[i] for i in range(len(pts) - 1))
+
+
+def sync_check(L, S, marks, maxlag=0.15, require=False, pair_win=1.0, label_win=0.25):
+    """T6 label lag (2026-10-10): pair the take's `sync=<n>` evidence lines (take_mark send times, script clock) with
+    the sync flashes found in the video (`marks`, video clock). lag_i = (mark_i - send_i) - (mark_0 - send_0): how
+    much later/earlier than the take's first (T0) marker this one reached the screen. FAIL when any |lag| > maxlag,
+    a send has no flash, a flash has no send, or a label has no take_mark within label_win s.
+    Returns (ok, text, synced) with synced = [(video t, label text)] (the label at its own flash, else at
+    t + T0 offset) for the burn-in. No take_mark in the take: ok (SKIP) unless require."""
+    sends = [(t, v) for t, v in S.get('sync', [])]
+    if not sends:
+        why = ('take_mark off: ' + S['sync_off'][0][1]) if S.get('sync_off') else 'no take_mark in the take'
+        return (not require), ('SKIP ' if not require else '') + why + (':BAD' if require else ''), None
+    if not marks:
+        return False, 'sends=%d flashes=0 (no sync flash in the video):BAD' % len(sends), None
+    best = None
+    if len(marks) == len(sends):   # one flash per send, both in send order: pair by order (any lag shows)
+        best = (None, [(st, n, mm) for (st, n), mm in zip(sends, marks)], set(range(len(marks))))
+    for m in (marks if best is None else []):   # else: the offset that pairs the most sends with flashes
+        for s, _ in sends:
+            off = m - s
+            used, pairs = set(), []
+            for st, n in sends:
+                cand = [(abs(mm - st - off), j) for j, mm in enumerate(marks) if j not in used and abs(mm - st - off) <= pair_win]
+                if cand:
+                    j = min(cand)[1]; used.add(j); pairs.append((st, n, marks[j]))
+            key = (len(pairs), -sum(abs(mm - st - off) for st, _, mm in pairs))
+            if best is None or key > best[0]:
+                best = (key, pairs, used)
+    _, pairs, used = best
+    bad = []
+    paired = {n for _, n, _ in pairs}
+    miss = [n for _, n in sends if n not in paired]
+    extra = [marks[j] for j in range(len(marks)) if j not in used]
+    if miss:
+        bad.append('no flash for n=' + ','.join(miss[:8]))
+    if extra:
+        bad.append('flash without take_mark at ' + ','.join('%.2f' % x for x in extra[:8]))
+    lags = []
+    if pairs:
+        s0, _, m0 = pairs[0]
+        off0 = m0 - s0
+        lags = [(n, (mm - st) - off0, st) for st, n, mm in pairs]
+        over = [(n, d) for n, d, _ in lags if abs(d) > maxlag]
+        if over:
+            bad.append('lag>%.2fs at n=' % maxlag + ','.join('%s(%+.2f)' % x for x in over[:8]))
+    else:
+        off0 = 0.0
+    synced, nolab = [], []
+    for t, txt in L:
+        c = [(abs(st - t), mm) for st, _, mm in pairs if abs(st - t) <= label_win]
+        if c:
+            synced.append((min(c)[1], txt))
+        else:
+            synced.append((t + off0, txt))
+            if txt.lower() != 'end':   # take_mark sends none for `end` (the video stops there)
+                nolab.append(txt)
+    if nolab:
+        bad.append('label without flash: ' + '|'.join(nolab[:4]))
+    txt = 'sends=%d flashes=%d paired=%d t0_offset=%.2f' % (len(sends), len(marks), len(pairs), off0)
+    if lags:
+        txt += ' lag=%+.2f..%+.2f' % (min(d for _, d, _ in lags), max(d for _, d, _ in lags))
+    if bad:
+        txt += ' ' + '; '.join(bad) + ':BAD'
+    return not bad, txt, synced
 
 
 def video_len(path):
@@ -274,6 +343,8 @@ def main():
     ap.add_argument('--set', action='append', default=[], help='name=value, overrides a rules-file `set`')
     ap.add_argument('--no-cursor', action='store_true', help='skip the mouse-cursor frame check on --video')
     ap.add_argument('--no-overlay', action='store_true', help='skip the foreign-overlay frame check on --video')
+    ap.add_argument('--no-sync', action='store_true', help='skip the sync-flash label lag check on --video')
+    ap.add_argument('--synced-out', help='write the labels at their measured video times (sync flashes) here, for the burn-in')
     ap.add_argument('--kfplog', help='KenshiFP.log of the take: every free block / free swing must have run its native animation (live=1)')
     ap.add_argument('--log-t0', help='wall clock HH:MM:SS[.ms] of take t=0 in the log (default: judge the whole log)')
     a = ap.parse_args()
@@ -300,6 +371,19 @@ def main():
         lines.append('overlay %s %s' % ('PASS' if vok else 'FAIL', vtxt))
         if not vok:
             ok = False; fails.append('overlay')
+    if a.video and not a.no_sync:   # T6 label lag: every label's sync flash within synclag of the T0 offset
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import frames
+        marks = frames.syncmarks(a.video) if S.get('sync') else []
+        sok, stxt, synced = sync_check(L, S, marks, cfg.get('synclag', 0.15), bool(cfg.get('sync', 0)))
+        lines.append('sync %s %s' % (('PASS' if sok else 'FAIL') if not stxt.startswith('SKIP') else 'SKIP', stxt))
+        if not sok:
+            ok = False; fails.append('sync')
+        if synced and a.synced_out:
+            with open(a.synced_out, 'w') as fh:
+                for t, x in synced:
+                    fh.write('%.3f %s\n' % (t, x))
     if a.kfplog:
         t0 = wall(a.log_t0) if a.log_t0 else None
         t1 = t0 + (L[-1][0] if L else 0) + 1.0 if t0 is not None else None
