@@ -132,7 +132,8 @@ before 2026-10-10 11:30 unclassed)
 - 2026-10-10 | E6 stroke 1 blade seen / len: game below replay | game e6fix (F0595751) stroke 1 seen 0.048 (FAIL < 0.05) at swing1 u .93, len 237 (FAIL < 240) at u .78; replay of the same rec with the same source: seen 0.075, len 245 (both PASS) | C:\KenshiTestRuns\kfx-b2\e6\e6fix.vmrec.txt (= /root/animlab-work/e6fix-game.txt) | F0595751 | OPEN (fixer refit 4 adds margin: replay seen 0.087, len 262)
 - 2026-10-10 | E6 stroke 2 blade seen: replay below game (reverse) | game e6fix stroke 2 seen 0.116 at swing1 frame 1318 u .94; replay (F0595751 source and refit 4) 0.030 at the same frame: replay FAIL, game PASS, at the recovery end | same rec | F0595751 | OPEN
 - 2026-10-10 | taste R8 wrist (vmcheck) | Shay accepted f28-sword-z0c (sword zoom 0, 3912d09) and picked wb36 (f23-sword-z0d) but vmcheck (fp-viewmodel.sh PT30) still gates sword SWING frames at wb 30: FAILS both (wb 37.8 / 36.4); spec.py wrist + arc.wb (swing 50) PASS | corpus rec/f28-sword-z0c.txt, rec/f23-sword-z0d.txt | E334DB71 / 9E5422A6 | OPEN (taste, class taste): vmcheck swing limit should follow metrics.ARC_WB 50 (fp-viewmodel.sh owner: KenshiFP fixer)
-- 2026-10-10 | taste R17 blade on stroke 0 | `animlab blade` FAILS the Shay-accepted stroke 0 (f28 snap 26/22 + seen 0.000 @u.65; e6-anim stroke 0 seen 0.000): the documented "baseline exception" is not in the check, so every stroke-0 swing is a false alarm | corpus rec/f28-sword-z0c.txt, rec/e6-anim.txt | E334DB71 / 9DA35EE0 | OPEN (taste): either a per-stroke baseline in the check or a question to Shay whether the one-frame end-on/snap he accepted should be fixed
+- 2026-10-10 | taste R17 blade on stroke 0 | `animlab blade` FAILS the Shay-accepted stroke 0 (f28 snap 26/22 + seen 0.000 @u.65; e6-anim stroke 0 seen 0.000): the documented "baseline exception" is not in the check, so every stroke-0 swing is a false alarm | corpus rec/f28-sword-z0c.txt, rec/e6-anim.txt | E334DB71 / 9DA35EE0 | CLOSED (spec 2026-10-10): R17 snap/end-on now native-referenced (`spec.py blade`: snap <= 32, end-on <= 67 ms, from the game's katana attacks); stroke 0 passes with no exception (t65/t66 TN). New disagreement t62 (coordinator reject of stroke 2: snap 27, end-on 23 ms) is inside the native range | class: taste, rule threshold vs native
+- 2026-10-10 | taste t62 R17 FN (native reference) | coordinator rejected E6 stroke 2 (wind-up snap 27 deg/33 ms + one end-on frame 23 ms); `spec.py blade` (native katana attacks: snap 7-32, end-on <= 67 ms) passes it: the flaw is inside what the game's own swings do | corpus rec/e6-anim.txt (--only-stroke 2) | 9DA35EE0 | OPEN (coordinator): keep the coord reject as taste (FN stays) or relabel; stroke 2 was refit since (e6-anim-b2 / e6fix pass both checks) | class: taste, coord verdict vs native reference
 - 2026-10-10 | taste R2 inline per swing (working tree) | the uncommitted per-swing `inline` (metrics.py "each: swings k/n", working tree 2026-10-10 ~12:40) FAILS the Shay-accepted f28-sword-z0c (swings 3/5, worst swing3@1182) and f23-sword-z0d; the committed whole-take inline PASSED both | corpus rec/f28-sword-z0c.txt, rec/f23-sword-z0d.txt | E334DB71 / 9E5422A6 | OPEN (taste): maintainer to recheck the per-swing limits against the taste set (`bash components/KenshiFP/animlab/taste/run.sh --only R2`) before committing
 
 ## Catch-rate ledger (animlab-loop; `python3 components/KenshiFP/animlab/ledger.py`)
@@ -185,13 +186,12 @@ Shay's (and the coordinator's) accept/reject decisions as labelled recordings: w
 (71 rows: 67 scored, 4 listed: superseded/open/decision-only), recordings/videos/takes in the protected corpus (C:\KenshiTestRuns\corpus,
 MANIFEST rows `taste:<rule>`). Weights: shay 1.0, shay-sym / shay-fix 0.75, coord 0.5. Rerun (WSL, ~1.5 min cold, cached after):
 `bash /mnt/c/KenshiModding/components/KenshiFP/animlab/taste/run.sh [--only R1,R2] [--md out.md]` (harness `tools/animlab/taste.py`).
-Every FN / FP is a Misses row of class "taste". Lab state at the time of the run below = harness working tree incl. uncommitted
-metrics.py edits (per-swing inline).
+Every FN / FP is a Misses row of class "taste".
 
 | rule | n | TP (rej+FAIL) | TN (acc+PASS) | FN (lab missed) | FP (false alarm) |
 |---|---|---|---|---|---|
 | R1 edge lines up at the stroke start and leads through the stroke (wind-u | 7 | 4 | 3 | 0 | 0 |
-| R2 blade roughly in line with the forearm; shoulder/elbow drive the arc,  | 5 | 2 | 1 | 0 | 2 |
+| R2 blade roughly in line with the forearm; shoulder/elbow drive the arc,  | 5 | 2 | 3 | 0 | 0 |
 | R3 no hand/forearm roll in the wind-up; no sudden wrist/blade roll | 6 | 3 | 3 | 0 | 0 |
 | R4 no arm churn: elbow/forearm must not swing out and back while the weap | 4 | 1 | 3 | 0 | 0 |
 | R5 same swing input -> same forearm roll (no forearm flip mid-stroke) | 2 | 1 | 1 | 0 | 0 |
@@ -205,13 +205,17 @@ metrics.py edits (per-swing inline).
 | R13 no clipped or hollow limbs (near-plane cut) | 4 | 2 | 2 | 0 | 0 |
 | R14 zoom 25 looks natural: hand away from the head, weapon visible, wrist  | 1 | 0 | 1 | 0 | 0 |
 | R15 every frame judgeable: open ground, nothing solid in frame, full res,  | 6 | 3 | 3 | 0 | 0 |
-| R17 blade reads on screen: no one-frame snap at the wind-up top, never end | 5 | 3 | 0 | 0 | 2 |
+| R17 blade reads on screen: wind-up-top rotation within the native rate, en | 5 | 2 | 2 | 1 | 0 |
 | R20 take labels match game state; no combat / bystanders; video ends at th | 2 | 2 | 0 | 0 | 0 |
 
-Items 67 scored (+4 open/superseded listed), weighted agreement 0.89. Disagreements: t10 (R2 FP f23-sword-z0d.txt), t11 (R2 FP f28-sword-z0c.txt), t33 (R8 FP f28-sword-z0c.txt), t34 (R8 FP f23-sword-z0d.txt), t65 (R17 FP e6-anim.txt), t66 (R17 FP f28-sword-z0c.txt)
+Items 67 scored (+4 open/superseded listed), weighted agreement 0.96 (was 0.89; fresh cache 2026-10-10 after the native-reference
+R17 + the maintainer's per-swing inline). Disagreements: t33 (R8 FP f28-sword-z0c.txt), t34 (R8 FP f23-sword-z0d.txt): vmcheck.wrist
+gates swings at 30; t62 (R17 FN e6-anim.txt stroke 2, coordinator reject): its snap 27 deg/33 ms and 23 ms end-on lie inside the
+native katana range (snap 7-32, end-on <= 67 ms), so the native-reference rule no longer rejects it (the Shay-accepted stroke 0,
+snap 20-26 / end-on 12-30 ms, passes with no exception).
 
 ## Rule -> check map (spec-first; `bash .../taste/run.sh map --md`)
-Rules file `components/KenshiFP/animlab/taste/rules.tsv` (owner shay / coord / inferred), checks `taste/checks.json` (check id ->
+Rules file `components/KenshiFP/animlab/taste/rules.tsv` (owner shay / coord / native / inferred), checks `taste/checks.json` (check id ->
 lab command + verdict regex). `spec.py run <rules> --checks <checks> --class sword|crossbow <rec>` runs every rule of a class on a
 new recording; `run.sh unarmed <candidate dir>` runs the unarmed spec on fist candidates (pose.txt).
 
@@ -224,7 +228,7 @@ new recording; `run.sh unarmed <candidate dir>` runs the unarmed spec on fist ca
 | R5 same swing input -> same forearm roll (no forearm flip mid-stroke) | sword | E5 (Shay review anim-sword-z0 swing 3) | shay | hinge | covered: needs >= 3 swings from ready |
 | R6 ready pose stable: no sudden ~90 deg roll mid-walk, one ready branch | sword | E3 | shay | branch | covered: --ref a known-good recording of the same build |
 | R7 sharp edge never faces the camera at rest (ready/walk/block) | sword | S1 | shay | restedge | covered: new (spec.py restedge, p05 of edge cos >= 0) |
-| R8 wrist bend: holds <= 30 deg (PT30), swings <= 50 (Shay accepted wb36); solver-posed frames only, native-animation frames exempt (Shay 2026-10-10) | all | PT17-W, PT30, X3, X5, c6a1eda, Shay 2026-10-10 | shay | wrist,arc.wb,vmcheck.wrist | partial: vmcheck.wrist gates swings at 30 too (FAILs Shay-accepted f28); spec.py wrist splits holds/swings and skips metrics.NATIVE_STATES (native/off/draw/lower = metrics.is_native); arc.wb judges swing frames only (solver-posed); vmcheck PT29 zo native exemption: kfp-fixer (fp-viewmodel.sh) |
+| R8 wrist bend: holds <= 30 deg (PT30), swings <= 50 (Shay accepted wb36); solver-posed frames only, native-animation frames exempt (Shay 2026-10-10) | all | PT17-W, PT30, X3, X5, c6a1eda, Shay 2026-10-10 | shay | wrist,arc.wb,vmcheck.wrist | partial: vmcheck.wrist gates swings at 30 too (FAILs Shay-accepted f28); spec.py wrist splits holds/swings, skips native frames (metrics.NATIVE_STATES) |
 | R9 every state visibly plays: pose moves vs ready (aim, block, reload, swing) | all | memory state-must-visibly-play; C1 | shay | moves | covered: unarmed U3 |
 | R10 stock low (<= 25% from the bottom in ready), crossbow orientation unchanged | crossbow | C2, C2b accepted (13bca46) | shay | stock | covered: --ref f14-xb0 (d40b6ad-era orientation) |
 | R11 bolt and strings rigid on the crossbow | crossbow | C3 | shay | bolt | covered: needs the .bolt sidecar |
@@ -233,37 +237,63 @@ new recording; `run.sh unarmed <candidate dir>` runs the unarmed spec on fist ca
 | R14 zoom 25 looks natural: hand away from the head, weapon visible, wrist limit | all | memory zoomout-every-build; PT29 | shay | vmcheck.zo | partial: vmcheck zo only (PT29); `animlab.py` has no zoom-25 judgement (Misses X7 row OPEN); no Shay-labelled z25 recording |
 | R15 every frame judgeable: open ground, nothing solid in frame, full res, no cursor | all | memory screenshots-must-be-judgeable; ticket A | shay | openground,cursor | covered: videos (frames.py) |
 | R16 review before handing over: every frame reviewed, flaws fixed first | all | memory review-before-handing-over | shay | - | out-of-reach: process rule (coordinator), not a property of a recording |
-| R17 blade reads on screen: no one-frame snap at the wind-up top, never end-on, full length, overhead descends vertically | sword | E6 coordinator reviews (Misses E6 rows) | coord | blade.snap,blade.seen,stroke.len,stroke.oh | covered: stroke 0 = documented baseline exception (Shay-approved stroke fails snap/seen) |
+| R17 blade reads on screen: wind-up-top rotation within the native rate, end-on in the follow-through at most two video frames, full length, overhead descends vertically | sword | native reference (snap, end-on: game katana attacks, Shay 2026-10-10); E6 coordinator reviews (len, overhead) | native | blade.snap,blade.seen,stroke.len,stroke.oh | covered: spec.py blade: snap <= 32 deg/33 ms (native downward combo 32 @x1.2, chop down 15, bigchopv2 14, heavy downcut 10, desperate attack 7; chop left 47 starts at the top = engine crossfade, not counted); end-on (seen < 0.05 on screen) <= 67 ms (native bigchopv2 67, desperate attack 33). No stroke-0 exception needed: stroke 0 snap 20-26, end-on 12-30 ms PASS. len/overhead stay coord |
 | R18 block guard not hanging (blade not straight down, hilt not at the face) | sword | Misses z25 block guard | coord | guard | covered: whether the native hanging guard is acceptable is Shay's call (open) |
 | R19 zoom crossfade band: no own headless torso / floating hand between eye and head-show distance | all | Z1 coordinator review | coord | zoomband | covered: no game recording of the fail case yet |
 | R20 take labels match game state; no combat / bystanders; video ends at the end label | all | T6 coordinator review | coord | takecheck | covered: takes only |
 | R21 hand grips the hilt (no open palm, fingers wrapped) | sword | PT33 | shay | - | out-of-reach: recordings hold no finger bones; the visual lab renders fingers in the bind pose |
 | R22 do not enlarge the arm / change framing to match Chivalry; only the movement matters | all | memory sword-inline-with-forearm | shay | - | out-of-reach: a negative design rule: nothing to measure (framing changes show up as stock/stroke regressions) |
-| U1 guard: both fists on screen at rest (zoom 0) | unarmed | NA1 plan row (coordinator) | inferred | spec:U1 | covered |
-| U2 every technique returns to the guard | unarmed | NA1 plan row (coordinator) | inferred | spec:U2 | covered |
+| U1 guard: both fists on screen at rest (zoom 0), below the eye line | unarmed | native reference: ma idle1 stance hands below the eye (wrists y -3.7 / -8.5 dm, all clip starts -3.1..-3.8); on-screen = FP visibility (U3/R9, Shay) | native | spec:U1 | covered: native guard is below the FP view (y/z -2.0 R, -3.2 L); FP keeps the native 'below the eye' shape, lifted onto the screen |
+| U2 every technique returns to the guard (last key = guard, <= 0.5 dm) | unarmed | native reference: clips end 0.4-3.5 dm off their start (arms vs chest) and the engine crossfades back to the stance; the FP key set has no crossfade | native | spec:U2 | covered: badpunch end-start 1.5/3.5, chudan 2.6/1.9, 2strike 0.5/0.4, shoteiL 0.4/0.6 dm (L/R) |
 | U3 the technique visibly plays (fist moves >= 1 dm from the guard) | unarmed | memory state-must-visibly-play | shay | spec:U3 | covered |
-| U4 a punch drives toward the screen centre | unarmed | NA1 plan row (coordinator) | inferred | spec:U4 | covered |
+| U4 a punch drives toward the screen centre, at or below the centre line | unarmed | native reference: striking fists land at |x/z| <= 0.29, y/z -0.28..-0.09 (badpunch L, chudan L/R, 2strike R, shoteiL L) | native | spec:U4 | covered: limits |x/z| <= 0.30, y/z -0.35..+0.05 |
 | U5 no hand at / above / behind the eye (forearm/fist >= 2.5 dm from the eye, <= eye level +0.5 dm) | unarmed | PT29 hands at the head (Shay), NA1 row | shay | spec:U5 | covered: thresholds 2.5 / +0.5 dm are the lab's (native.py fists) |
-| U6 wind-up stays below eye level | unarmed | NA1 brief (coordinator) | inferred | spec:U6 | covered |
+| U6 wind-up never rises above the strike (wrist/fist highest at the strike) | unarmed | native reference: every native striking hand is highest AT the strike; wind-up stays 0.62-2.64 dm below it | native | spec:U6 | covered: was 'wind-up below eye level' (inferred); limit rise <= 0.1 dm; hands at the head stay U5 (Shay) |
 | U7 no near-plane cut of forearm/fist | unarmed | PT17 (Shay) | shay | spec:U7 | covered |
-| U8 wrist bend <= 30 deg | unarmed | PT17-W / PT30 (Shay) | shay | spec:U8 | covered: fist candidates are solver-posed on every frame (the native clip only feeds the path model), so the limit applies; the zoom-25 native animation (U13) is exempt (Shay 2026-10-10) |
+| U8 wrist bend <= 30 deg | unarmed | PT17-W / PT30 (Shay) | shay | spec:U8 | covered |
 | U9 no arm churn | unarmed | memory no-arm-churn | shay | spec:U9 | covered: same limits as the sword churn (450 px within 0.4 s, fist <= 250 px) |
-| U10 punch driven by shoulder/elbow, not the wrist (wrist share of fist motion <= 0.6) | unarmed | sword-inline-with-forearm (sword rule, Shay) carried over | inferred | spec:U10 | covered |
-| U11 no sudden fist roll (<= 30 deg per 33 ms) | unarmed | sword roll rules (Shay) carried over; threshold inferred | inferred | spec:U11 | covered |
+| U10 punch driven by shoulder/elbow, not the wrist (wrist share of fist motion <= 0.45) | unarmed | native reference: native striking hands 0.04-0.41 (straight punches 0.04-0.25, palm strikes 0.40/0.41) | native | spec:U10 | covered: was 0.6 (inferred) |
+| U11 no sudden fist roll (<= 40 deg per 33 ms on straight-wrist frames) | unarmed | native reference: native fist roll on straight-wrist frames (wb <= 30) up to 36.5 deg/33 ms (2strike L; badpunch 23, shoteiL 27.5, chudan 5) | native | spec:U11 | covered: was 30 on every frame (inferred); bent-wrist frames skipped (prop axis tilts without a roll; U8 judges the bend) |
 | U12 the game's half-open hand is accepted: no fist-closed check (skeletons have no finger bones) | unarmed | Shay 2026-10-10 (via coordinator) | shay | - | dropped: decision, nothing to gate; replaces the inferred "fist closed" rule |
 | U13 zoom 25 = the native third-person animation, unchanged | unarmed | NA1 plan row; zoomout-every-build (Shay) | shay | vmcheck.zo | partial: only after an in-game build (game recording + VMQUICK sheet); offline: native.py sheet-z25 |
-| U14 kicks / headbutt / flykick: guard holds, the camera reads the move | unarmed | NA1 plan row (coordinator) | inferred | - | missing: no kick candidate format yet (camera motion is not in pose.txt) |
+| U14 kicks: the arms move with the body (no held guard), the camera follows the head; headbutt: the guard holds while the head moves | unarmed | native reference: kicklow/megakick/flykick/flyknee wrists travel 6.4-9.5 dm vs the chest, head 9.6-44 dm; headbutt wrists <= 1.8 dm, head 10.7 dm | native | - | missing: was 'guard holds' (inferred, contradicted by the native kicks); no kick candidate format yet (camera motion is not in pose.txt) |
 | U15 solver reaches every key (no IK failure) | unarmed | lab | coord | spec:U15 | covered |
-| U16 block raises the guard | unarmed | NA1 plan row (coordinator) | inferred | - | missing: no block candidate yet |
+| U16 unarmed has no block: the defence is the native dodge back (guard kept at its height, the view moves back) | unarmed | native reference: game data has no unarmed block technique (dodgeback/dodgefall/dodgefly only); dodgeback wrists dy -0.7..+0.4 dm (L 1.6, R 4.8 dm travel), head 17 dm back | native | - | missing: was 'block raises the guard' (inferred, no native counterpart); no dodge candidate yet |
 | U17 palm-heel techniques become straight-wrist punches (wrist <= 30 deg); native palm strikes are not kept | unarmed | Shay 2026-10-10 (via coordinator) | shay | spec:U17 | covered: spec.py unarmed: candidates named shotei*/palm* get U17 (wb_max <= 30 every frame) |
 # rules=39 covered=29 dropped=1 missing=2 out-of-reach=3 partial=4
 
 ## Unarmed spec (NA1, before the fists are built)
 `spec.py unarmed` on metricslab/native.py fist candidates (dir with <technique>/pose.txt; `_*` helper dirs skipped): U1 guard view,
-U2 return to guard, U3 moves, U4 strike to centre, U5 eye clear, U6 wind-up below eye, U7 near-plane cut, U8 wrist <= 30, U9 churn,
+U2 return to guard, U3 moves, U4 strike to centre, U5 eye clear, U6 wind-up not above the strike, U7 near-plane cut, U8 wrist <= 30, U9 churn,
 U10 arm-driven (wrist share), U11 fist roll per 33 ms, U15 ikfail, U17 palm-heel = straight-wrist punch (shotei*/palm*). Shay
-decisions 2026-10-10: half-open hand accepted (U12 dropped: no finger bones), palm-heel -> straight-wrist punch (U17). Owner
-`inferred` rules (U1 U2 U4 U6 U10 U11 U14 U16) are reported apart (`inferred_fails=`) and are questions for Shay, not his rules.
+decisions 2026-10-10: half-open hand accepted (U12 dropped: no finger bones), palm-heel -> straight-wrist punch (U17), and the
+formerly inferred rules (U1 U2 U4 U6 U10 U11 U14 U16, plus R17 snap/end-on) take their shape and limits from the game's own
+animations ("use the native in-game animations to guide you"): owner `native`, hard rules. Numbers below.
+
+### Native reference (animlab-spec, 2026-10-10)
+Measured with the same check code (`spec.unarmed_checks`, `spec.blade_native`) on the native clips: `native.py trajectory`, unarmed =
+target hand, pelvis stab, shoulder anchor on the FP body (vmrec-q-sword-z0-a frame 100); katana = weapon target, fit anchor, torso
+stab; sampled at 30 fps x the technique's anim speed mult (game data). Strikers from the game data (badpunch L, ma chudan LR,
+ma 2strike R, ma shotei L). Scratch scripts: WSL /root/animlab-work/spec-native (rebuildable, not kept).
+
+| rule | native measurement | old (inferred) | new (native) |
+|---|---|---|---|
+| U1 guard | ma idle1 wrists y -3.7 (R) / -8.5 (L) dm, clip starts -3.1..-3.8: below the eye and below the FP view (y/z -2.0 / -3.2) | both fists on screen | on screen AND below the eye line (y <= 0) |
+| U2 return | clip end vs start (arms vs chest) 0.4-3.5 dm; the engine crossfades back to the stance | end <= 0.5 dm | unchanged (FP keys have no crossfade: last key = guard) |
+| U4 strike | strikers' nearest-centre point abs(x/z) .16-.29, y/z -.28..-.09 | abs(x/z) <= .30, abs(y/z) <= .35 | abs(x/z) <= .30, y/z -.35..+.05 |
+| U6 wind-up | every striker highest AT the strike; wind-up 0.62-2.64 dm below it | wind-up y <= eye | wind-up never above the strike (rise <= 0.1 dm); eye cap stays U5 |
+| U10 arm-driven | wrist share .04-.41 (straight punches .04-.25, palm strikes .40/.41) | <= 0.6 | <= 0.45 |
+| U11 roll | roll per 33 ms on straight-wrist frames up to 36.5 (2strike L; badpunch 23.4, shotei 27.5, chudan 4.7); bent-wrist frames up to 88 (prop axis tilts with the bend) | <= 30, every frame | <= 40, straight-wrist frames (wb <= 30) |
+| U14 kicks | kicklow / megakick / flykick / flyknee: wrists travel 6.4-9.5 dm vs the chest, head 9.6-44 dm; headbutt: wrists <= 1.8 dm, head 10.7 dm | guard holds | arms move with the body in kicks; guard holds only in the headbutt (no candidate format yet) |
+| U16 block | game data: no unarmed block technique (dodgeback / dodgefall / dodgefly); dodgeback wrists dy -0.7..+0.4 dm, head 17 dm back | block raises the guard | no block: native dodge back, guard kept at its height (no candidate yet) |
+| R17 snap | rotation per 33 ms after the wind-up top: downward combo 32 (x1.2), chop down 15, bigchopv2 14, heavy downcut 10, desperate attack 7 (chop left 47 starts at the top = engine crossfade, not counted) | <= 22 + stroke-0 exception | <= 32, no exception (`spec.py blade`) |
+| R17 end-on | follow-through on-screen visible blade < 0.05: bigchopv2 67 ms (0.038), desperate attack 33 ms (0.001), downward combo / heavy downcut 0 (disabled chop down 100 ms) | seen >= 0.05 every frame + stroke-0 exception | end-on stretch <= 67 ms (`spec.py blade`) |
+
+Fist candidates (fists 5a03b7d, /root/animlab-work/fists/cand) under the native rules: all 4 PASS (were badpunch FAIL U11 37 > 30,
+shoteiL FAIL U6 0.05 dm above the eye). Marginal: badpunch L roll 37.0 deg/33 ms (above the native max 36.5, inside the 40 limit);
+badpunch R wind-up rise +0.09 dm (limit 0.1; native badpunch strikes with L only, the candidate keys R as a striker too).
+The metrics.py `blade` default (snap 22, seen >= 0.05) and regress row 21 are unchanged (maintainer's): only the spec/taste R17
+checks use `spec.py blade`.
 
 ## Key findings / gotchas
 - Camera numbers are a MIRRORED frame (rt = fw x up): recorded hand axes mh/hy/hz are left-handed

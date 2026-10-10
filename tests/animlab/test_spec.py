@@ -73,7 +73,19 @@ class TestUnarmed(unittest.TestCase):
         fr = [(-0.2, GL, GR, {})] + [(u / 59.0, GL, lerp(GR, hi, math.sin(math.pi * u / 59.0)), {}) for u in range(60)]
         res = {r[0]: r for r in S.unarmed_checks(S.read_pose(tmp(pose_file(fr))))}
         self.assertEqual(res['U5'][1], 'FAIL', res['U5'])
+        self.assertEqual(res['U6'][1], 'PASS', res['U6'])   # native reference: highest AT the strike is the native shape
+
+    def test_windup_above_strike(self):
+        # U6 (native reference): the fist rises 1 dm above the later strike point during the wind-up
+        up = (2.0, -0.4, 4.0)
+        fr = [(-0.2, GL, GR, {})]
+        for k in range(60):
+            u = k / 59.0
+            w = lerp(GR, up, u / 0.4) if u < 0.4 else lerp(up, HIT, (u - 0.4) / 0.3) if u < 0.7 else lerp(HIT, GR, (u - 0.7) / 0.3)
+            fr.append((u, GL, w, {}))
+        res = {r[0]: r for r in S.unarmed_checks(S.read_pose(tmp(pose_file(fr))))}
         self.assertEqual(res['U6'][1], 'FAIL', res['U6'])
+        self.assertEqual(res['U5'][1], 'PASS', res['U5'])
 
     def test_wrist_fold(self):
         res = {r[0]: r for r in S.unarmed_checks(S.read_pose(tmp(pose_file(punch(opts=lambda k, u: {'bR': 60.0 * math.sin(math.pi * u)})))))}
@@ -112,6 +124,30 @@ class TestUnarmed(unittest.TestCase):
             os.makedirs(os.path.join(d, n))
             open(os.path.join(d, n, 'pose.txt'), 'w').write(pose_file(punch()))
         self.assertEqual([os.path.basename(os.path.dirname(p)) for p in S.find_cands([d])], ['jab'])
+
+
+class TestBladeNative(unittest.TestCase):
+    @staticmethod
+    def swing(endon_frames, snap=10.0, n=61):
+        # blade turning about the view axis at a steady rate; the flat faces the camera except endon_frames frames at u .7
+        F, P = [], []
+        for k in range(n):
+            u = k / (n - 1.0); a = math.radians(snap * k * 0.5)
+            mf = (math.sin(a), math.cos(a), 0.0)
+            edge = k >= 42 and k < 42 + endon_frames
+            mid = (3.5 * mf[0], -2.0 + 3.5 * mf[1], 5.0)   # the flat edge-on to the view ray through the blade middle
+            mu = mid if edge else (math.cos(a), -math.sin(a), 0.0)
+            F.append(dict(t=u, swu=u)); P.append(dict(mp=(0.0, -2.0, 5.0), mf=mf, mu=mu, state='swing', wih=1))
+        return F, P
+
+    def test_one_frame_endon_passes(self):
+        ok, txt = S.blade_native(*self.swing(1))
+        self.assertTrue(ok, txt)
+
+    def test_long_endon_fails(self):
+        ok, txt = S.blade_native(*self.swing(6))
+        self.assertFalse(ok, txt)
+        self.assertIn('endon=', txt)
 
 
 RULES = '''# comment

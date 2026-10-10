@@ -8,11 +8,15 @@
   spec.py restedge <rec>                                     sword edge never toward the camera in the rest states
   spec.py stilljit <rec> [--states aim --max 1.5]            still-state weapon jitter (px at 1600x900)
   spec.py wrist    <rec> [--hold 30 --swing 50]              wrist bend limit per state (holds vs swings)
+  spec.py blade    <rec> [--only-stroke N --snap 32 --run .067]  R17 blade, native reference (snap at the wind-up top,
+                                                             longest end-on stretch in the follow-through)
                                                             on solver-posed frames only (native frames exempt, Shay 2026-10-10)
 
 Rules file (TSV, '#' comments): id, class (comma list: sword,crossbow,unarmed,take,all), rule, source, owner
-(shay | coord | inferred), checks (comma list of check ids; '-' none), status (covered | partial | missing | out-of-reach),
-note. Owner `inferred` = a rule nobody has confirmed yet: its verdict is reported apart (questions for the owner).
+(shay | coord | native | inferred), checks (comma list of check ids; '-' none), status (covered | partial | missing |
+out-of-reach), note. Owner `native` = thresholds/shape measured on the game's own animations (Shay 2026-10-10: "use the
+native in-game animations to guide you"; numbers in the note + STATUS.md "Native reference"): a hard rule.
+Owner `inferred` = a rule nobody has confirmed yet: its verdict is reported apart (questions for the owner).
 Checks file (JSON): {"vars": {name: value}, "checks": {id: {"cmd": template, "line": regex, "fail": regex,
 "num": [field, "max"|"min", limit], "pass": regex}}}. Template fields: {rec}, {L} (this directory), {vars}, item options
 ({pre}, {ref}, {mode}, ...; missing options expand to ''). A check FAILS when the first output line matching `line`
@@ -173,13 +177,91 @@ def wrist(rec, hold=WB_HOLD, swing=WB_SWING):
     return ok, ' '.join(sorted(parts)) or 'no wrist data'
 
 
+# R17 blade, NATIVE REFERENCE (Shay 2026-10-10: "use the native in-game animations to guide you"). Measured on the game's
+# own katana attacks (native.py trajectory, katana, anchor fit, torso stab, 30 fps x the technique's anim speed mult;
+# numbers in docs/animlab/STATUS.md "Native reference"): rotation per 33 ms video frame after the wind-up top 7-32 deg
+# (downward combo 32 @1.2, chop down 15, bigchopv2 14, heavy downcut 10, desperate attack 7; chop left 47 starts AT the
+# top, its first frames are the engine's crossfade from the stance: not counted); the follow-through passes near edge-on
+# (on-screen visible blade < 0.05) for up to two video frames in the enabled attacks (bigchopv2 67 ms seen 0.038,
+# desperate attack 33 ms seen 0.001, downward combo / heavy downcut 0; the disabled chop down 100 ms, chop down static
+# 533 ms in its resting tail). So: snap <= 32, and an end-on stretch (on-screen visible blade < 0.05, or a facing sign
+# change between two frames) lasts at most 67 ms (two 30 fps video frames).
+NAT_SNAP, NAT_SEEN, NAT_RUN = 32.0, 0.05, 0.067   # deg per 33 ms; visible blade; s
+
+
+def blade_native(F, P, snap_max=NAT_SNAP, see_min=NAT_SEEN, run_max=NAT_RUN):
+    """per swing: snap (as metrics.blade_check) and the longest end-on stretch over u .45-.95 (on-screen frames only:
+    a blade out of view is stroke.len's business). A run = consecutive frames below see_min; its length in time is
+    last - first + one frame interval; a facing sign change between frames counts as a one-frame run."""
+    import metrics as M
+    ws, wr, ok, txt = None, None, True, []
+    for k, idx in enumerate(M.swings(F, P)):
+        rate = []
+        for n, i in enumerate(idx):
+            j = n
+            while j > 0 and F[idx[n]]['t'] - F[idx[j - 1]]['t'] <= M.SNAP_WIN:
+                j -= 1
+            if j < n:
+                rate.append((F[i]['swu'], M.blade_rot(P[idx[j]], P[i]), i))
+        top = [r for r in rate if M.ARC_U0 - 0.1 <= r[0] <= M.ARC_U0 + 0.12]
+        if top:
+            ut = min(top, key=lambda r: r[1])[0]
+            mx = max((r for r in rate if ut <= r[0] <= ut + M.SNAP_U), key=lambda r: r[1])
+            if ws is None or mx[1] > ws[1]:
+                ws = (k, mx[1], mx[0])
+        g = [(M.blade_seen(P[i]), F[i]['t'], F[i]['swu']) for i in idx if M.SEE_U0 <= F[i]['swu'] <= M.SEE_U1]
+        dt = min((g[n + 1][1] - g[n][1] for n in range(len(g) - 1)), default=1 / 60.0)
+        best, run0, prev = (0.0, None, 1.0), None, None
+        for n, (s, t, u) in enumerate(g):
+            low = s[1] > 0 and s[0] < see_min
+            flip = prev is not None and s[1] > 0 and prev[2] * s[2] < 0
+            if low:
+                run0 = run0 if run0 is not None else t
+                ln = t - run0 + dt
+                if ln > best[0]:
+                    best = (ln, u, s[0])
+            else:
+                run0 = None
+                if flip and dt > best[0]:
+                    best = (dt, u, 0.0)
+            prev = s
+        if best[1] is not None and (wr is None or best[0] > wr[1]):
+            wr = (k, best[0], best[1], best[2])
+    if ws:
+        b = ws[1] > snap_max; ok = ok and not b
+        txt.append('snap=%.0f/%.0f%s@swing%d,u=%.2f' % (ws[1], snap_max, ':BAD' if b else '', ws[0], ws[2]))
+    else:
+        ok = False; txt.append('snap=n/a(no swing):BAD')
+    if wr:
+        b = wr[1] > run_max + 1e-6; ok = ok and not b
+        txt.append('endon=%.0fms/%.0f%s@swing%d,u=%.2f,seen=%.3f' % (wr[1] * 1000, run_max * 1000, ':BAD' if b else '', wr[0], wr[2], wr[3]))
+    else:
+        txt.append('endon=0ms/%.0f' % (run_max * 1000))
+    return ok, ' '.join(txt)
+
+
+def blade_rec(rec, snap_max=NAT_SNAP, see_min=NAT_SEEN, run_max=NAT_RUN):
+    import recfmt, metrics as M
+    r = recfmt.parse(rec)
+    return blade_native(r.frames, M.frame_metrics(r), snap_max, see_min, run_max)
+
+
 # ---------------------------------------------------------------- unarmed spec (fist candidates, metricslab pose.txt)
 
 ARM = ('sh', 'el', 'wr', 'hx', 'pp', 'pf', 'pu')
 TX, TY = 1.245, 0.70          # screen half-extent tangents (16:9, KenshiFP fov; = native.py _onscr)
 W, H = 1600, 900
-U = dict(near=3.0, eye_min=2.5, above_max=0.5, center=(0.30, 0.35), wb_max=30.0, ret=0.5, move_dm=1.0, strike_min=1.5,
-         rev=450.0, grip_px=250.0, win=0.4, wshare=0.6, twist=30.0, twist_dt=1 / 30.0, windup_y=0.0)
+# Unarmed limits. NATIVE REFERENCE (Shay 2026-10-10: the game's own unarmed animations guide the inferred rules): measured
+# with these same checks on the native clips (native.py trajectory, target hand, pelvis stab, shoulder anchor on the FP
+# body, 30 fps x the technique's anim speed mult); numbers per rule in docs/animlab/STATUS.md "Native reference".
+#   U1 guard_y 0: native stance hands are below the eye (ma idle1 wrists y -3.8 / -8.5 dm) -> FP guard in the lower half
+#   U4 center x .30, y -.35..+.05: native strikes land at |x/z| <= .29, y/z -.28..-.09 (at / below the centre)
+#   U6 windup_rise 0.1: native wrist/fist is highest AT the strike, the wind-up never rises above it (rise 0.00, all)
+#   U10 wshare .45: native striking hands .04-.41 (palm strikes .40/.41, straight punches .04-.25)
+#   U11 twist 40: native fist roll per 33 ms on straight-wrist frames (wb <= 30) up to 37 (ma 2strike L)
+U = dict(near=3.0, eye_min=2.5, above_max=0.5, center=(0.30, 0.35), center_y=(-0.35, 0.05), guard_y=0.0, wb_max=30.0,
+         ret=0.5, move_dm=1.0, strike_min=1.5, rev=450.0, grip_px=250.0, win=0.4, wshare=0.45, twist=40.0, twist_dt=1 / 30.0,
+         twist_wb=30.0, windup_rise=0.1, strike_band=0.5)
 
 
 def read_pose(path):
@@ -251,7 +333,10 @@ def unarmed_checks(F, strikers=None, c=U, name=''):
     # U1 both fists on screen in the guard (start / end)
     gk = [k for k in range(len(F)) if u[k] <= .02 or u[k] >= .98]
     off = ['%s@%.2f' % (s, u[k]) for k in gk for s in sides if not (_onscr(F[k][s]['wr'], c['near'], .95) and _onscr(F[k][s]['pp'], c['near'], .95))]
-    res.append(('U1', 'FAIL' if off or not gk else 'PASS', 'guard: both fists on screen at u<=.02/>=.98 (%d frames)%s' % (len(gk), ' off=' + ','.join(off[:6]) if off else '')))
+    hi = ['%s@%.2f' % (s, u[k]) for k in gk for s in sides if max(F[k][s]['wr'][1], F[k][s]['pp'][1]) > c['guard_y']]
+    gy = max([max(F[k][s]['wr'][1], F[k][s]['pp'][1]) for k in gk for s in sides] or [0.0])
+    res.append(('U1', 'FAIL' if off or hi or not gk else 'PASS', 'guard: both fists on screen, below the eye line at u<=.02/>=.98 (%d frames, highest y %.2f dm <= %.1f)%s%s' % (
+        len(gk), gy, c['guard_y'], ' off=' + ','.join(off[:6]) if off else '', ' high=' + ','.join(hi[:6]) if hi else '')))
     # U2 returns to the guard
     dd = max(_ln(_sub(F[-1][s]['wr'], F[0][s]['wr'])) for s in sides)
     res.append(('U2', 'PASS' if dd <= c['ret'] else 'FAIL', 'return to guard: end wrist vs start %.2f dm (<= %.1f)' % (dd, c['ret'])))
@@ -266,8 +351,9 @@ def unarmed_checks(F, strikers=None, c=U, name=''):
         k = min(range(len(F)), key=lambda k: abs(F[k][s]['pp'][0] / max(F[k][s]['pp'][2], 1e-3)) + abs(F[k][s]['pp'][1] / max(F[k][s]['pp'][2], 1e-3)))
         pp = F[k][s]['pp']
         sx, sy = pp[0] / pp[2], pp[1] / pp[2]
-        okc = abs(sx) <= cx and abs(sy) <= cy and pp[2] > c['near']
-        res.append(('U4', 'PASS' if okc else 'FAIL', 'strike %s: fist nearest the centre x/z %.2f y/z %.2f @u%.2f (|x|<=%.2f |y|<=%.2f)' % (s, sx, sy, u[k], cx, cy)))
+        y0, y1 = c.get('center_y') or (-cy, cy)
+        okc = abs(sx) <= cx and y0 <= sy <= y1 and pp[2] > c['near']
+        res.append(('U4', 'PASS' if okc else 'FAIL', 'strike %s: fist nearest the centre x/z %.2f y/z %.2f @u%.2f (|x|<=%.2f, y %.2f..%.2f)' % (s, sx, sy, u[k], cx, y0, y1)))
     # U5 clear of the eye: forearm/fist >= eye_min from the eye, never above eye level + above_max
     emin, top, topat = 1e9, -1e9, ''
     for k, f in enumerate(F):
@@ -280,11 +366,23 @@ def unarmed_checks(F, strikers=None, c=U, name=''):
                     top, topat = p[1], '%s@%.2f' % (s, u[k])
     res.append(('U5', 'PASS' if emin >= c['eye_min'] and top <= c['above_max'] else 'FAIL',
                 'eye: forearm/fist min distance %.2f dm (>= %.1f), highest wrist/fist y %.2f dm @%s (<= %.1f)' % (emin, c['eye_min'], top, topat, c['above_max'])))
-    # U6 wind-up below eye level: before each striker's furthest reach the wrist/fist stays at or below the eye line
+    # U6 (native reference) wind-up not above the strike: strike frames = the first stretch with the wrist within strike_band
+    # dm of its furthest forward reach; the wrist/fist before it never rises more than windup_rise above the strike's
+    # highest point (native: highest AT the strike in every clip). Hands at the head stay U5's (eye level + above_max).
     for s in strikers:
-        kp = max(range(len(F)), key=lambda k: F[k][s]['wr'][2])
-        hi = max((max(F[k][s]['wr'][1], F[k][s]['pp'][1]), k) for k in range(kp + 1))
-        res.append(('U6', 'PASS' if hi[0] <= c['windup_y'] else 'FAIL', 'wind-up %s: highest wrist/fist y %.2f dm @u%.2f before the reach (u%.2f) (<= %.1f)' % (s, hi[0], u[hi[1]], u[kp], c['windup_y'])))
+        hk = lambda k: max(F[k][s]['wr'][1], F[k][s]['pp'][1])
+        zmax = max(f[s]['wr'][2] for f in F)
+        k0 = next(k for k in range(len(F)) if F[k][s]['wr'][2] >= zmax - c['strike_band'])
+        k1 = k0
+        while k1 + 1 < len(F) and F[k1 + 1][s]['wr'][2] >= zmax - c['strike_band']:
+            k1 += 1
+        sh = max(hk(k) for k in range(k0, k1 + 1))
+        if k0 == 0:
+            res.append(('U6', 'PASS', 'wind-up %s: none (strike from the first frame)' % s))
+            continue
+        wu = max((hk(k), k) for k in range(k0))
+        res.append(('U6', 'PASS' if wu[0] - sh <= c['windup_rise'] else 'FAIL', 'wind-up %s: highest wrist/fist y %.2f dm @u%.2f vs strike %.2f (u%.2f-%.2f): rise %.2f (<= %.1f)' % (
+            s, wu[0], u[wu[1]], sh, u[k0], u[k1], wu[0] - sh, c['windup_rise'])))
     # U7 near-plane cut
     cut = sorted(set('%s@%.2f' % (s, u[k]) for k, f in enumerate(F) for s in sides
                      for p in [_add(f[s]['el'], _mul(_sub(f[s]['wr'], f[s]['el']), v)) for v in (.5, .75, 1.0)] + [_add(f[s]['wr'], _mul(_sub(f[s]['pp'], f[s]['wr']), v)) for v in (.5, 1.0)]
@@ -334,11 +432,13 @@ def unarmed_checks(F, strikers=None, c=U, name=''):
                 j -= 1
             if j == k:
                 continue
+            if max(_ang(_sub(F[i][s]['wr'], F[i][s]['el']), F[i][s]['hx']) for i in (j, k)) > c['twist_wb']:
+                continue   # a bent wrist tilts the prop axis without a roll (U8 judges the bend)
             x0, x1 = _perp(F[j][s]['pu'], _sub(F[j][s]['wr'], F[j][s]['el'])), _perp(F[k][s]['pu'], _sub(F[k][s]['wr'], F[k][s]['el']))
             a = _ang(x0, x1)
             if a > tw[0]:
                 tw = (a, '%s@u%.2f' % (s, u[k]))
-    res.append(('U11', 'PASS' if tw[0] <= c['twist'] else 'FAIL', 'fist roll: max %.0f deg per 33 ms %s (<= %.0f)' % (tw[0], tw[1], c['twist'])))
+    res.append(('U11', 'PASS' if tw[0] <= c['twist'] else 'FAIL', 'fist roll: max %.1f deg per 33 ms %s (<= %.0f, straight-wrist frames)' % (tw[0], tw[1], c['twist'])))
     # U17 (Shay 2026-10-10): palm-heel techniques become straight-wrist punches (wrist <= 30 on every frame); the native palm
     # strike (bent-back wrist, palm forward) is not kept. A palm technique is recognised by its name (shotei / palm).
     if re.search(r'(?i)shotei|palm', name or ''):
@@ -475,7 +575,13 @@ def main():
     p = sp.add_parser('restedge'); p.add_argument('rec'); p.add_argument('--p05', type=float, default=REST_EDGE_P05)
     p = sp.add_parser('stilljit'); p.add_argument('rec'); p.add_argument('--states', default='aim'); p.add_argument('--max', type=float, default=STILL_JIT)
     p = sp.add_parser('wrist'); p.add_argument('rec'); p.add_argument('--hold', type=float, default=WB_HOLD); p.add_argument('--swing', type=float, default=WB_SWING)
+    p = sp.add_parser('blade'); p.add_argument('rec'); p.add_argument('--snap', type=float, default=NAT_SNAP)
+    p.add_argument('--seen', type=float, default=NAT_SEEN); p.add_argument('--run', type=float, default=NAT_RUN)
+    p.add_argument('--only-stroke', dest='only_stroke', type=int)
     a = ap.parse_args()
+    if getattr(a, 'only_stroke', None) is not None:
+        import metrics as M
+        M.STROKE_ONLY = a.only_stroke
     if a.cmd == 'map':
         return cmd_map(a)
     if a.cmd == 'run':
@@ -488,6 +594,8 @@ def main():
         ok, txt = stilljit(a.rec, tuple(a.states.split(',')), a.max)
     elif a.cmd == 'wrist':
         ok, txt = wrist(a.rec, a.hold, a.swing)
+    elif a.cmd == 'blade':
+        ok, txt = blade_rec(a.rec, a.snap, a.seen, a.run)
     else:
         ap.print_help()
         return 2
