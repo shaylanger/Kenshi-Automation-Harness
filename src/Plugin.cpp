@@ -240,6 +240,11 @@ void Tick(const char *source) {
 }
 
 void PollInbox(GameWorld *world) {
+  try {
+    SamplerTick(world); // before the 250 ms inbox gate: the sampler keeps its own <ms> interval
+  } catch (...) {
+    Log("KAH: exception in SamplerTick");
+  }
   DWORD now = GetTickCount();
   if (now - g_lastPoll < 250)
     return;

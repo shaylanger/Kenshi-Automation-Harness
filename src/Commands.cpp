@@ -759,7 +759,7 @@ const char *const kBuiltins[] = {
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
     "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "hit", "newgame", "import", "stealth", "crime",
-    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode", "dialog", "input_isolation", "key_inject", "mouse_inject", "chatter", "sync_flash"};
+    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode", "dialog", "input_isolation", "key_inject", "mouse_inject", "chatter", "sync_flash", "sampler"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | chatter off|on|status | "
@@ -785,7 +785,7 @@ const char *const kHelp =
     "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [+x|-x|+z|-z] [walk|run] | acceltime <npc> <dist> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt] [follow] | camfollow <npc> [on|off] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
-    "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | sync_flash [ms] [n] | fps [reset] | input_isolation on|off|status | key_inject <key> [down|up|tap] [ms] | mouse_inject <button> [down|up|click] [ms] | mouse_inject move <dx> <dy> | at <x> <y> | wheel <d> | "
+    "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | sync_flash [ms] [n] | sampler start <ms> <file> <query>... | sampler stop|status | fps [reset] | input_isolation on|off|status | key_inject <key> [down|up|tap] [ms] | mouse_inject <button> [down|up|click] [ms] | mouse_inject move <dx> <dy> | at <x> <y> | wheel <d> | "
     "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "
     "packweight <npc|building|ground> <pack> | craftfinish <npc> <item> [at <bench>]. "
     "<npc> = name (exact match nearest the player wins, else nearest substring), "
@@ -1406,6 +1406,116 @@ std::string SyncFlash(const std::vector<std::string> &f, bool &ok) {
   }
 }
 
+// ---- sampler: game-thread evidence sampler for video takes (take_sample.py, 2026-10-10) ------------------------
+// take_sample.py polled 5 queries through the inbox every 0.6 s from WSL; at WSL load 23-60 its reads came 1.0-1.7 s
+// apart while the game ran smoothly (op-blkK: vmrec dense, ev gaps), so takecheck's cover rule failed takes for the
+// sampler's lateness. Here the harness runs the queries itself on the game thread every <ms> and appends
+// `<epoch s>\t<query index>\t<reply>` lines to <HarnessDir>\<file>: a gap in the file is a real game stall.
+// sampler start <ms 50..5000> <file> <query>...   (one tab field per query, e.g. "fp_keys state", "where Axima")
+// sampler stop | status                           (status/stop reply epoch=<harness clock> for the client's offset)
+struct TakeSampler {
+  bool on;
+  DWORD everyMs, last;
+  std::string path;
+  std::vector<std::vector<std::string> > queries;
+  int ticks;
+  TakeSampler() : on(false), everyMs(300), last(0), ticks(0) {}
+};
+TakeSampler g_sampler;
+
+double EpochNow() {
+  FILETIME ft;
+  GetSystemTimeAsFileTime(&ft);
+  ULARGE_INTEGER u;
+  u.LowPart = ft.dwLowDateTime;
+  u.HighPart = ft.dwHighDateTime;
+  return (double)(u.QuadPart - 116444736000000000ULL) / 1e7;
+}
+
+std::string EpochStr(double t) {
+  char b[64];
+  sprintf_s(b, sizeof b, "%.3f", t);
+  return b;
+}
+
+void SamplerTick(GameWorld *world) {
+  if (!g_sampler.on)
+    return;
+  DWORD now = GetTickCount();
+  if (g_sampler.ticks > 0 && now - g_sampler.last < g_sampler.everyMs)
+    return;
+  g_sampler.last = now;
+  const std::string t = EpochStr(EpochNow());
+  std::string out;
+  for (size_t i = 0; i < g_sampler.queries.size(); ++i) {
+    std::vector<std::string> f;
+    f.push_back("smp");
+    for (size_t j = 0; j < g_sampler.queries[i].size(); ++j)
+      f.push_back(g_sampler.queries[i][j]);
+    bool ok = false, pending = false;
+    std::string r;
+    try {
+      r = RunCommand(world, f, ok, pending);
+    } catch (...) {
+      r = "exception";
+    }
+    if (pending)
+      r = "pending";
+    for (size_t k = 0; k < r.size(); ++k)
+      if (r[k] == '\n' || r[k] == '\r' || r[k] == '\t')
+        r[k] = ' ';
+    out += t + "\t" + Int((long long)i) + "\t" + r + "\n";
+  }
+  std::ofstream f(g_sampler.path.c_str(), std::ios::app | std::ios::binary);
+  f << out;
+  ++g_sampler.ticks;
+}
+
+std::string Sampler(const std::vector<std::string> &f, bool &ok) {
+  const std::string sub = f.size() > 2 ? Lower(f[2]) : "status";
+  if (sub == "stop" || sub == "status") {
+    if (sub == "stop")
+      g_sampler.on = false;
+    ok = true;
+    return std::string("sampler ") + (g_sampler.on ? "on" : "off") + " samples=" + Int(g_sampler.ticks) +
+           " epoch=" + EpochStr(EpochNow()) + " file=" + g_sampler.path;
+  }
+  if (sub != "start" || f.size() < 6)
+    return "usage: sampler start <ms 50..5000> <file> <query>... | sampler stop | sampler status";
+  int ms = atoi(f[3].c_str());
+  const std::string name = f[4];
+  if (ms < 50 || ms > 5000 || name.empty() || name.find_first_of("\\/:") != std::string::npos)
+    return "usage: sampler start <ms 50..5000> <file (plain name, in the harness folder)> <query>...";
+  g_sampler.queries.clear();
+  for (size_t i = 5; i < f.size(); ++i) {
+    std::vector<std::string> q;
+    std::string w;
+    for (size_t k = 0; k <= f[i].size(); ++k) {
+      if (k == f[i].size() || f[i][k] == ' ') {
+        if (!w.empty())
+          q.push_back(w);
+        w.clear();
+      } else {
+        w += f[i][k];
+      }
+    }
+    if (!q.empty()) {
+      if (Lower(q[0]) == "sampler")
+        return "sampler: a query may not be sampler";
+      g_sampler.queries.push_back(q); // SamplerTick prepends a dummy f[0]: RunCommand reads the command from f[1]
+    }
+  }
+  g_sampler.path = HarnessDir() + "\\" + name;
+  DeleteFileA(g_sampler.path.c_str());
+  g_sampler.everyMs = (DWORD)ms;
+  g_sampler.ticks = 0;
+  g_sampler.last = 0;
+  g_sampler.on = true;
+  ok = true;
+  return "sampler on ms=" + Int(ms) + " queries=" + Int((long long)g_sampler.queries.size()) + " epoch=" +
+         EpochStr(EpochNow()) + " file=" + g_sampler.path;
+}
+
 std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool &ok,
                        bool &pending) {
   ok = false;
@@ -1425,6 +1535,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
 
   if (cmd == "sync_flash") // sync_flash [ms] [n]: full-view magenta marker for video sync (any phase)
     return SyncFlash(f, ok);
+  if (cmd == "sampler") // sampler start <ms> <file> <query>... | stop | status (game-thread take sampler, any phase)
+    return Sampler(f, ok);
 
   if (cmd == "help") {
     ok = true;

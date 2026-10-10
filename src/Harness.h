@@ -33,6 +33,8 @@ std::string Int(long long v);
 // pending: a mod's handler answers later (KAH_Complete); write no reply now.
 std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool &ok,
                        bool &pending);
+// Game-thread take sampler (`sampler` command, Commands.cpp): runs its queries every <ms>; called from PollInbox.
+void SamplerTick(GameWorld *world);
 std::string Phase(GameWorld *world);
 // Notices the end of a pending load (call every tick while one is pending).
 bool LoadPending();
