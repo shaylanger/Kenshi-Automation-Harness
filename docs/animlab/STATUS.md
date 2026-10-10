@@ -90,7 +90,7 @@ g_ent_getvisible and the node setters; the current-source sword drive gate still
 Standing order (Shay via coordinator, 2026-10-09): every miss gets a lab check that FAILS on the recording that showed
 it (and passes on the fixed build where one exists), or a written reason it is out of reach. The FP fixer appends rows.
 Format: date | point | what the game showed | recording path | build | status
-- 2026-10-09 | C1 aim | aim pose did not play in background: the combat layer read only real keys, the viewmodel read harness input | none (input layer) | - | open: outside the solver; lab can assert every expected state appears and moves
+- 2026-10-09 | C1 aim | aim pose did not play in background: the combat layer read only real keys, the viewmodel read harness input | C:KenshiTestRuns14°.txt (pre-fix) | pass: vmq-125c crossbow-z0 (build Oct 9 19:32:36) | CLOSED (lab): `animlab.py metrics` moves line, regress step 14: f14/xb0 FAIL aim:MISSING (also f13/x3, xb0b), vmq-125c crossbow-z0 PASS aim 6.2dm/23deg (vmq-cbaf 19:15, vmq-f804 19:24 also PASS). The input-layer cause itself is outside the solver; the lab detects the missing state
 - 2026-10-09 | X1 crossbow jitter | game jitter p95 5-6 px vs replay ~0: bone-world map quantised at the floating origin (fixed in game by the node map, e948f86) | C:\KenshiTestRuns\vmq-f8c\vmrec-q-crossbow-z0.txt | 419D164F (6c9516b) | CLOSED (lab): `animlab.py compare` jitter line (game jit_p95 > 1 px at most 2.5x the replay, swings skipped), regress step 12: crossbow-z0 vs its 6c9516b replay FAIL (ready 1.74/0.42 x4.2, reload 2.73/0.41 x6.6); f14/xb0 (node map) vs the current solver PASS (ready x2.3, close to the limit; f13/sw0 without build stamp x2.5). The quantised-map mode (kfpvm_replay --abs-world: absolute float32 world, game magnitudes ~54100) does NOT reproduce it: float32 ulp ~0.004 units, far below a pixel; --bw-lag overshoots ready (7.3) -> the game mechanism is not modelled, only detected
 - 2026-10-09 | jitter under-reported | lab jitter generally below the game's | vmq-f8c recordings | 419D164F | CLOSED with X1: the compare jitter line flags any state where the game is noisier than the replay (detects, does not model)
 - 2026-10-09 | sword elbow branch drift | elbow switches branch on long replays/drives (e.g. drive @6c9516b sword-z0-a 83-232: elbow on the right branch, game low; no S2 re-seed + no elbow warm start in the drive) | C:\KenshiTestRuns\vmq-f8c\vmrec-q-sword-z0-a.txt | 419D164F (6c9516b) | partly: branch history dependence reproduced by check regress step 10 (cold drive @6c9516b elbow95 5.16 vs seeded 0.05); drift over long replays itself still open
@@ -115,7 +115,7 @@ Format: date | point | what the game showed | recording path | build | status
 1. Standing lab maintainer (#7 since 2026-10-09; #6 handoff copied here): work through "Misses" (a failing check per miss
    or a reason), one line to main per closed miss. Done: E1, X1, jitter under-report, C3 check (no pass case yet).
    Left, in order:
-   a. C1: `moves FAIL aim:MISSING` on f13/x3, f14/xb0, xb0b predate the C1 fix (fp_combat input path): pass case = a
+   a. (DONE) C1: `moves FAIL aim:MISSING` on f13/x3, f14/xb0, xb0b predate the C1 fix (fp_combat input path): pass case = a
       post-fix crossbow recording (newest vmq-* / f16); add a regress pair (fail old, pass new) and close.
    b. C3: PASS case once the fixer records a fixed build; meanwhile try a lab-side bolt-pin variant (send it to the fixer
       as pending-fixes/kfp-c3-*.py if one passes `animlab.py bolt`).
