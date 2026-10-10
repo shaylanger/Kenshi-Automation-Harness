@@ -217,6 +217,26 @@ def arc_gate(table, spec, wb_lim=ARC_WB):
     return ok, txt
 
 
+
+JIT_MIN, JIT_RATIO = 1.0, 2.5   # X1 jitter faithfulness: game jit_p95 (px) above JIT_MIN may be at most JIT_RATIO x the replay's
+
+
+def jitter_faithful(game, replay, skip_states=('off', 'draw', 'lower', 'native', 'settle', 'swing')):
+    """X1 check (game vs replay of the same recording): tip jitter the solver does not produce comes from outside it
+    (e.g. the pre-e948f86 bone-world map). Per state with >= 10 frames and game jit_p95 > JIT_MIN: game/replay <= JIT_RATIO.
+    Swings are skipped (fast motion: jit is dominated by the frame timing, not by noise). Returns (ok, [text])."""
+    ok, txt = True, []
+    for s, g in game.items():
+        r = replay.get(s)
+        if s in skip_states or not r or g.get('n', 0) < 10 or not g['jit_p95'] == g['jit_p95'] or g['jit_p95'] <= JIT_MIN:
+            continue
+        q = g['jit_p95'] / max(r['jit_p95'], 0.1) if r['jit_p95'] == r['jit_p95'] else float('inf')
+        good = q <= JIT_RATIO
+        ok = ok and good
+        txt.append('%s:%.2f/%.2f=x%.1f%s' % (s, g['jit_p95'], r['jit_p95'], q, '' if good else ':BAD'))
+    return ok, txt
+
+
 METRIC_COLS = ('n', 'wb_p95', 'wb_max', 'elb_h_max', 'elb_h_mean', 'st_max', 'edge_mean', 'edge_max', 'jit_p95', 'step_p95',
                'move_dm', 'move_deg', "arc_ok", "arc_p05")
 

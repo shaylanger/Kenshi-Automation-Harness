@@ -136,6 +136,13 @@ class T(unittest.TestCase):
         self.assertFalse(M.arc_gate({'swing': dict(good, wb_max=107.0)}, {'swing': 0.85})[0])   # lead by wrist fold
         self.assertEqual(M.arc_gate({}, {'swing': 0.85}), (False, ['swing:NO_FAST_FRAMES']))
 
+    def test_jitter_faithful(self):   # X1: game jitter the replay does not show = noise from outside the solver
+        g = {'ready': dict(n=50, jit_p95=1.74), 'reload': dict(n=50, jit_p95=0.8), 'swing': dict(n=50, jit_p95=60.0)}
+        r = {'ready': dict(n=50, jit_p95=0.42), 'reload': dict(n=50, jit_p95=0.1), 'swing': dict(n=50, jit_p95=10.0)}
+        ok, txt = M.jitter_faithful(g, r)
+        self.assertFalse(ok); self.assertEqual(len(txt), 1); self.assertTrue(txt[0].startswith('ready:') and txt[0].endswith(':BAD'))
+        self.assertTrue(M.jitter_faithful(g, dict(r, ready=dict(n=50, jit_p95=1.0)))[0])   # reload below 1 px, swing skipped
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)

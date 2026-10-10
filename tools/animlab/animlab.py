@@ -167,6 +167,9 @@ def compare(real, sim, skip=0, tol=None, quiet=False):
 def cmd_compare(a):
     fails, n = compare(a.real, a.sim, a.skip)
     print('GATE %s frames=%d %s' % ('PASS' if not fails else 'FAIL', n, '; '.join(fails[:8])))
+    ok, txt = M.jitter_faithful(M.state_table(M.frame_metrics(recfmt.parse(a.real)), a.skip),
+                                M.state_table(M.frame_metrics(recfmt.parse(a.sim)), a.skip))
+    print('jitter %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt) or 'no state above %.1f px' % M.JIT_MIN))
 
 
 def adapter_args(a):
