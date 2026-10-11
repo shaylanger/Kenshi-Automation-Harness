@@ -324,6 +324,35 @@ new recording; `run.sh unarmed <candidate dir>` runs the unarmed spec on fist ca
 | U17 palm-heel techniques become straight-wrist punches (wrist <= 30 deg); native palm strikes are not kept | unarmed | Shay 2026-10-10 (via coordinator) | shay | spec:U17 | covered: spec.py unarmed: candidates named shotei*/palm* get U17 (wb_max <= 30 every frame) |
 # rules=39 covered=29 dropped=1 missing=2 out-of-reach=3 partial=4
 
+### PROPOSED from open mocap reference (anim-reference, 2026-10-11; for the animlab-spec owner, NOT in rules.tsv)
+Source: `components/KenshiFP/animlab/reference/` (`compare.py` on the compiled tables 4f49590b, drive adapter built from
+/root/KenshiFP c4ee493; results `reference/out-defaults/REFERENCE.md`). Reference = CMU mocap (free for all uses) + Bandai Namco
+Research Motiondataset-1 (CC BY-NC 4.0), torso-stabilised, shoulder-anchored, scaled to the FP arm (`mocapref.py`). Human numbers
+are p10..p90; "ours" = the four sword strokes / fist techniques solved through the drive (no target smoothing: game values can be
+lower). Performers mime (no real sword), so treat as owner `inferred` until Shay/coord confirm; each line = one proposed rule.
+
+| proposed rule | class | reference (human) | ours (defaults) | proposed check id | note |
+|---|---|---|---|---|---|
+| PR1 forearm roll (pronation, hand vs forearm frame, swing-twist) <= 45 deg per 33 ms on solver frames | sword | casual swordplay 3-9; explosive pronation in sport biomechanics ~35-50 | 65-115, spikes at the wind-up top (u .28) and early stroke | `ref.roll33` (mocapref.roll_rate on a rec) | PROPOSED; first run on a game recording (smoothing) before gating; complements R3/R17 |
+| PR2 the wrist adds little: wrist share of the hand point (fixed 0.15-arm lever, U10 formula) <= 0.25 in the stroke | sword | 0.05-0.11 (sword mime), fists 0.04-0.13 | 0.40-0.62 | `ref.wshare` | PROPOSED; puts a number on R2 "shoulder/elbow drive, wrist little" |
+| PR3 wrist bend added during the stroke <= 20 deg over the ready bend | sword | -1..15 | 7-26 (strokes 1, 2: 25, 26) | `ref.wbdelta` | PROPOSED; complements R8 (absolute limits) |
+| PR4 the elbow opens through the strike (end >= 100 deg) and the wrist path is >= 1 arm length | sword | elbow end 123-179, path 1.7-3.6 arm | elbow end 69-93, path 0.7-1.2 | - | QUESTION for Shay: R22 (framing) may forbid it; the FP arm stays bent and the arcs are short |
+| PR5 two-handed swings keep their own timing: wind-up >= 40% of the swing, chop (top -> end) 0.15-0.4 s, peak 9-15 arm/s | twohand | axe chop: wind-up share 0.43-0.68, stroke 0.16-0.37 s | 1H key times reused (wind-up .28) | `ref.2htime` | PROPOSED for the 2H family (CMU 79_01, 80_71) |
+| PR6 two-hand spacing at the strike 0.5-3.8 dm (median 0.9: the hands slide together on the handle) | twohand | top 0.9-3.8, strike 0.5-2.9 dm | R25 heavy 0.5-3.5 | (R25 twosp) | SUPPORTS R25; no new check |
+| PR7 straight-punch wrist share <= 0.25 (U10 is 0.45 incl. palm strikes) | unarmed | 0.04-0.13 | 0.21 | (spec:U10 limit) | PROPOSED tightening for non-palm techniques (U17 makes every technique a straight-wrist punch) |
+| PR8 guard elbow <= 130 deg (a guard is a bent arm) | unarmed | elbow at the guard 36-113 | 145; guard 4.2 dm deep (human 0.3-2.3) | - | QUESTION: U1 (on screen) pushes the guard out; only if Shay wants a bent-arm guard |
+| PR9 kick camera: head drop <= 1 dm, head back <= 5 dm, kick 0.4-1.5 s; arms travel 4-11 dm with the body | unarmed | drop 0.3-1.0, back 0.05-5.0 dm, total 0.37-1.46 s, wrists 4.2-10.8 dm | no FP kick yet | `spec:U14` limits | SUPPORTS U14 (native 6.4-9.5 dm); gives the missing kick-candidate limits |
+| PR10 dual-wield alternation: next stroke may start during the other's recovery (overlap <= 0.2 s), interval 0.25-1.0 s | dualwield | boxing alternation 0.11-1.02 s (median 0.28), overlap 0-0.19 s | motions/dualwield-alternate.json 0.85 s, no overlap | `ref.alt` | PROPOSED for the dual-wield brief (proxy: boxing, no dual-sword data) |
+| PR11 crossbow aim: trigger wrist >= 0.35 arm from the eye; rear elbow 34-53 deg | crossbow | rifle aim: wrist-head 0.42-0.53 arm, rear elbow 34-53 | r_aim 0.25 arm, elbow 38 | - | INFO: a crossbow stock sits at the cheek, the rifle numbers are an upper bound |
+
+Taste-set notes (reference vs Shay's rules): R2 / U10 / R25 / U14 are SUPPORTED by human motion (PR2, PR7, PR6, PR9). R8's 30-deg
+hold limit is stricter than a human sword grip (mime wrist bend 36-65 at the start): it is Shay's look, not anatomy; keep it.
+The largest human-vs-ours gaps (elbow bent through the stroke, short arcs, no torso turn: human torso share 0.12-0.48, chest
+yaw 37-99 deg per stroke) follow from the fixed FP camera + R22 (no framing change): do not gate them without Shay (PR4, PR8).
+Live-tables naming bug found on the way: `kfp_tables.inc` names row 0 of `fist_guard` / `fist_<tech>` 'L' (KT_RLR / KT_RLRN), but the
+C arrays hold the RIGHT hand first (kfp_viewmodel.inc `g_vm_fist_guard` comment `/* R */`, native.py writes R, L): `fist_guard.L`
+edits the right fist (owner: live-tables / kfp-fixer).
+
 ## Unarmed spec (NA1, before the fists are built)
 `spec.py unarmed` on metricslab/native.py fist candidates (dir with <technique>/pose.txt; `_*` helper dirs skipped): U1 guard view,
 U2 return to guard, U3 moves, U4 strike to centre, U5 eye clear, U6 wind-up not above the strike, U7 near-plane cut, U8 wrist <= 30, U9 churn,
