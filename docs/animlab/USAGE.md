@@ -175,7 +175,9 @@ swing (2E66 33.67 s; a stamp/vmrec view source covers it); occluder flags a full
   `LABNICE_REC_SLOTS` (default 12) while a 5090 take records: new jobs then take only slots 1..12 and lab-recpause
   SIGSTOPs only job trees holding a slot above 12 (`/tmp/labnice/held.<pid>`), SIGCONT when the recording ends.
   Cache-miss adapter runs outside labnice take one slot of the same pool. `LABNICE_REC_SLOTS=0` = pause everything
-  while recording. `lab-recpause.sh --status|--which`, `labnice.sh --status`.
+  while recording. A job asking for more than 12 while recording starts at once with 12; jobs without a held file are
+  never paused; stale recording flags (marker or ffmpeg gdigrab older than 30 min) are ignored. `lab-recpause.sh
+  --status|--which`, `labnice.sh --status`, selftest `tools/automation/labnice-selftest.sh` (private LAB_D).
 - weapon_matrix temp dirs (`/tmp/animlab-wm-replay*`) are removed at exit.
 
 ## Metrics (per state)
