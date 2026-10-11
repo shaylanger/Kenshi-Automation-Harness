@@ -333,6 +333,37 @@ Item *FindInventoryItem(Character *c, const std::string &wanted, bool &ambiguous
   return ambiguous ? nullptr : partial;
 }
 
+// A worn (equipped) item with the same name or string id as `like` (FindInventoryItem returns the first
+// match in section order, which can be an unequipped copy); nullptr if none.
+Item *FindWornNamedLike(Character *c, Item *like) {
+  Inventory *inv = Valid(c) ? c->getInventory() : nullptr;
+  if (!Valid(inv) || !Valid(like))
+    return nullptr;
+  std::string name, dataId;
+  try {
+    name = Lower(like->getName());
+    if (like->data) dataId = Lower(like->data->stringID);
+  } catch (...) { return nullptr; }
+  lektor<InventorySection *> &sections = inv->getAllSections();
+  for (uint32_t si = 0; si < sections.size(); ++si) {
+    InventorySection *section = sections.stuff[si];
+    if (!Valid(section))
+      continue;
+    const Ogre::vector<InventorySection::SectionItem>::type &items = section->getItems();
+    for (size_t i = 0; i < items.size(); ++i) {
+      Item *item = items[i].item;
+      if (!Valid(item) || item == like || !item->isEquipped)
+        continue;
+      try {
+        if (Lower(item->getName()) == name || (!dataId.empty() && item->data && Lower(item->data->stringID) == dataId))
+          return item;
+      } catch (...) {
+      }
+    }
+  }
+  return nullptr;
+}
+
 std::string DescribeItem(Item *item) {
   if (!Valid(item))
     return "invalid item";
@@ -3228,6 +3259,14 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
       // (the game runs its unequip callbacks) and put it in the main
       // inventory; if there's no room there it is dropped next to the
       // character.
+      // xbf-hit5 (KenshiFP R09): `unequip Malzin <his crossbow>` left him armed: the name lookup returns the first
+      // match in section order, so a same-named unequipped copy (main inventory) hid the worn one. Prefer a worn
+      // item with the same name / string id.
+      if (!item->isEquipped) {
+        Item *worn = FindWornNamedLike(c, item);
+        if (Valid(worn))
+          item = worn;
+      }
       if (!item->isEquipped)
         return "not equipped: " + DescribeItem(item);
       Inventory *inv = c->getInventory();
