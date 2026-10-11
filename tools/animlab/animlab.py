@@ -437,12 +437,18 @@ def cmd_agree(a):
         t = shlex.split(line)
         rec = t[0] if os.path.isabs(t[0]) else os.path.join(base, t[0])
         jobs.append((rec, t[1], t[2:]))
+    # the same rec on several rows (e.g. plain + --tables) gets its own name + replay file: one shared keep/<name>.replay.txt
+    # was written by two parallel replays at once (agree crashed in labcache restore / compared the other row's replay)
+    seen = {}
+    for i, (rec, ad, args) in enumerate(jobs):
+        nm = os.path.splitext(os.path.basename(rec))[0]
+        seen[nm] = seen.get(nm, 0) + 1
+        jobs[i] = (rec, ad, args, nm if seen[nm] == 1 else '%s#%d' % (nm, seen[nm]))
     keep = a.keep or tmpdir('animlab-agree-')
     os.makedirs(keep, exist_ok=True)
 
     def one(j):
-        rec, ad, args = j
-        name = os.path.splitext(os.path.basename(rec))[0]
+        rec, ad, args, name = j
         if not os.path.exists(rec) or not os.path.exists(shlex.split(ad)[0]):
             return name, None, 'missing %s' % (rec if not os.path.exists(rec) else ad)
         out = os.path.join(keep, name + '.replay.txt')

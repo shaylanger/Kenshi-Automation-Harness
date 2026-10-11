@@ -28,7 +28,7 @@ CLI (shell callers, e.g. regress.sh):
            is left out of the key, --in must then name every input, e.g. build.sh's compile-input manifest)
   labcache.py stats | prune | clear | key <file>
 """
-import contextlib, hashlib, io, json, os, shlex, shutil, subprocess, sys, tempfile, time
+import contextlib, hashlib, io, json, os, shlex, shutil, subprocess, sys, tempfile, threading, time
 try:
     import fcntl
 except ImportError:  # Windows Python (4080 rig shim): no flock; one analysis per take there, locks are best effort
@@ -160,7 +160,8 @@ def _restore(meta, outputs):
         if os.path.isfile(src):
             if os.path.dirname(tgt):
                 os.makedirs(os.path.dirname(tgt), exist_ok=True)
-            tmp = tgt + '.lc%d' % os.getpid()
+            # pid + thread: parallel agree/pool workers restoring the same target in one process raced on one tmp name
+            tmp = tgt + '.lc%d-%d' % (os.getpid(), threading.get_ident())
             shutil.copyfile(src, tmp); shutil.copymode(src, tmp)
             os.replace(tmp, tgt)
 
