@@ -508,6 +508,12 @@ def inline_table(S):
     wrist, blade forward from the grip); wr = wrist share of the tip motion: sum |tip - where it would be if the blade had
     stayed rigid with the forearm (minimal rotation, so forearm twist counts as wrist)| / sum |tip step|, over consecutive
     frames of the same phase. ~0 = the arm carries the blade, ~1 = the wrist turns it."""
+    return inline_from_raw(inline_raw(S))
+
+
+def inline_raw(S):
+    """inline_table's per-phase samples {phase: [fb list, sc list, wrist path, tip path]}: mergeable over swings/recordings
+    (pool inline: a take's pooled median = inline_from_raw of the merged samples of its swings)."""
     A, C, W = {}, {}, {}
     for k, s in enumerate(S):
         if not s:
@@ -522,9 +528,22 @@ def inline_table(S):
             fa0 = nz(sub(a['wr'], a['el']))
             rig = add(s['wr'], _rot_min(fa0, fa, sub(a['tip'], a['wr'])))
             w = W.setdefault(s['ph'], [0.0, 0.0]); w[0] += ln(sub(s['tip'], rig)); w[1] += ln(sub(s['tip'], a['tip']))
+    return dict((ph, [xs, C.get(ph, []), W.get(ph, [0.0, 0.0])[0], W.get(ph, [0.0, 0.0])[1]]) for ph, xs in A.items())
+
+
+def inline_merge(raws):
+    """merge inline_raw dicts (several swings) into one."""
     out = {}
-    for ph, xs in A.items():
-        xs = sorted(xs); cs = sorted(C.get(ph, [])); w = W.get(ph)
+    for R in raws:
+        for ph, (a, c, w0, w1) in R.items():
+            m = out.setdefault(ph, [[], [], 0.0, 0.0]); m[0] += a; m[1] += c; m[2] += w0; m[3] += w1
+    return out
+
+
+def inline_from_raw(R):
+    out = {}
+    for ph, (xs, cs, w0, w1) in R.items():
+        xs = sorted(xs); cs = sorted(cs); w = (w0, w1) if w1 > 0 else None
         out[ph] = dict(n=len(xs), fb_med=xs[len(xs) // 2], fb_max=xs[-1], sc_med=cs[len(cs) // 2] if cs else float('nan'),
                        sc_max=cs[-1] if cs else float('nan'), wr=w[0] / w[1] if w and w[1] > 1e-6 else float('nan'))
     return out
@@ -1229,13 +1248,16 @@ def zoomband_check(S, max_frames=0, lag=None):
 POOL_RATE, POOL_TAKE, POOL_MIN_ARC_N = 0.95, 2, 6   # min predicted take pass rate, swings per take, arc frames of a full swing
 
 
-def swing_verdicts(F, P, overhead=()):
+def swing_verdicts(F, P, overhead=(), inline=False):
     """per swing of a recording: arc counts, wrist bend, blade + stroke checks judged on that swing alone; churn = the
     swing's wind-up roll (<= ROLL_MAX) and stroke-start roll (<= SROLL_MAX, step <= SROLL_STEP; R3, gated like the
     scripted-stroke check_suite: Misses 2026-10-10 "pool does not run every gated per-stroke rule", e6r5 s1 51 deg passed
-    the pool). The arm-churn reversal (rev) is not per swing and stays in the recording checks."""
+    the pool). The arm-churn reversal (rev) is not per swing and stays in the recording checks.
+    inline=True: also the take judge's E1 inline per swing (ok['inline'] = inline_each's per-swing limits, 'inl' = the
+    swing's inline_raw samples for pool_predict's pooled take median; Misses 2026-10-11 "E6 stroke 3 wind-up inline")."""
     out = []
     _, _, cd = churn_check(churn_series(F, P), sroll_gate=True)
+    S = inline_series(F, P) if inline else None
     for k, idx in enumerate(swings(F, P)):
         keep = set(idx)
         rl = [r for r in cd['rolls'] if r[1] in keep]; sr = [r for r in cd['srolls'] if r[2] in keep]
@@ -1251,13 +1273,18 @@ def swing_verdicts(F, P, overhead=()):
         out.append(dict(k=k, frame=idx[0], stroke=F[idx[0]].get('stroke'), arc_good=sum(1 for x in ar if x >= 0.7), arc_n=len(ar),
                         wb_max=max(wb) if wb else 0.0, ok=dict(blade=bok, stroke=sok, churn=cok), btxt=btxt, stxt=stxt, ctxt=ctxt,
                         full=us[0] <= 0.1 and us[-1] >= 0.9 and len(ar) >= POOL_MIN_ARC_N))
+        if inline:
+            raw = inline_raw([S[i] if i in keep else None for i in range(len(S))])
+            iok, itxt = inline_check(inline_from_raw(raw), fb_med=INL_FB_MED + INL_EACH_SLACK)
+            out[-1]['ok']['inline'] = iok; out[-1]['inl'] = raw; out[-1]['itxt'] = itxt
     return out
 
 
 def pool_predict(V, checks=('arc', 'blade', 'stroke', 'churn'), take=POOL_TAKE, rate=POOL_RATE, share=0.85, wb_lim=None):
     """V = swing_verdicts rows (+ 'rec'). A take of `take` swings draws native variants at random: predicted take pass rate =
     share of all `take`-combinations of full pool swings that pass (arc pooled over the take like the game's arc gate,
-    blade/stroke = every swing passes). PASS when every check's rate >= `rate`."""
+    blade/stroke = every swing passes; inline = the take judge's _both: the take's pooled samples within the inline limits
+    and every swing within inline_each's). PASS when every check's rate >= `rate`."""
     import itertools
     wb_lim = ARC_WB if wb_lim is None else wb_lim
     full = [v for v in V if v['full']]
@@ -1270,6 +1297,8 @@ def pool_predict(V, checks=('arc', 'blade', 'stroke', 'churn'), take=POOL_TAKE, 
     def comb(cs, c):
         if c == 'arc':
             return sum(v['arc_good'] for v in cs) >= share * sum(v['arc_n'] for v in cs) and max(v['wb_max'] for v in cs) <= wb_lim
+        if c == 'inline':
+            return all(one(v, c) for v in cs) and inline_check(inline_from_raw(inline_merge(v['inl'] for v in cs)))[0]
         return all(one(v, c) for v in cs)
     combos = list(itertools.combinations(full, take))
     ok, txt = True, ['swings=%d full=%d recs=%d takes=%d' % (len(V), len(full), len({v.get('rec') for v in full}), len(combos))]

@@ -390,14 +390,15 @@ def cmd_pool(a):
     V = []
     for rec, out in res:
         r = recfmt.parse(out)
-        for v in M.swing_verdicts(r.frames, M.frame_metrics(r), oh):
+        for v in M.swing_verdicts(r.frames, M.frame_metrics(r), oh, inline='inline' in a.checks.split(',')):
             v['rec'] = os.path.splitext(os.path.basename(rec))[0]
             if v['stroke'] in (None, -1, a.stroke):
                 V.append(v)
     if a.verbose:
         for v in V:
             print('  %s@%d full=%d arc=%d/%d wb=%.1f blade=%d stroke=%d churn=%d(%s) %s' % (v['rec'], v['frame'], v['full'], v['arc_good'], v['arc_n'],
-                  v['wb_max'], v['ok']['blade'], v['ok']['stroke'], v['ok']['churn'], v['ctxt'], ' '.join(v['btxt'])))
+                  v['wb_max'], v['ok']['blade'], v['ok']['stroke'], v['ok']['churn'], v['ctxt'], ' '.join(v['btxt'])) +
+                  (' inline=%d %s' % (v['ok']['inline'], ' '.join(v['itxt'][1:3])) if 'inline' in v['ok'] else ''))
     ok, txt = M.pool_predict(V, tuple(c for c in a.checks.split(',') if c), a.take, a.rate)
     print('pool stroke %d %s %s (%s)' % (a.stroke, 'PASS' if ok else 'FAIL', ' '.join(txt), kept(a, keep)))
     return 0 if ok else 1
@@ -592,7 +593,8 @@ def main():
     p.add_argument('--replay', action='store_true', help='block: replay the recordings (default: judge them as recorded)')
     p.add_argument('--stroke-args', default='--no-rec-sets --set stroke={stroke}', help='adapter args forcing the stroke (KenshiFP kfpvm_replay default)')
     p.add_argument('--args', help='extra adapter args'); p.add_argument('--overhead', help='overhead stroke ids (stroke check)')
-    p.add_argument('--checks', default='arc,blade,stroke,churn'); p.add_argument('--take', type=int, default=M.POOL_TAKE)
+    p.add_argument('--checks', default='arc,blade,stroke,churn', help='arc,blade,stroke,churn,inline (inline = the take judge\'s E1 inline: pooled + per swing)')
+    p.add_argument('--take', type=int, default=M.POOL_TAKE)
     p.add_argument('--rate', type=float, default=M.POOL_RATE, help='min predicted take pass rate')
     p.add_argument('-j', type=int, default=int(os.environ.get('LABNICE_J') or min(16, os.cpu_count() or 4))); p.add_argument('--keep'); p.add_argument('-v', dest='verbose', action='store_true')
     p = sp.add_parser('agree'); p.add_argument('manifest', help='lines `<game rec> <adapter of its build> [adapter args]`')
