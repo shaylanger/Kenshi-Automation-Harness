@@ -68,6 +68,11 @@ typedef void *(*KAH_FindCharacterFn)(const char *ref, char *error, int errorSize
  * (key_inject / mouse_inject; GetAsyncKeyState and DirectInput already return
  * it). A mod that gates input on window focus should treat 1 as focused. */
 typedef int (*KAH_InputIsolatedFn)(void);
+/* Frame stamp (harness `stamp on`, 2026-10-10): stampOn() = 1 while the per-frame video sync code is drawn;
+ * stampSet(lo, hi16) sets the mod payload it carries (call it every frame right after your view is posed, game
+ * thread: the frame being rendered then shows exactly this payload). Cheap no-ops while the stamp is off. */
+typedef int (*KAH_StampOnFn)(void);
+typedef void (*KAH_StampSetFn)(unsigned lo, unsigned hi16);
 
 typedef struct KAH_Api {
   int version;
@@ -82,6 +87,9 @@ typedef struct KAH_Api {
   KAH_FindCharacterFn findCharacter;
   /* Optional: NULL with a harness older than 2026-10-07 (check before use). */
   KAH_InputIsolatedFn inputIsolated;
+  /* Optional: NULL with a harness older than 2026-10-10 (check before use). */
+  KAH_StampOnFn stampOn;
+  KAH_StampSetFn stampSet;
 } KAH_Api;
 
 /* Fills *api and returns 1 when the harness is loaded, else returns 0. */
@@ -105,6 +113,8 @@ static int KAH_Connect(KAH_Api *api) {
   api->complete = (KAH_CompleteFn)GetProcAddress(dll, "KAH_Complete");
   api->findCharacter = (KAH_FindCharacterFn)GetProcAddress(dll, "KAH_FindCharacter");
   api->inputIsolated = (KAH_InputIsolatedFn)GetProcAddress(dll, "KAH_InputIsolated");
+  api->stampOn = (KAH_StampOnFn)GetProcAddress(dll, "KAH_StampOn");
+  api->stampSet = (KAH_StampSetFn)GetProcAddress(dll, "KAH_StampSet");
   return api->registerCommand && api->registerBeforeAttack && api->log && api->complete ? 1
                                                                                          : 0;
 }

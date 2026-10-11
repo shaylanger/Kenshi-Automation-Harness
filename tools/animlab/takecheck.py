@@ -29,6 +29,11 @@ Sync (T6 label lag): when the evidence has `sync=<n>` lines (take-sample.sh take
 video's sync flashes (frames.py syncmarks) are paired with them: every label needs its flash and no flash may reach the
 screen more than `synclag` (default 0.15 s) earlier/later than the take's T0 flash; `set sync 1` makes take_mark
 mandatory; `--synced-out F` writes the labels at their measured video times (burn-in); `--no-sync` skips it.
+Frame stamp (harness `stamp on`, stamp.py; `--stamp auto|on|off`, default auto = when the video has one): every video
+frame carries its game frame, FP state and the last label mark. Then labels sit at the frame their mark first shows, the
+stamp keys (ui_state hud_text loaded stroke view zoomb wcls vm gf mark) replace the sampled ones (one sample per video
+frame), the rest of the evidence moves by the measured T0 (mark 0), everything is judged on the video clock and the
+sync line becomes `sync PASS|FAIL stamp frames=.. dup=.. skip_max=.. marks=k/n t0=..` (FAIL = a label mark never shown).
 
 KenshiFP log (`--kfplog LOG [--log-t0 HH:MM:SS.ms]`): every free block / free swing in the take must have run its native
 animation (`... end: ... live=1`); a press whose progress never went live (fb_lives 0, p 1.010) fails `animlive`.
@@ -339,7 +344,11 @@ def check(L, S, R, cfg, vlen=None, rec=None):
 
 
 def sync_grade(stxt):
-    """'warn' | 'hid' for a failed sync check text: no flash paired at all, or a lag beyond SYNC_HIDE, hides states."""
+    """'warn' | 'hid' for a failed sync check text: no flash paired at all, or a lag beyond SYNC_HIDE, hides states.
+    Frame stamp: a label whose mark never showed keeps an estimated time (warn); no mark shown at all = hid."""
+    m = re.search(r'^stamp .* marks=(\d+)/', stxt)
+    if m:
+        return 'warn' if int(m.group(1)) > 0 else 'hid'
     m = re.search(r'paired=(\d+)', stxt)
     if not m or int(m.group(1)) == 0:
         return 'hid'
@@ -413,6 +422,8 @@ def main():
     ap.add_argument('--synced-out', help='write the labels at their measured video times (sync flashes) here, for the burn-in')
     ap.add_argument('--kfplog', help='KenshiFP.log of the take: every free block / free swing must have run its native animation (live=1)')
     ap.add_argument('--log-t0', help='wall clock HH:MM:SS[.ms] of take t=0 in the log (default: judge the whole log)')
+    ap.add_argument('--stamp', choices=('auto', 'on', 'off'), default='auto',
+                    help='frame stamp (harness `stamp on`): auto = use it when the video has one, on = required, off = ignore')
     a = ap.parse_args()
     L = read_labels(a.labels); S = read_ev(a.ev); R, cfg = read_rules(a.rules)
     for x in a.set:
@@ -421,7 +432,26 @@ def main():
     if a.video and vlen is None:
         print('video FAIL cannot read the length of %s' % a.video); return 1
     sync_res, t0off = None, None
-    if a.video and not a.no_sync:   # T6 label lag: every label's sync flash within synclag of the T0 offset
+    # Frame stamp (frame-stamp, 2026-10-10): the video carries the game frame + FP state + label mark in every frame
+    # (stamp.py). Labels move to the frame their mark shows, the stamp keys (ui_state, hud_text, loaded, stroke, ...)
+    # replace the sampled ones (one sample per video frame: a gap is a real capture/game gap), the other evidence is
+    # shifted by the measured T0 (mark 0), so everything is judged on the video clock (offset 0) and the flash sync
+    # check is replaced by the mark check (every label's mark shown).
+    stamp = None
+    if a.video and a.stamp != 'off':
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import stamp as stampmod
+        stamp = stampmod.take_inputs(a.video, L)
+        if stamp is None and a.stamp == 'on':
+            print('stamp FAIL no frame stamp in %s' % a.video)
+            print('RESULT %s FAIL stamp' % a.name)
+            return 1
+    if stamp is not None:
+        L = sorted(stamp['labels'], key=lambda x: x[0]); S = stamp['merge'](S); t0off = 0.0
+        sok = not stamp['missing']
+        sync_res = (sok, stamp['text'] + ('' if sok else ':BAD'), L)
+    elif a.video and not a.no_sync:   # T6 label lag: every label's sync flash within synclag of the T0 offset
         import os
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import frames
@@ -436,7 +466,7 @@ def main():
     end = next((t for t, x in L if x.lower() == 'end'), None)
     pre = []
     if a.video and t0off is not None:
-        pre.append('end-offset T0 at video %.2f s (sync flash 0)' % t0off)
+        pre.append('end-offset T0 at video %.2f s (%s)' % (t0off, 'frame stamp: all times on the video clock' if stamp else 'sync flash 0'))
     if (a.video and cfg.get('trim', 0) and 'corpus' not in a.video.replace('\\', '/').lower().split('/') and t0off is not None and end is not None and vlen is not None
             and vlen - (end + t0off) > cfg['endslack']):
         cut = end + t0off + 0.3

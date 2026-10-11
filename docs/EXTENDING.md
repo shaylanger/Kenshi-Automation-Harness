@@ -96,6 +96,12 @@ runs then keep the game in the background and feed it injected input
 and DirectInput keyboard/mouse reads already return that injected input in-process.
 NULL with a harness older than 2026-10-07.
 
+Video takes can carry your state frame by frame: while a test has `stamp on`, `api.stampOn()`
+returns 1 and `api.stampSet(lo, hi16)` sets the 48-bit payload the harness burns into every
+rendered frame (top-left code with the frame counter and the label mark; `tools/animlab/stamp.py`
+decodes it). Call it every frame right after your view is posed, on the game thread: that frame
+then shows exactly this payload. Both are NULL with a harness older than 2026-10-10.
+
 A pending command never completed just times out on the client side; a
 `complete` for an unknown or already answered id is ignored (and logged).
 

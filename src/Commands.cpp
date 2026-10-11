@@ -20,6 +20,7 @@
 #include "RaceFilter.h"
 #include "HoldSpeed.h"
 #include "Chatter.h"
+#include "FrameStamp.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -772,7 +773,7 @@ const char *const kBuiltins[] = {
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
     "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "hit", "newgame", "import", "stealth", "crime",
-    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode", "dialog", "input_isolation", "key_inject", "mouse_inject", "chatter", "sync_flash", "sampler"};
+    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode", "dialog", "input_isolation", "key_inject", "mouse_inject", "chatter", "sync_flash", "stamp", "sampler"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | chatter off|on|status | "
@@ -798,7 +799,7 @@ const char *const kHelp =
     "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [+x|-x|+z|-z] [walk|run] | acceltime <npc> <dist> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt] [follow] | camfollow <npc> [on|off] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
-    "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | sync_flash [ms] [n] | sampler start <ms> <file> <query>... | sampler stop|status | fps [reset] | input_isolation on|off|status | key_inject <key> [down|up|tap] [ms] | mouse_inject <button> [down|up|click] [ms] | mouse_inject move <dx> <dy> | at <x> <y> | wheel <d> | "
+    "ui [filter] [all] | click <widget> | messages [n] | screenshot [name] | sync_flash [ms] [n] | stamp on [cell] [flash] [log <file>]|off|status | sampler start <ms> <file> <query>... | sampler stop|status | fps [reset] | input_isolation on|off|status | key_inject <key> [down|up|tap] [ms] | mouse_inject <button> [down|up|click] [ms] | mouse_inject move <dx> <dy> | at <x> <y> | wheel <d> | "
     "transfer <from npc> <to npc> <item> | packput <npc> <pack> <item> [n] | "
     "packweight <npc|building|ground> <pack> | craftfinish <npc> <item> [at <bench>]. "
     "<npc> = name (exact match nearest the player wins, else nearest substring), "
@@ -1381,11 +1382,236 @@ void SyncFlashFrame(float) {
   }
 }
 
+// ---- stamp: frame-exact video sync code (frame-stamp, 2026-10-10) -----------------------------------------------
+// Flash sync matched to a sampled event log lagged under PC load (tur-b-2, e6r7: label lag + sampler gaps while the
+// game ran fine). `stamp on` draws a black/white cell grid in the top-left corner of the view EVERY rendered frame:
+// render-frame counter + last sync mark + a 48-bit mod payload (KenshiFP: FP state, stroke, view, weapon class,
+// table hash; exported KAH_StampSet), layout in FrameStamp.h. tools/animlab/stamp.py reads it from every
+// video frame (video frame -> game frame, state; dropped/duplicated frames exact). While the stamp is on, sync_flash
+// sets the mark (no magenta flash unless `stamp on .. flash`). Off by default; nothing is drawn or hooked until used.
+//   stamp on [cell px 4..32, default 8] [flash] [log <file>]   log = <HarnessDir>\<file>: one line per payload/mark
+//                                                               change `<fc>\t<epoch>\t<lo hex>\t<hi hex>\t<mark>\t<flags>`
+//   stamp off | status
+double EpochNow();
+std::string EpochStr(double t);
+struct StampState {
+  bool on, hooked, flash;
+  int cell;
+  unsigned fc, mark, lo, hi, setsSince, frames, sets, syncPaints;
+  bool paintedOnSet;
+  DWORD thread;
+  MyGUI::Widget *back;
+  MyGUI::Widget *cells[FrameStamp::ROWS * FrameStamp::COLS];
+  unsigned char shown[FrameStamp::ROWS * FrameStamp::COLS];
+  std::string logPath, logBuf;
+  unsigned lastLo, lastHi, lastMark;
+  bool logged;
+  CRITICAL_SECTION lock;
+  StampState()
+      : on(false), hooked(false), flash(false), cell(8), fc(0), mark(0), lo(0), hi(0), setsSince(0), frames(0),
+        sets(0), syncPaints(0), paintedOnSet(false), thread(0), back(nullptr), lastLo(0), lastHi(0), lastMark(0),
+        logged(false) {
+    InitializeCriticalSection(&lock);
+    for (int i = 0; i < FrameStamp::ROWS * FrameStamp::COLS; ++i) {
+      cells[i] = nullptr;
+      shown[i] = 2;
+    }
+  }
+};
+StampState g_stamp;
+
+void StampFlushLog() {
+  if (g_stamp.logPath.empty() || g_stamp.logBuf.empty())
+    return;
+  std::ofstream f(g_stamp.logPath.c_str(), std::ios::app | std::ios::binary);
+  f << g_stamp.logBuf;
+  g_stamp.logBuf.clear();
+}
+
+void StampPaint(unsigned flags) {
+  if (!g_stamp.on || !g_stamp.back)
+    return;
+  unsigned char bits[FrameStamp::BITS];
+  EnterCriticalSection(&g_stamp.lock);
+  const unsigned lo = g_stamp.lo, hi = g_stamp.hi;
+  LeaveCriticalSection(&g_stamp.lock);
+  FrameStamp::Encode(g_stamp.fc, g_stamp.mark, flags, lo, hi, bits);
+  try {
+    for (int r = 0; r < FrameStamp::ROWS; ++r)
+      for (int c = 0; c < FrameStamp::COLS; ++c) {
+        const int i = r * FrameStamp::COLS + c;
+        const unsigned char v = r == 0 ? (unsigned char)((c & 1) == 0) : bits[i - FrameStamp::COLS];
+        if (g_stamp.shown[i] != v && g_stamp.cells[i]) {
+          const float x = v ? 1.0f : 0.0f;
+          g_stamp.cells[i]->setColour(MyGUI::Colour(x, x, x));
+          g_stamp.shown[i] = v;
+        }
+      }
+  } catch (...) {
+  }
+  if (!g_stamp.logPath.empty() &&
+      (!g_stamp.logged || lo != g_stamp.lastLo || hi != g_stamp.lastHi || g_stamp.mark != g_stamp.lastMark)) {
+    char b[160];
+    sprintf_s(b, sizeof b, "%u\t%.3f\t%08x\t%04x\t%u\t%u\n", g_stamp.fc, EpochNow(), lo, hi & 0xffff,
+              g_stamp.mark, flags);
+    g_stamp.logBuf += b;
+    g_stamp.lastLo = lo;
+    g_stamp.lastHi = hi;
+    g_stamp.lastMark = g_stamp.mark;
+    g_stamp.logged = true;
+  }
+}
+
+void StampFrame(float) {
+  if (!g_stamp.on)
+    return;
+  g_stamp.thread = GetCurrentThreadId();
+  ++g_stamp.fc;
+  ++g_stamp.frames;
+  const unsigned fresh = g_stamp.setsSince > 0 ? 1u : 0u;
+  g_stamp.setsSince = 0;
+  g_stamp.paintedOnSet = false;
+  StampPaint(fresh);
+  if ((g_stamp.frames & 31) == 0)
+    StampFlushLog();
+}
+
+// Exported for mods (KAH_Api.stampOn / stampSet): the mod sets its payload every frame right after it poses the
+// view; on the render thread the cells are repainted at once (this frame shows this payload), else at frame start.
+extern "C" __declspec(dllexport) int KAH_StampOn() { return g_stamp.on ? 1 : 0; }
+extern "C" __declspec(dllexport) void KAH_StampSet(unsigned lo, unsigned hi) {
+  if (!g_stamp.on)
+    return;
+  EnterCriticalSection(&g_stamp.lock);
+  g_stamp.lo = lo;
+  g_stamp.hi = hi & 0xffff;
+  LeaveCriticalSection(&g_stamp.lock);
+  ++g_stamp.sets;
+  ++g_stamp.setsSince;
+  if (g_stamp.thread && GetCurrentThreadId() == g_stamp.thread) {
+    StampPaint(3);
+    ++g_stamp.syncPaints;
+    g_stamp.paintedOnSet = true;
+  }
+}
+
+std::string StampStatus() {
+  return std::string("stamp ") + (g_stamp.on ? "on" : "off") + " cell=" + Int(g_stamp.cell) + " fc=" +
+         Int(g_stamp.fc) + " frames=" + Int(g_stamp.frames) + " sets=" + Int(g_stamp.sets) + " sync_paints=" +
+         Int(g_stamp.syncPaints) + " mark=" + Int(g_stamp.mark) + " flash=" + (g_stamp.flash ? "1" : "0") +
+         " log=" + (g_stamp.logPath.empty() ? std::string("none") : g_stamp.logPath) + " epoch=" +
+         EpochStr(EpochNow());
+}
+
+std::string Stamp(const std::vector<std::string> &f, bool &ok) {
+  const std::string sub = f.size() > 2 ? Lower(f[2]) : "status";
+  if (sub == "status") {
+    ok = true;
+    return StampStatus();
+  }
+  if (sub == "off") {
+    g_stamp.on = false;
+    try {
+      if (g_stamp.back)
+        g_stamp.back->setVisible(false);
+    } catch (...) {
+    }
+    StampFlushLog();
+    ok = true;
+    Log("KAH: stamp off frames=" + Int(g_stamp.frames) + " sets=" + Int(g_stamp.sets));
+    return StampStatus();
+  }
+  if (sub != "on")
+    return "usage: stamp on [cell px 4..32, default 8] [flash] [log <file>] | stamp off | stamp status";
+  int cell = 8;
+  bool flash = false;
+  std::string logName;
+  for (size_t i = 3; i < f.size(); ++i) {
+    const std::string a = Lower(f[i]);
+    if (a == "flash")
+      flash = true;
+    else if (a == "log" && i + 1 < f.size())
+      logName = f[++i];
+    else if (atoi(a.c_str()) >= 4 && atoi(a.c_str()) <= 32)
+      cell = atoi(a.c_str());
+    else
+      return "usage: stamp on [cell px 4..32, default 8] [flash] [log <file>]";
+  }
+  if (!logName.empty() && logName.find_first_of("\\/:") != std::string::npos)
+    return "stamp: log <file> is a plain name (written in the harness folder)";
+  MyGUI::Gui *g = MyGUI::Gui::getInstancePtr();
+  if (!g)
+    return "no MyGUI";
+  try {
+    const int C = cell, W = (FrameStamp::COLS + 2) * C, H = (FrameStamp::ROWS + 2) * C;
+    if (g_stamp.back && g_stamp.cell != cell) {
+      g->destroyWidget(g_stamp.back); // children go with it
+      g_stamp.back = nullptr;
+    }
+    if (!g_stamp.back) {
+      const char *layer = MyGUI::LayerManager::getInstance().isExist("Top") ? "Top" : "Popup";
+      g_stamp.back = g->createWidgetT("Widget", "WhiteSkin", MyGUI::IntCoord(0, 0, W, H), MyGUI::Align::Default,
+                                      layer, "KAH_Stamp");
+      g_stamp.back->setNeedMouseFocus(false);
+      g_stamp.back->setNeedKeyFocus(false);
+      g_stamp.back->setColour(MyGUI::Colour(0.0f, 0.0f, 0.0f));
+      g_stamp.back->setAlpha(1.0f);
+      for (int r = 0; r < FrameStamp::ROWS; ++r)
+        for (int c = 0; c < FrameStamp::COLS; ++c) {
+          const int i = r * FrameStamp::COLS + c;
+          MyGUI::Widget *w = g_stamp.back->createWidgetT("Widget", "WhiteSkin",
+                                                         MyGUI::IntCoord((c + 1) * C, (r + 1) * C, C, C),
+                                                         MyGUI::Align::Default);
+          w->setNeedMouseFocus(false);
+          w->setNeedKeyFocus(false);
+          w->setColour(MyGUI::Colour(0.0f, 0.0f, 0.0f));
+          w->setAlpha(1.0f);
+          g_stamp.cells[i] = w;
+          g_stamp.shown[i] = 0;
+        }
+    }
+    if (!g_stamp.hooked) {
+      g->eventFrameStart += MyGUI::newDelegate(&StampFrame);
+      g_stamp.hooked = true;
+    }
+    g_stamp.cell = cell;
+    g_stamp.flash = flash;
+    g_stamp.back->setCoord(0, 0, W, H);
+    g_stamp.back->setVisible(true);
+    MyGUI::LayerManager::getInstance().upLayerItem(g_stamp.back);
+    StampFlushLog();
+    g_stamp.logPath = logName.empty() ? std::string() : HarnessDir() + "\\" + logName;
+    if (!g_stamp.logPath.empty())
+      DeleteFileA(g_stamp.logPath.c_str());
+    g_stamp.logged = false;
+    g_stamp.mark = 0;
+    g_stamp.frames = 0;
+    g_stamp.sets = 0;
+    g_stamp.syncPaints = 0;
+    g_stamp.on = true;
+    StampPaint(0);
+    Log("KAH: stamp on cell=" + Int(cell) + " flash=" + Int(flash ? 1 : 0) + " log=" + g_stamp.logPath);
+    ok = true;
+    return StampStatus();
+  } catch (...) {
+    return "stamp failed (MyGUI exception)";
+  }
+}
+
 std::string SyncFlash(const std::vector<std::string> &f, bool &ok) {
   const int ms = f.size() >= 3 ? atoi(f[2].c_str()) : 150;
   const int n = f.size() >= 4 ? atoi(f[3].c_str()) : 0;
   if (ms < 30 || ms > 2000)
     return "usage: sync_flash [ms 30..2000, default 150] [n]";
+  if (g_stamp.on) { // the stamp carries the mark, exact to the frame; the full-view flash only with `stamp on .. flash`
+    g_stamp.mark = (unsigned)n & 0xff;
+    StampPaint(g_stamp.setsSince > 0 ? 1u : 0u);
+    Log("KAH: sync mark n=" + Int(n) + " stamp fc=" + Int(g_stamp.fc));
+    if (!g_stamp.flash) {
+      ok = true;
+      return "sync_flash n=" + Int(n) + " stamp mark fc=" + Int(g_stamp.fc);
+    }
+  }
   MyGUI::Gui *g = MyGUI::Gui::getInstancePtr();
   if (!g)
     return "no MyGUI";
@@ -1548,6 +1774,8 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
 
   if (cmd == "sync_flash") // sync_flash [ms] [n]: full-view magenta marker for video sync (any phase)
     return SyncFlash(f, ok);
+  if (cmd == "stamp") // stamp on [cell] [flash] [log <file>] | off | status: per-frame sync code (any phase)
+    return Stamp(f, ok);
   if (cmd == "sampler") // sampler start <ms> <file> <query>... | stop | status (game-thread take sampler, any phase)
     return Sampler(f, ok);
 

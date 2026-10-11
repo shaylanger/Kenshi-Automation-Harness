@@ -112,6 +112,11 @@ rem Scenario @log step (paths with spaces); needs Python 3.
 where py >nul 2>nul
 if not errorlevel 1 (py -3 "%ROOT%tests\kah_log_step_test.py") else (python "%ROOT%tests\kah_log_step_test.py")
 if errorlevel 1 exit /b 1
+cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\frame_stamp_test.exe" ^
+  "%ROOT%tests\frame_stamp_test.cpp" > "%ROOT%obj\tests\build_frame_stamp.log" 2>&1
+if errorlevel 1 (type "%ROOT%obj\tests\build_frame_stamp.log" & echo TEST BUILD FAILED & exit /b 1)
+"%ROOT%obj\tests\frame_stamp_test.exe"
+if errorlevel 1 exit /b 1
 rem Scenario @any step (alternatives until one passes); needs Python 3.
 where py >nul 2>nul
 if not errorlevel 1 (py -3 "%ROOT%tests\kah_any_step_test.py") else (python "%ROOT%tests\kah_any_step_test.py")
