@@ -142,7 +142,7 @@ takes, harness without sync_flash) it is SKIP unless the rules say `set sync 1`.
 `tools/animlab/autoreview.py` (usage in its header) looks at EVERY encoded frame of a take video (VFR passthrough,
 256x144, NVDEC via framecache) and writes `flags.tsv` + `crops/` (prev | FLAG | next at full resolution) + one
 `RESULT <take>-autoreview PASS|FAIL flags=..` line. Checks: `oneview` (one view per FP/3P switch: no both / neither /
-misplaced frame), `fragments` (no stray body parts while the body is hidden in the zoom fade band), `occluder` (arm /
+misplaced frame; with a frame stamp only the stamp's switch frame is judged and a settle that keeps the same objects passes), `fragments` (no stray body parts while the body is hidden in the zoom fade band), `occluder` (arm /
 body across the lens, edge-connected foreground share per weapon), `weapon` (viewmodel weapon complete vs references in
 `tools/animlab/autoreview-refs/<weapon>/<state>/`), plus frames.py's `overlay`, `cursor`, `openground`.
 View/state per frame: the frame stamp (decoded from the video when it carries one; or `<stem>.stamp.txt`), else the

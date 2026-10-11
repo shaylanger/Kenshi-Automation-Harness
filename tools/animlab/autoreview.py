@@ -33,6 +33,11 @@ Checks:
              (>= 2.5 x the next step): `neither` (empty frame, then the body) or `misplaced` (viewmodel elsewhere for one
              frame). Judged only within +-0.5 s of a view change when a view source exists; image-only it needs a quiet
              side (median change <= QUIET cells over the 4 frames before or after), so fast arm swings (fists) do not count.
+             With a frame stamp (frame-exact view) an `intermediate` frame must be the stamp's switch frame (first new-view
+             frame, or last old-view frame for the before form; a motion cut next to the switch is not one, 8C72A4C4 f779)
+             and is flagged only when its objects disagree with the settled neighbour's in the changed cells (coverage
+             < OBJ_SAME either way): the viewmodel settling / the zoom camera easing after a clean cut keeps the same
+             objects (8C72A4C4 f148 f505), a neither / misplaced frame does not.
   fragments  no stray body parts while the body is hidden (Z1 fade band: hat-brim shard + neck/shoulder slivers, 9C9ECB01
              5.90-6.47 s; C00ADF99 45.9 s): frames of a band span (view source) or of an image-only intermediate view
              (a quiet frame change, a static view < BAND_MAX s, a second frame change) may hold no floating object (not
@@ -63,6 +68,8 @@ T_CELL = 12.0                 # mean abs RGB difference for a changed cell
 CUT = 60                      # changed cells (of 416) for a cut
 TR_MIN = 5                    # transient cluster cells for `both`
 IM_MIN = 8                    # second change for `intermediate`
+OBJ_SAME = 0.80               # stamp: intermediate frame whose objects match the settled neighbour's (both ways) = clean
+#                               switch + settle (05-zband2 8C72A4C4 f148/f505: 0.86-0.98; 2E66 neither/misplaced 0.36-0.48)
 QUIET = 6                     # image-only: median changed cells on the quiet side of a judged cut
 EV_MIN = 12                   # changed cells for a view event in a quiet scene (image-only fragments)
 BAND_MAX = 1.5                # s
@@ -411,8 +418,19 @@ def sync_offset(ev, video):
 
 
 # ================================================================ check: oneview
-def check_oneview(F, t, cnt, steps, windows):
-    """windows: list of (t0, t1) to judge (view source) or None = image-only (quiet-side rule)."""
+def obj_same(a, b, m):
+    """min coverage of a's objects by b's and b's by a's (dilated 2 px) inside the changed cells m (grown 1 cell)."""
+    import numpy as np
+    M = np.kron(dilate(m, 1), np.ones((CS, CS), bool))
+    oa = objects(a) & M; ob = objects(b) & M
+    fb = (ob & dilate(oa, 2)).sum() / max(ob.sum(), 1)
+    fa = (oa & dilate(ob, 2)).sum() / max(oa.sum(), 1)
+    return float(min(fa, fb))
+
+
+def check_oneview(F, t, cnt, steps, windows, views=None):
+    """windows: list of (t0, t1) to judge (view source) or None = image-only (quiet-side rule).
+    views: frame-exact per-frame views (frame stamp) or None."""
     import numpy as np
     hb = hud_cells()
     n = len(F)
@@ -437,13 +455,18 @@ def check_oneview(F, t, cnt, steps, windows):
         if cl and cl[0][0] >= TR_MIN:
             flags.append((g, 'both: %d cells in neither neighbour (cut %d/%d)' % (cl[0][0], ga, gb), cl[0][1]))
             continue
+        sw = (lambda k: views[k] and views[k - 1] and views[k] != views[k - 1]) if views else None
         if ga >= CUT and ga >= gb:
             nxt = cnt[g + 2] if g + 2 < n else 0
+            if sw and (not sw(g) or obj_same(F[g], F[g + 1], steps[g + 1]) >= OBJ_SAME):
+                continue
             if gb >= IM_MIN and gb >= 2.5 * max(nxt, 3):
                 flags.append((g, 'intermediate: cut %d, then %d cells change at once and settle (%d)' % (ga, gb, nxt),
                               [tuple(c) for c in np.argwhere(steps[g + 1])]))
         elif gb >= CUT:
             prv = cnt[g - 1] if g >= 2 else 0
+            if sw and (not sw(g + 1) or obj_same(F[g], F[g - 1], steps[g]) >= OBJ_SAME):
+                continue
             if ga >= IM_MIN and ga >= 2.5 * max(prv, 3):
                 flags.append((g, 'intermediate: %d cells changed once (before: %d), then cut %d' % (ga, prv, gb),
                               [tuple(c) for c in np.argwhere(steps[g])]))
@@ -847,7 +870,7 @@ def run(video, out, ev=None, vmrec=None, stamp=None, offset=None, weapon=None, r
             lines.append('oneview: no view change in the take (%s)' % vsrc)
         else:
             win = None if changes is None else [(c, c) for c in changes]
-            fl = check_oneview(F, t, cnt, steps, win)
+            fl = check_oneview(F, t, cnt, steps, win, views if vsrc == 'stamp' else None)
             allf += [(i, w, c, 'oneview') for i, w, c in fl]
             lines.append('oneview: %s, cuts=%d, flags=%d' % ('image-only (quiet side)' if win is None else '%d view changes' % len(win),
                                                              sum(1 for c in cnt if c >= CUT), len(fl)))
