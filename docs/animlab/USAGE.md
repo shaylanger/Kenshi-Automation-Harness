@@ -484,3 +484,24 @@ Scripts live in KenshiModding `components/KenshiFP/animlab/` (run in WSL); each 
   `components/KenshiFP/tests/ingame/take-preflight.sh` (pf_begin RESULT guard, pf_outdir, pf_rig incl. the 4080
   rig_preflight, pf_display, pf_day, pf_clean, pf_area, pf_weapon, pf_open with cursor + min luma; `pf_all` = all in order).
 - **Review verdicts**: `tools/automation/review-verdict.ps1 ... FAIL|REJECT-SHEET` appends a PENDING Misses row automatically.
+
+## Reference motion (mocap)
+
+`tools/animlab/mocapref.py` reads openly licensed human motion capture (CMU ASF/AMC, BVH) and measures it the way the
+lab measures a viewmodel: the clip is torso-stabilised (as the fixed FP camera sees the arms), its weapon-side shoulder
+placed on the FP body's shoulder and scaled to the FP arm length (`--body <rec>`), then strikes / kicks / aim holds /
+two-hand swings are found and measured: phase timing and shares, peak wrist speed (arm lengths/s), wrist path, elbow
+angles + opening, reach, wrist bend (start / max / added), wrist share at a fixed 0.15-arm lever (U10 formula),
+forearm roll per 33 ms (swing-twist of the hand in the forearm frame), torso share + chest yaw, two-hand spacing,
+kick head/wrist travel, aim-hold reach/elbows/jitter/raise time. `strike_rows(V, ...)` takes any view dict, so the same
+code measures a solved KenshiFP path. No motion data in this repo (it is fetched by the KenshiFP workspace).
+```
+python3 -I $L/mocapref.py info <clip.amc|clip.bvh> [--asf subj.asf]
+python3 -I $L/mocapref.py measure <clip> --kind strike|kick|hold|twohand --side R|L --body vmrec-q-sword-z0-a.txt [--json o.json]
+```
+KenshiFP comparison (workspace `components/KenshiFP/animlab/reference/`: `sources.tsv` clips + licenses, `fetch.sh <dir>`
+downloads each source into its own new dir, `compare.py --data <dir> --tables <fp_tables dump> --out <dir>` solves the
+live tables through the drive adapter and writes REFERENCE.md + `REF <family> <metric> ... OK|DEVIATES` lines; run via
+labnice.sh). Limits: mocap hands have no weapon (blade direction is not measured; CMU hand/thumb axes are noisy, roll
+spikes > 120 deg/33 ms dropped as flips), the reference performers mime (casual swordplay, acted slashes), the drive applies
+poses without the game's target smoothing. Tests: `tests/animlab/test_mocapref.py`.
