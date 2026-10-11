@@ -230,9 +230,45 @@ def read_vmrec(path):
     return rows
 
 
+def stamp_from_video(video, out):
+    """stamped take (harness `stamp on`, KenshiFP kfp_stamp_frame payload): decode the per-frame stamp with the harness
+    stamp.py into <out>/stamp.tsv (its --out table) and return the path; None when the video carries no stamp (three
+    full-res probe frames, frames.has_stamp) or stamp.py / frames.py are not importable."""
+    try:
+        import frames, stamp as stampmod
+    except Exception:
+        return None
+    if not any(f is not None and frames.has_stamp(f) for f in (full_frame(video, x) for x in (0.5, 3.0, 8.0))):
+        return None
+    try:
+        rows, C = stampmod.decode_video(video)
+    except Exception:
+        return None
+    if not C or not any(r['d'] for r in rows):
+        return None
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, 'stamp.tsv')
+    stampmod.write_table(rows, path)
+    return path
+
+
+STAMP_BLANK = (10, 35)        # rows, cols at 256x144: the stamp block (26 x 7 cells of 8 px at 1600x900) changes every frame
+
+
 def read_stamp(path):
-    """[(key, byframe, kv)] from a frame-stamp file."""
+    """[(key, byframe, kv)] from a frame-stamp file: `<frame|t> key=value ...` lines, or stamp.py's --out table
+    (`vf t ok fc .. ui stroke phase view zoomb wcls vm ..`, keyed by video time)."""
     rows = []
+    with open(path, errors='replace') as fh:
+        head = fh.readline()
+    if head.startswith('vf\tt\tok'):
+        cols = head.rstrip('\n').split('\t')
+        for line in open(path, errors='replace').read().splitlines()[1:]:
+            v = dict(zip(cols, line.split('\t')))
+            if v.get('ok') == '1':
+                rows.append((float(v['t']), False, dict(view=v['view'], vm=v['vm'], zoomb=v['zoomb'], ui_state=v['ui'],
+                                                        wcls=v['wcls'])))
+        return rows
     for line in open(path, errors='replace'):
         m = re.match(r'^\s*(f?)(\d+(?:\.\d+)?)\s+(.*)$', line)
         if not m:
@@ -244,8 +280,13 @@ def read_stamp(path):
 
 
 def stamp_view(kv):
-    if 'view' in kv:
-        return kv['view'].lower()
+    v = kv.get('view', '').lower()
+    if v in ('eye', 'zoom', 'off', 'freecam'):    # KenshiFP stamp: eye = FP; zoom + viewmodel on = FP pulled back;
+        if v == 'eye' or (v == 'zoom' and kv.get('vm') == '1'):   # zoom + viewmodel off = band until the body shows
+            return 'fp'
+        return 'band' if v == 'zoom' else '3p'
+    if v:
+        return v
     if kv.get('band_hidden') == '1':
         return 'band'
     if 'zoom' in kv or 'on' in kv:
@@ -289,6 +330,17 @@ def frame_views(t, cnt, stamp=None, vmrec=None):
                 if rows[j][0] <= key + 1e-6:
                     kv = rows[j][2]
                     views[i] = stamp_view(kv); sts[i] = kv.get('st') or kv.get('ui_state')
+            i = 0                     # stamp 'band' (zoom, viewmodel off) ends where the body shows: the first image
+            while i < n:              # event >= 3 frames into the run; the rest of the run is 3P
+                if views[i] != 'band':
+                    i += 1; continue
+                j = i
+                while j < n and views[j] == 'band':
+                    j += 1
+                k = next((x for x in range(i + 3, j) if cnt[x] >= EV_MIN), j)
+                for x in range(k, j):
+                    views[x] = '3p'
+                i = j
             ch = [t[i] for i in range(1, n) if views[i] and views[i - 1] and views[i] != views[i - 1]]
             return views, sts, ch, 'stamp'
     if vmrec and os.path.exists(vmrec):
@@ -776,6 +828,10 @@ def run(video, out, ev=None, vmrec=None, stamp=None, offset=None, weapon=None, r
     F, t = F[keep], t[keep]
     weapon = guess_weapon(video) if weapon in (None, 'auto') else weapon
     stamp, vmrec, ev = sidecars(video, stamp, vmrec, ev)
+    if not stamp and len(F) > 1:
+        stamp = stamp_from_video(video, out)
+    if stamp and len(F) > 1:
+        F[:, :STAMP_BLANK[0], :STAMP_BLANK[1]] = 0     # the stamp's frame counter is no scene change
     cnt, steps = step_counts(F)
     views, sts, changes, vsrc = frame_views(t, cnt, stamp, vmrec)
     es, eoff = ev_states(t, ev, offset, video)
