@@ -56,7 +56,7 @@ Checks:
   overlay, cursor, openground: frames.py's checks (cached, not duplicated); their spans become flags.
 Started at nice 15 by review-pack.py; backfill uses <= 16 workers.
 """
-import argparse, glob, os, re, subprocess, sys
+import argparse, glob, math, os, re, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -82,7 +82,9 @@ FG_T = 34                     # plate foreground: max abs RGB difference
 OCC_MAX = {'fists': 0.15, 'sword': 0.12, 'crossbow': 0.15, None: 0.15}   # accepted sword/xbow takes p99 0.05-0.10; fist arm-across 0.15-0.25
 WEAPON_MIN = 0.70
 ZFP = 1.5                     # dm: rec zoom at or above = 3P / band
-HUDBOX = (0.43, 0.505, 0.60, 0.565)   # KenshiFP HUD text box (frames.OV_ZONES)
+HUDBOX = (0.43, 0.505, 0.60, 0.565)   # KenshiFP HUD text box (frames.OV_ZONES) at 1600x900; any take size: hudbox()
+HUD_PX = (-112, 4.5, 160, 58.5)       # the same box in px from the screen centre (fixed-px widget, frames.OV_HUD_PX)
+SRC = [1600, 900]                     # the take's own frame size (run() probes it; analysis stays W x H = 256x144)
 REFS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'autoreview-refs')
 
 
@@ -149,10 +151,37 @@ def is_flash(f):
 
 
 # ================================================================ grid helpers
+def video_size(video):
+    """(w, h) of the video's frames (an image: its size); None when unreadable"""
+    try:
+        if video.lower().endswith(('.png', '.jpg', '.jpeg')):
+            from PIL import Image
+            return Image.open(video).size
+        pr = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height',
+                             '-of', 'csv=p=0', video], capture_output=True, text=True).stdout.strip().split(',')
+        return int(pr[0]), int(pr[1])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def hudbox():
+    """the KenshiFP HUD text box as frame fractions at the take's size SRC (= HUDBOX at 1600x900)"""
+    sw, sh = SRC
+    x0, y0, x1, y1 = HUD_PX
+    return tuple(round(v, 6) for v in (0.5 + x0 / float(sw), 0.5 + y0 / float(sh), 0.5 + x1 / float(sw), 0.5 + y1 / float(sh)))
+
+
+def stamp_blank():
+    """(rows, cols) at W x H covering the frame stamp corner (26 x 7 cells of 8 GAME px, + margin) of a take at SRC
+    (= STAMP_BLANK (10, 35) at 1600x900)"""
+    sw, sh = SRC
+    return int(round(60.0 * H / sh)), int(math.ceil(216.0 * W / sw))
+
+
 def hud_cells():
     import numpy as np
     m = np.zeros((SR, NC), bool)
-    x0, y0, x1, y1 = HUDBOX
+    x0, y0, x1, y1 = hudbox()
     m[int(y0 * H) // CS:-(-int(y1 * H) // CS), int(x0 * W) // CS:-(-int(x1 * W) // CS)] = True
     return m
 
@@ -259,7 +288,8 @@ def stamp_from_video(video, out):
     return path
 
 
-STAMP_BLANK = (10, 35)        # rows, cols at 256x144: the stamp block (26 x 7 cells of 8 px at 1600x900) changes every frame
+STAMP_BLANK = (10, 35)        # rows, cols at 256x144 for a 1600x900 take (stamp_blank() at any size): the stamp block
+#                               (26 x 7 cells of 8 game px) changes every frame
 
 
 def read_stamp(path):
@@ -538,7 +568,7 @@ def check_fragments(F, t, cnt, views):
     objc = [int(objects(f)[:, NC * CS // 4:3 * NC * CS // 4].sum()) for f in F] if not any(v is not None for v in views) else None
     spans, how = band_spans(t, cnt, views, objc)
     hudpx = np.zeros((SR * CS, W), bool)
-    x0, y0, x1, y1 = HUDBOX
+    x0, y0, x1, y1 = hudbox()
     hudpx[int(y0 * H):int(y1 * H) + 1, int(x0 * W):int(x1 * W) + 1] = True
     hudpx[:int(0.05 * H)] = True
     flags = []
@@ -849,6 +879,7 @@ def run(video, out, ev=None, vmrec=None, stamp=None, offset=None, weapon=None, r
     import numpy as np
     name = name or os.path.splitext(os.path.basename(video))[0]
     os.makedirs(out, exist_ok=True)
+    SRC[:] = video_size(video) or (1600, 900)   # take size: HUD box / stamp corner are fixed game px
     F, t = load(video)
     keep = [i for i in range(len(F)) if not is_flash(F[i])]
     F, t = F[keep], t[keep]
@@ -857,7 +888,8 @@ def run(video, out, ev=None, vmrec=None, stamp=None, offset=None, weapon=None, r
     if not stamp and len(F) > 1:
         stamp = stamp_from_video(video, out)
     if stamp and len(F) > 1:
-        F[:, :STAMP_BLANK[0], :STAMP_BLANK[1]] = 0     # the stamp's frame counter is no scene change
+        sb = stamp_blank()
+        F[:, :sb[0], :sb[1]] = 0     # the stamp's frame counter is no scene change
     cnt, steps = step_counts(F)
     views, sts, changes, vsrc = frame_views(t, cnt, stamp, vmrec)
     es, eoff = ev_states(t, ev, offset, video)

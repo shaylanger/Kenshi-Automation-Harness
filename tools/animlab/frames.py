@@ -101,29 +101,60 @@ def openground(shares, fps, t0=0.0, min_sky=0.08, share=0.9):
 
 
 # ---------------- frame stamp corner (harness `stamp on`, stamp.py; frame-stamp 2026-10-10) ----------------
-# cell 8 px at 1600x900: (24+2) x (5+2) cells = 208 x 56 px in the top-left corner. In a frame that shows it, the
+# The harness draws it in GAME pixels (cell 8 px at any render size): (24+2) x (5+2) cells = 208 x 56 px in the
+# top-left corner. A video shows it at the game's own size (any resolution: 8 px) or resized (a 1600-wide game view
+# scaled to the analysis size), so the cell size is found per frame (stamp_cell). In a frame that shows it, the
 # corner is never a foreign overlay or a cursor; without a stamp the corner stays checked like the rest.
-STAMP_ZONE = (0.0, 0.0, 0.135, 0.07)
+STAMP_ZONE = (0.0, 0.0, 0.135, 0.07)   # zone at 1600x900, cell 8 (216 x 63 px = 27 x 7.875 cells); any size: stamp_zone()
+STAMP_VIEW_WS = (1600, 1280, 1920, 1366, 1024, 960, 2560, 1440, 1680)   # render widths a resized frame may come from
+_STAMP_C = [8.0]                       # last cell size seen (tried first)
 
 
-def has_stamp(f):
-    """the stamp's sync row (row 0: even cells white, odd black, on a black backing) is in this frame"""
-    Hh, Ww = f.shape[:2]
-    C = 8.0 * Ww / 1600.0
-    if Hh < 7 * C or Ww < 26 * C:
+def _stamp_at(g, C):
+    Hh, Ww = g.shape[:2]
+    if C < 2 or Hh < 7 * C or Ww < 26 * C:
         return False
-    g = f.mean(2) if f.ndim == 3 else f
     y0, y1 = int(C * 1.25), max(int(C * 1.75), int(C * 1.25) + 1)
     v = [float(g[y0:y1, int((c + 1.25) * C):max(int((c + 1.75) * C), int((c + 1.25) * C) + 1)].mean()) for c in range(24)]
     return min(v[0::2]) - max(v[1::2]) > 60 and float(g[:max(1, int(C * 0.75)), :int(26 * C)].mean()) < 60
 
 
+def stamp_cell(f):
+    """cell size (px in this frame) of the frame stamp shown in f, or None: 8 (video at the game's own size, any
+    resolution) or 8 scaled from a render width (env RES_W, STAMP_VIEW_WS) when the frame is a resized view."""
+    Ww = f.shape[1]
+    g = f.mean(2) if f.ndim == 3 else f
+    ws = [int(os.environ.get('RES_W') or 0)] + list(STAMP_VIEW_WS)
+    seen = set()
+    for C in _STAMP_C + [8.0] + [8.0 * Ww / w for w in ws if w > 0]:
+        k = round(C, 3)
+        if k in seen:
+            continue
+        seen.add(k)
+        if _stamp_at(g, C):
+            _STAMP_C[0] = C
+            return C
+    return None
+
+
+def has_stamp(f):
+    """the stamp's sync row (row 0: even cells white, odd black, on a black backing) is in this frame"""
+    return stamp_cell(f) is not None
+
+
+def stamp_zone(C, Ww, Hh):
+    """the stamp corner as (x0, y0, x1, y1) frame fractions for cell C px in a Ww x Hh frame (STAMP_ZONE at 1600x900)"""
+    return (0.0, 0.0, min(1.0, 27.0 * C / Ww), min(1.0, 7.875 * C / Hh))
+
+
 def blank_stamp(f):
     """black out the stamp corner of a frame that shows the stamp (in place); True when it did"""
-    if not has_stamp(f):
+    C = stamp_cell(f)
+    if C is None:
         return False
     Hh, Ww = f.shape[:2]
-    f[:int(STAMP_ZONE[3] * Hh), :int(STAMP_ZONE[2] * Ww)] = 0
+    z = stamp_zone(C, Ww, Hh)
+    f[:int(z[3] * Hh), :int(z[2] * Ww)] = 0
     return True
 
 
@@ -275,33 +306,51 @@ def cursor_check(video, fps=5.0, t0=None, t1=None, name='take'):
 # CLASS: anything drawn over the game scene that is not the take's own label/HUD: NPC speech bars, name tags ([Malzin]),
 # damage numbers, hint/notification lists, dialog popups, stray debug strings (turret-fp.mp4 speech/name tag/damage,
 # sword-z25-block-f36 [Malzin], anim-xbow-z25 hint list + [Axima]; mutation vid-popup-overlay = a flat grey dialog box).
-OW, OH, CW, CH = 1600, 900, 16, 10            # analysis frame size and cell grid (100 x 90 cells)
+OW, OH, CW, CH = 1600, 900, 16, 10            # reference frame size and cell grid (100 x 90 cells at 1600x900)
+#   Resolution: the overlay check runs on frames at the game's OWN size (any resolution, e.g. 1280x720 takes, Shay
+#   2026-10-11): Kenshi's UI text and panels are drawn in fixed pixels, so the 16x10 px cell grid and the glyph tests
+#   keep their meaning; the grid covers the frame cropped to whole cells (fit_cells); zones are frame fractions.
 OV_BASE_TEXT, OV_BASE_PANEL = None, 0.8       # panel cells in >= this share of frames = the take's own HUD (baseline);
 #   text has no baseline (was 0.4): the 5090-operator's op-b1 blkG / op-probe takes show the [Axima] name tag in every
 #   frame (KenshiFP picks the own character at the screen centre at zoom 25) and the baseline hid it (Misses 2026-10-10)
 OV_ZONES = ((0.15, 0.0, 0.85, 0.20), (0.0, 0.70, 1.0, 1.0), (0.43, 0.505, 0.60, 0.565))   # + KenshiFP HUD text box
 #   (kfp_controls.inc g_widget_setpos(vw/2-90, vh/2+20): LOADED / RELOAD n.n / NO POWER under the crosshair)   # x0 y0 x1 y1: centred title/state label band (down to
 #   0.2 H: anim-sword-e6 "stroke 0"), Kenshi's bottom UI panel. The top corners (stray debug strings) stay checked.
+OV_HUD_PX = (-112, 4.5, 160, 58.5)            # the KenshiFP HUD text box zone in px from the screen centre (fixed-px widget;
+#   = OV_ZONES[2] at 1600x900); ov_zones() places it at any frame size
+
+
+def ov_zones(Ww=OW, Hh=OH):
+    """OV_ZONES for a Ww x Hh frame: fractional bands + the KenshiFP HUD box kept at its pixel offsets from the centre"""
+    x0, y0, x1, y1 = OV_HUD_PX
+    return OV_ZONES[:2] + (tuple(round(v, 6) for v in (0.5 + x0 / float(Ww), 0.5 + y0 / float(Hh), 0.5 + x1 / float(Ww), 0.5 + y1 / float(Hh))),)
+
+
+def fit_cells(f):
+    """f cropped to whole 16x10 cells (a no-op at 1600x900 and 1280x720)"""
+    return f[:f.shape[0] // CH * CH, :f.shape[1] // CW * CW]
 
 
 def _ogrid(a):
-    return a.reshape(OH // CH, CH, OW // CW, CW).transpose(0, 2, 1, 3).reshape(OH // CH, OW // CW, CH * CW)
+    nr, nc = a.shape[0] // CH, a.shape[1] // CW
+    return a.reshape(nr, CH, nc, CW).transpose(0, 2, 1, 3).reshape(nr, nc, CH * CW)
 
 
 def _strokes(m):
     """per cell: max over pixel rows of rising edges of mask m (glyph strokes; text has several per 16 px, an edge one)."""
     np = gpu.xp_of(m)
     r = m[:, 1:] & ~m[:, :-1]
-    r = np.concatenate([r, np.zeros((OH, 1), bool)], 1)
-    return r.reshape(OH // CH, CH, OW // CW, CW).sum(3).max(1)
+    r = np.concatenate([r, np.zeros((m.shape[0], 1), bool)], 1)
+    return r.reshape(m.shape[0] // CH, CH, m.shape[1] // CW, CW).sum(3).max(1)
 
 
 def text_cells(f):
-    """(T, A, B) cell masks of text in a 1600x900 frame. B: outlined thin text floating over the scene (name tags, damage
-    numbers): neutral-bright or red core pixels with a much darker pixel within 3 px on both sides; A: text on a flat dark
+    """(T, A, B) cell masks of text in a frame at the game's own size (any resolution; cropped to whole cells).
+    B: outlined thin text floating over the scene (name tags, damage numbers): neutral-bright or red core pixels with a much darker pixel within 3 px on both sides; A: text on a flat dark
     panel (speech bars, hint lists, debug boxes): dark flat background + low-saturation brighter glyphs. Both need >= 3
     glyph strokes per cell."""
     np = gpu.xp_of(f)
+    f = fit_cells(f)
     g = f.mean(-1)
     mx, mn = f.max(-1), f.min(-1)
     spread = mx - mn
@@ -329,6 +378,7 @@ def text_cells(f):
 def flat_cells(f, std_max=3.0, sat_max=25):
     """(flat, cell mean grey): cells of a flat neutral fill (UI panel / dialog body / title bar): grey std <= std_max,
     mean colour spread <= sat_max."""
+    f = fit_cells(f)
     G = _ogrid(f.mean(-1))
     return (G.std(-1) <= std_max) & (_ogrid(f.max(-1) - f.min(-1)).mean(-1) <= sat_max), G.mean(-1)
 
@@ -376,28 +426,35 @@ def panel_rects(F, M=None, min_w=6, min_h=4, tol=1, uni=2.0, step=15.0):
     return out
 
 
-def zone_mask(zones):
+def zone_mask(zones, Ww=OW, Hh=OH):
+    """cell mask (Hh//CH x Ww//CW) of the zones (x0, y0, x1, y1 frame fractions) in a Ww x Hh frame"""
     import numpy as np
-    Z = np.zeros((OH // CH, OW // CW), bool)
+    Z = np.zeros((Hh // CH, Ww // CW), bool)
     for x0, y0, x1, y1 in zones:
-        Z[int(y0 * OH) // CH:-(-int(y1 * OH) // CH), int(x0 * OW) // CW:-(-int(x1 * OW) // CW)] = True
+        Z[int(y0 * Hh) // CH:-(-int(y1 * Hh) // CH), int(x0 * Ww) // CW:-(-int(x1 * Ww) // CW)] = True
     return Z
 
 
-def overlay_check(video, fps=2.0, t0=None, t1=None, zones=OV_ZONES, frames=None):
+def overlay_check(video, fps=2.0, t0=None, t1=None, zones=None, frames=None):
     """(ok, text): no foreign overlay in any sampled frame. A text line (>= 3 adjacent text cells in a cell row) or a
     flat UI panel (>= 12 cells) outside the expected zones and outside the take's baseline (its own HUD) = FAIL.
-    `frames` = iterable of (t, 1600x900 frame) instead of reading the video (tests)."""
+    Frames at the video's own size (any resolution); zones default ov_zones() of that size.
+    `frames` = iterable of (t, frame) instead of reading the video (tests)."""
     import numpy as np
     if frames is None:
-        frames = iter_frames_full(video, fps, t0, t1, size=(OW, OH))
-    Z = zone_mask(zones)
-    Zs = zone_mask([STAMP_ZONE])
+        frames = iter_frames_full(video, fps, t0, t1)
+    Z = Zs = None
     ts, TX, AX, PX = [], [], [], []
     for t, f in frames:
         if is_flash(f):   # harness sync_flash marker frame
             continue
-        st = has_stamp(f)
+        Hh, Ww = f.shape[:2]
+        if Z is None:
+            Z = zone_mask(ov_zones(Ww, Hh) if zones is None else zones, Ww, Hh)
+        C = stamp_cell(f)
+        st = C is not None
+        if st:
+            Zs = zone_mask([stamp_zone(C, Ww, Hh)], Ww, Hh)
         fd = gpu.dev(f)   # per-pixel work on the GPU when it is on (gpu.py); cell masks back on host
         T, A, _ = (gpu.host(x) for x in text_cells(fd))
         P = np.zeros_like(T)
