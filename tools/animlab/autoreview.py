@@ -105,22 +105,18 @@ def load(video, w=W, h=H):
         from PIL import Image
         im = np.asarray(Image.open(video).convert('RGB').resize((w, h), Image.BILINEAR))
         return im[None].copy(), np.zeros(1)
-    try:
-        import framecache as fc
-        hw = fc.hwdec()
-    except ImportError:
-        hw = []
-    return _decode(video, w, h, hw)
+    return _decode(video, w, h)
 
 
-def _decode(video, w, h, hw):
+def _decode(video, w, h):
     import numpy as np
-    cmd = ['ffmpeg', '-nostdin', '-loglevel', 'error'] + hw + ['-i', video, '-vf', 'scale=%d:%d' % (w, h),
-                                                              '-fps_mode', 'passthrough', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']
-    r = subprocess.run(cmd, capture_output=True)
-    if hw and (r.returncode or not r.stdout):   # NVDEC refused: software decode
-        r = subprocess.run([c for c in cmd if c not in hw], capture_output=True)
-    raw = r.stdout
+    post = ['-vf', 'scale=%d:%d' % (w, h), '-fps_mode', 'passthrough', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']
+    try:
+        import framecache as fc   # NVDEC (Windows-native under WSL) -> software
+        r = fc.decode(video, post=post)
+    except ImportError:
+        r = subprocess.run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-i', video] + post, capture_output=True)
+    raw = r.stdout if r is not None else b''
     F = np.frombuffer(raw, np.uint8).reshape(-1, h, w, 3)
     T = probe_pts(video)
     if len(T) < len(F):

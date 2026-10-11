@@ -6,7 +6,8 @@ Work runs on a lowest-priority CUDA stream so Kenshi's rendering during takes ke
   xp_of(a)    numpy or cupy module for array a (write array code as `np = gpu.xp_of(a)`)
   dev(a)      a on the GPU when the GPU path is on, else a unchanged
   host(a)     a as a numpy array (no-op for numpy)
-ANIMLAB_GPU=0 or the host file /etc/kah-no-gpu forces the CPU path.  CLI: gpu.py  (prints which path is active)
+ANIMLAB_GPU=0 or the host file /etc/kah-no-gpu forces the CPU path. Under WSL the frame checks run in Windows
+python (framecache.native_check); a WSL CuPy context (fallback) holds one of 2 framecache.gpu_slot slots.  CLI: gpu.py  (prints which path is active)
 """
 import os, sys
 
@@ -20,6 +21,14 @@ def cupy():
         _cp = None
         if os.environ.get('ANIMLAB_GPU', '1') != '0' and not os.path.exists('/etc/kah-no-gpu'):
             try:
+                try:   # WSL: at most 2 processes with a WSL CUDA context (framecache.gpu_slot; GPU-PV TDRs 2026-10-11)
+                    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                    import framecache
+                    framecache.gpu_slot.hold()
+                except ImportError:
+                    pass
+                import warnings
+                warnings.filterwarnings('ignore', message='CUDA path could not be detected')
                 import cupy as cp
                 if cp.cuda.runtime.getDeviceCount() > 0:
                     # CUDA stream priority: 0 = least (numbers below 0 are higher); our work never preempts others

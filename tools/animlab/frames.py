@@ -47,14 +47,11 @@ def read_frames(video, fps, t0=None, t1=None):
     c = framecache.frames(video, fps, W, H, t0, t1)   # decoded once per video, shared by every consumer
     if c is not None:
         return np.asarray(c).astype(int)
-    cmd = ['ffmpeg', '-nostdin', '-loglevel', 'error'] + framecache.hwdec()
-    if t0:
-        cmd += ['-ss', str(t0)]
-    cmd += ['-i', video]
-    if t1:
-        cmd += ['-t', str(t1 - (t0 or 0))]
-    cmd += ['-vf', 'fps=%g,scale=%d:%d' % (fps, W, H), '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']
-    raw = subprocess.run(cmd, capture_output=True).stdout
+    pre = ['-ss', str(t0)] if t0 else []
+    post = (['-t', str(t1 - (t0 or 0))] if t1 else []) + ['-vf', 'fps=%g,scale=%d:%d' % (fps, W, H), '-f', 'rawvideo',
+                                                          '-pix_fmt', 'rgb24', '-']
+    r = framecache.decode(video, pre, post)   # Windows-native NVDEC under WSL (framecache.decode)
+    raw = r.stdout if r is not None else b''
     return np.frombuffer(raw, np.uint8).reshape(-1, H, W, 3).astype(int)
 
 
@@ -179,14 +176,10 @@ def iter_frames_full(video, fps, t0=None, t1=None, size=None):
         for k in range(len(c)):
             yield (i0 + k) / fps, np.asarray(c[k]).astype(np.int16)
         return
-    cmd = ['ffmpeg', '-nostdin', '-loglevel', 'error'] + framecache.hwdec()
-    if t0:
-        cmd += ['-ss', str(t0)]
-    cmd += ['-i', video]
-    if t1:
-        cmd += ['-t', str(t1 - (t0 or 0))]
-    cmd += ['-vf', ('fps=%g' % fps) + (',scale=%d:%d' % size if size else ''), '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    pre = ['-ss', str(t0)] if t0 else []
+    post = (['-t', str(t1 - (t0 or 0))] if t1 else []) + [
+        '-vf', ('fps=%g' % fps) + (',scale=%d:%d' % size if size else ''), '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']
+    p = framecache.decode(video, pre, post, popen=True)   # Windows-native NVDEC under WSL (framecache.decode)
     n, k = w * h * 3, 0
     try:
         while True:
@@ -676,8 +669,9 @@ def still_cursor_check(path):
 # Decode + judge once per video (framecache.py): identical calls (same video content, check, arguments, this file's
 # source) share one run; concurrent ones wait for it. Calls with frames= (tests) are not cached.
 syncmarks = framecache.cached_check('syncmarks', syncmarks)
-cursor_check = framecache.cached_check('cursor', cursor_check)
-overlay_check = framecache.cached_check('overlay', overlay_check)
+# CuPy checks run in Windows python under WSL (framecache.native_check: no WSL GPU-PV, gpu-native 2026-10-11).
+cursor_check = framecache.cached_check('cursor', framecache.native_check(cursor_check))
+overlay_check = framecache.cached_check('overlay', framecache.native_check(overlay_check))
 
 
 def openground_check(video, fps=2.0, t0=None, t1=None, band=(0.08, 0.62), min_sky=0.08, share=0.9):

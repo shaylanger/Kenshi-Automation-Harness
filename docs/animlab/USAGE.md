@@ -154,6 +154,18 @@ takes, harness without sync_flash) it is SKIP unless the rules say `set sync 1`.
   117 -> 41 and 59 -> 26 cpu-s cold, 0.4 warm.
 - **GPU pixel maths** `tools/animlab/gpu.py` (CuPy, lowest-priority CUDA stream; numpy fallback, `ANIMLAB_GPU=0`):
   frames.py cursor/overlay candidate search runs on it; `python3 gpu.py` prints the active path.
+- **Windows-native GPU under WSL** (gpu-native 2026-10-11: WSL CUDA/NVDEC goes through dxgkrnl GPU-PV, the 5090's
+  13:16 BSOD + afternoon TDRs): `framecache.decode(video, pre, post)` runs every NVDEC decode (frames.py, autoreview.py,
+  stamp.py) in Windows `ffmpeg.exe -hwaccel cuda` (`ANIMLAB_WIN_FFMPEG`); `framecache.native_check` runs frames.py
+  cursor/overlay in Windows python + CuPy (`ANIMLAB_WIN_PYTHON`, via `native_run.py` on a content-hashed copy of
+  tools/animlab in `%TEMP%\kah-native`, so gate snapshots run their own sources); videos Windows cannot see (gate
+  namespaces' /tmp, bind-mounted snapshots) are copied there for the call. WSL NVDEC/CuPy = fallback only, at most 2
+  WSL GPU processes (`framecache.gpu_slot`, flock `/run/kah-gpu/slot<i>`, `ANIMLAB_WSL_GPU_SLOTS`; the others queue).
+  `ANIMLAB_NATIVE=0` = old WSL path, `ANIMLAB_DECODE=native|hw|sw` forces one decode path. Measured (56 s 1600x900
+  corpus take): decode fps=5 full-res 5.3 -> 2.8 s, 160x90 3.6 -> 1.9 s, 256x144 passthrough 4.3 -> 1.5 s; cursor /
+  overlay checks same wall (9-10 s / 4.7 s), WSL cpu 14 -> 0.05 s; identical RESULT lines. Test
+  `tests/animlab/test_gpunative.py` (WSL). Windows python needs `pip install --user numpy pillow cupy-cuda12x
+  nvidia-cuda-nvrtc-cu12 nvidia-curand-cu12 nvidia-cuda-runtime-cu12` (done on the 5090).
 - **Recording** `tools/automation/venc.sh` `venc_args <crf> [x264-preset]` (sourced by rig-env.sh / take-preflight.sh):
   h264_nvenc on both rigs (probe cached per rig/day in `$TMPDIR/kah-venc.<rig>`), libx264 fallback, `VENC=x264|nvenc`
   forces. New take recorders use `$(venc_args 18)` instead of literal libx264 args.
