@@ -255,19 +255,26 @@ def cmd_stroke(a):
 
 def cmd_path(a):
     """E6 screen path per swing: blade tip one straight line across the screen, diagonals ~40-45 deg, follow-through to a
-    screen edge (metrics.path_check). One `pathsw s<stroke> swing<k> PASS|FAIL|INFO-FAIL ...` line per swing (optimizer input), then
+    screen edge, plus sweep/wexit per swing and rep per stroke (Shay 17:05/17:25; metrics.path_check). One `pathsw s<stroke> swing<k> PASS|FAIL|INFO-FAIL ...` line per swing (optimizer input), then
     `path PASS|FAIL` (stroke-1 swings are info, never fail)."""
     rec = recfmt.parse(a.rec); P = M.frame_metrics(rec)
     kw = dict(dev=a.dev, late=a.late, edge=a.edge, angr=(a.ang_min, a.ang_max), info=() if a.gate_info else M.PATH_INFO)
     ok, n, worst = True, 0, ''
-    for k, (stk, S) in enumerate(M.path_series(rec.frames, P)):
+    sw = M.path_series(rec.frames, P)
+    for k, ((stk, S), idx) in enumerate(zip(sw, M.swings(rec.frames, P))):
         if a.stroke is not None and stk != a.stroke:
             continue
-        g, gated, t = M.path_one(stk, S, **kw)
+        g, gated, t = M.path_swing(rec.frames, P, idx, stk, S, **kw)
         ok = ok and (g or not gated); n += 1
         if gated and not g and not worst:
             worst = ' first_bad=swing%d:%s' % (k, t)
         print('pathsw s%s swing%d %s %s' % ('-' if stk is None else stk, k, 'PASS' if g else ('FAIL' if gated else 'INFO-FAIL'), t))
+    for stk, (g, v) in sorted(M.path_rep(sw).items(), key=lambda x: -1 if x[0] is None else x[0]):
+        if a.stroke is not None and stk != a.stroke:
+            continue
+        gated = stk not in kw['info']
+        ok = ok and (g or not gated)
+        print('pathrep s%s %s rep=%.3f/%.2f' % ('-' if stk is None else stk, 'PASS' if g else ('FAIL' if gated else 'INFO-FAIL'), v, M.REP_MAX))
     if not n:
         ok = False
     print('path %s swings=%d%s%s' % ('PASS' if ok else 'FAIL', n, '' if a.stroke is None else ' stroke=%d' % a.stroke, worst))

@@ -420,5 +420,33 @@ class T(unittest.TestCase):
         ok, gated, t = M.path_one(3, off)
         self.assertFalse(ok, t); self.assertIn(':BAD', t.split('ctr=')[1].split(',')[0])
 
+    def test_swing_rules_sweep_wexit_rep(self):   # Shay 17:05 angular sweep + repeatable path, 17:25 wind-up exit continuity
+        def cam(x, y, z=10.0):   # screen px -> camera numbers at depth z
+            return ((x - 800) / 800.0 * M.TX * z, (450 - y) / 450.0 * M.TY * z, z)
+        def swing(scr, rot=90.0, n=20):   # scr(u) -> tip screen px; blade turns `rot` deg over the stroke in the view plane
+            F, P = [dict(swu=0.0)], [dict(state='ready', wih=True, tip=cam(*scr(-1)), mp=cam(800, 800), mf=(0.0, 1.0, 0.0))]
+            for k in range(n + 1):
+                u = k / float(n); a = math.radians(rot * min(1.0, max(0.0, (u - M.ARC_U0) / (M.PATH_U1 - M.ARC_U0))))
+                F.append(dict(swu=u)); P.append(dict(state='swing', wih=True, tip=cam(*scr(u)), mp=cam(800, 800), mf=(math.sin(a), math.cos(a), 0.0)))
+            return F, P
+        good = lambda u: (800, 300) if u < 0 else ((800 - 1400 * u / M.ARC_U0, 300 + 400 * u / M.ARC_U0) if u < M.ARC_U0 else (-600 + 2600 * (u - M.ARC_U0), 700 - 900 * (u - M.ARC_U0)))
+        F, P = swing(good)
+        idx = M.swings(F, P)[0]
+        ok, t = M.swing_rules(F, P, idx, 3); self.assertTrue(ok, t); self.assertIn('wexit=L', t)
+        ok, t = M.swing_rules(F, P, idx, 3, sweep_min=120); self.assertFalse(ok, t)              # sweep 90 < 120
+        F2, P2 = swing(good, rot=30.0); ok, t = M.swing_rules(F2, P2, M.swings(F2, P2)[0], 3)
+        self.assertFalse(ok, t); self.assertIn(':BAD', t.split('sweep=')[1].split(',')[0])
+        pop = lambda u: (800, 300) if u < M.ARC_U0 / 2 else good(max(u, M.ARC_U0))             # blade jumps from mid-screen to off screen
+        F3, P3 = swing(pop); ok, t = M.windup_exit(F3, P3, M.swings(F3, P3)[0])
+        self.assertFalse(ok, t); self.assertIn('exit_edge', t); self.assertIn(':BAD', t)
+        F4, P4 = swing(lambda u: good(u) if u < M.ARC_U0 else ((-600 + 2600 * (u - M.ARC_U0), -300) if u < 0.6 else good(u)))   # leaves left, comes back in from the top
+        ok, t = M.windup_exit(F4, P4, M.swings(F4, P4)[0]); self.assertFalse(ok, t); self.assertIn('other side', t)
+        on = lambda u: (800, 300) if u < M.ARC_U0 else good(u) if u > 0.4 else (700, 400)         # stroke starts on screen
+        F5, P5 = swing(on); ok, t = M.windup_exit(F5, P5, M.swings(F5, P5)[0]); self.assertTrue(ok, t); self.assertIn('wexit=on', t)
+        S = [(u, i, p) for u, i, p in M.path_series(F, P)[0][1]]
+        rep = M.path_rep([(3, S), (3, S)]); self.assertTrue(rep[3][0], rep)
+        rep = M.path_rep([(3, S), (3, [(u, i, (x, y + 200)) for u, i, (x, y) in S])]); self.assertFalse(rep[3][0], rep)
+        ok, t = M.thrust_one(9, [(0.3 + 0.1 * k, k, (400 + 100 * k, 700 - 60 * k)) for k in range(5)]); self.assertTrue(ok, t)
+
 if __name__ == '__main__':
     unittest.main(verbosity=1)

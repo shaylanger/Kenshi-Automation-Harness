@@ -1660,15 +1660,164 @@ def path_one(stk, S, dev=PATH_DEV, late=PATH_LATE_MAX, edge=PATH_EDGE, angr=PATH
     return ok, stk not in info, txt + ('(info)' if stk in info else '')
 
 
+# ---- Shay 17:05/17:25 swing rules, the rest (animlab-maintainer; span/ctr/fast above are sword-judge's):
+#   sweep = blade angular sweep: max angle between any two blade directions (camera frame, 3D) over the stroke (u ARC_U0..
+#           PATH_U1) >= SWEEP_MIN. Length-independent fairness: a short blade (dagger, fists later) cannot span the screen
+#           with its tip the way a long one does, but must still turn through the same angle (17:05 "minimum angular sweep").
+#           corpus: accepted backhand s1 85-87, s3 105-111, s0 55-59 (rejected PT17 "stops mid-swing"), s2 42 (info).
+#   rep   = repeatable path: per stroke id, every swing's screen tip path resampled at 20 stroke-u points; mean distance to
+#           the stroke's mean path / screen width <= REP_MAX (needs >= 2 swings of the stroke; corpus 0.001-0.008).
+#   wexit = wind-up exit continuity (Shay 17:25): a stroke whose tip is OFF screen at the stroke start (u ARC_U0) must show
+#           the wind-up carrying it off: the tip is on screen in the wind-up (or the ready frame before it), leaves through a
+#           screen edge with its last on-screen point within EXIT_EDGE of that edge (no jump out from mid-screen), and the
+#           stroke brings it back in through the same edge (no pop-in from another side). Ending off screen is fine
+#           (never judged); a stroke that starts on screen is 'wexit=on'. No wind-up frames recorded = BAD (no evidence).
+#           Tip already off screen in the ready pose: the blade middle is judged the same way ('mid:'; blade middle on
+#           screen through the whole wind-up = 'mid-on', the blade never disappears).
+#   thrust strokes (PATH_THRUST, scripted ids; none shipped yet): judged separately: no span/ang/edge/fast/sweep, the end tip
+#           must lie within PATH_THRUST_CTR (of the screen height) of the screen centre ('toward the centre', 17:05).
+# CLASS: every weapon stroke family (1H/2H/polearm/new); strokes in PATH_INFO report, never block (accepted s1).
+SWEEP_MIN, REP_MAX, EXIT_EDGE = 70.0, 0.03, 0.25
+PATH_THRUST, PATH_THRUST_CTR = (), 0.15
+
+
+def _on_scr(q):
+    return q is not None and 0 <= q[0] <= W_PX and 0 <= q[1] <= H_PX
+
+
+def _off_sides(q):
+    if q is None:
+        return {'Z'}   # behind the eye
+    b = set()
+    if q[0] < 0: b.add('L')
+    if q[0] > W_PX: b.add('R')
+    if q[1] < 0: b.add('T')
+    if q[1] > H_PX: b.add('B')
+    return b
+
+
+def swing_sweep(F, P, idx, u0=ARC_U0, u1=PATH_U1):
+    fs = [nz(P[i]['mf']) for i in idx if u0 <= F[i].get('swu', 0.0) <= u1]
+    if len(fs) < 2:
+        return None
+    return max(math.degrees(math.acos(max(-1.0, min(1.0, dot(p, q))))) for n, p in enumerate(fs) for q in fs[n + 1:])
+
+
+def windup_exit(F, P, idx, edge=EXIT_EDGE):
+    """(ok, text) for one swing (see the block comment)."""
+    pre = [idx[0] - 1] if idx[0] > 0 and P[idx[0] - 1]['wih'] and P[idx[0] - 1]['state'] != 'swing' else []
+    wind = [(i, _uproj(P[i]['tip'])) for i in pre] + [(i, _uproj(P[i]['tip'])) for i in idx if F[i].get('swu', 0.0) < ARC_U0]
+    strk = [(i, _uproj(P[i]['tip'])) for i in idx if ARC_U0 <= F[i].get('swu', 0.0) <= PATH_U1]
+    if not strk:
+        return False, 'wexit=no-stroke:BAD'
+    if _on_scr(strk[0][1]):
+        return True, 'wexit=on'
+    if len(wind) < 2:
+        return False, 'wexit=no-windup-frames:BAD'
+    ons = [n for n, (i, q) in enumerate(wind) if _on_scr(q)]
+    via = ''
+    if not ons:   # tip off screen from the ready pose on: judge the blade middle (the visible blade must be seen leaving)
+        mid = lambda i: _uproj(add(P[i]['mp'], mul(nz(P[i]['mf']), 0.5 * ln(sub(P[i]['tip'], P[i]['mp'])))))
+        wind = [(i, mid(i)) for i, q in wind]
+        if all(_on_scr(q) for i, q in wind):
+            return True, 'wexit=mid-on(tip off, blade middle on screen through the wind-up)'
+        ons = [n for n, (i, q) in enumerate(wind) if _on_scr(q)]
+        if not ons:
+            return False, 'wexit=never-on(blade off screen from the ready pose on: pops in):BAD'
+        via = 'mid:'
+    n = ons[-1]
+    q_on = wind[n][1]
+    if n + 1 >= len(wind):
+        return True, 'wexit=%son-to-stroke-start' % via   # still on at the last wind-up frame: the stroke itself carries it off
+    q_off = wind[n + 1][1]
+    side = _off_sides(q_off)
+    dist = {'L': q_on[0] / W_PX, 'R': 1 - q_on[0] / W_PX, 'T': q_on[1] / H_PX, 'B': 1 - q_on[1] / H_PX}
+    de = min([dist[x] for x in side if x in dist] or [1.0])
+    back = None   # re-entry side: the off-screen point just before the stroke's first on-screen frame
+    for k in range(1, len(strk)):
+        if _on_scr(strk[k][1]) and not _on_scr(strk[k - 1][1]):
+            back = _off_sides(strk[k - 1][1])
+            break
+    g_e = de <= edge
+    g_s = back is None or bool(side & back)
+    txt = 'wexit=' + via + '%s@frame%d,exit_edge=%.2f/%.2f%s,back=%s%s' % (
+        ''.join(sorted(side)) or '?', wind[n][0], de, edge, '' if g_e else ':BAD',
+        '-' if back is None else ''.join(sorted(back)), '' if g_s else ':BAD(other side)')
+    return g_e and g_s, txt
+
+
+def path_rep(sw, rep_max=REP_MAX, nu=20):
+    """{stroke: (ok, value)} over swings `sw` = path_series(F, P) (stroke ids with >= 2 swings of >= PATH_MIN_N frames)."""
+    by = {}
+    for stk, S in sw:
+        if len(S) >= PATH_MIN_N:
+            by.setdefault(stk, []).append(S)
+    us = [ARC_U0 + (PATH_U1 - ARC_U0) * k / (nu - 1) for k in range(nu)]
+    cl = lambda v, lim: min(1.5 * lim, max(-0.5 * lim, v))
+    def at(S, u):
+        for j in range(1, len(S)):
+            if S[j][0] >= u:
+                a, b = S[j - 1], S[j]; w = min(1.0, max(0.0, (u - a[0]) / max(b[0] - a[0], 1e-9)))
+                return (cl(a[2][0] + w * (b[2][0] - a[2][0]), W_PX), cl(a[2][1] + w * (b[2][1] - a[2][1]), H_PX))
+        return (cl(S[-1][2][0], W_PX), cl(S[-1][2][1], H_PX))
+    out = {}
+    for stk, L in by.items():
+        if len(L) < 2:
+            continue
+        R = [[at(S, u) for u in us] for S in L]
+        mean = [(sum(r[k][0] for r in R) / len(R), sum(r[k][1] for r in R) / len(R)) for k in range(nu)]
+        v = max(sum(math.hypot(r[k][0] - mean[k][0], r[k][1] - mean[k][1]) for k in range(nu)) / nu / W_PX for r in R)
+        out[stk] = (v <= rep_max, v)
+    return out
+
+
+def thrust_one(stk, S, ctr=PATH_THRUST_CTR):
+    """thrust stroke: (ok, text) end tip near the screen centre."""
+    if len(S) < PATH_MIN_N:
+        return False, 'thrust,n=%d:BAD(no stroke frames)' % len(S)
+    x, y = S[-1][2]
+    d = math.hypot(x - W_PX / 2.0, y - H_PX / 2.0) / H_PX
+    return d <= ctr, 'thrust,end_ctr=%.3f/%.2f%s,end=%.0f,%.0f' % (d, ctr, '' if d <= ctr else ':BAD', x, y)
+
+
+def swing_rules(F, P, idx, stk, sweep_min=SWEEP_MIN):
+    """(ok, text) sweep + wexit for one swing (thrusts: wexit only)."""
+    ok, t = windup_exit(F, P, idx)
+    if stk in PATH_THRUST:
+        return ok, t
+    sw = swing_sweep(F, P, idx)
+    g = sw is not None and sw >= sweep_min
+    return ok and g, ('sweep=%s/%.0f%s,' % ('-' if sw is None else '%.0f' % sw, sweep_min, '' if g else ':BAD')) + t
+
+
+def path_swing(F, P, idx, stk, S, **kw):
+    """one swing: (ok, gated, text) = path_one (or thrust_one) + swing_rules."""
+    info = kw.get('info', PATH_INFO)
+    if stk in PATH_THRUST:
+        g, t = thrust_one(stk, S)
+        gated = stk not in info
+        t += '' if gated else '(info)'
+    else:
+        g, gated, t = path_one(stk, S, **kw)
+    rg, rt = swing_rules(F, P, idx, stk)
+    return g and rg, gated, t + ',' + rt
+
+
 def path_check(F, P, **kw):
     """E6 screen path per swing (path_one); PASS = every gated swing passes (stroke-1 swings are info: never fail)."""
     sw = path_series(F, P)
     if not sw:
         return False, ['no swing:BAD']
+    info = kw.get('info', PATH_INFO)
     ok, txt = True, []
-    for k, (stk, S) in enumerate(sw):
-        g, gated, t = path_one(stk, S, **kw)
+    for k, ((stk, S), idx) in enumerate(zip(sw, swings(F, P))):
+        g, gated, t = path_swing(F, P, idx, stk, S, **kw)
         if gated:
             ok = ok and g
         txt.append('swing%d%s:%s' % (k, '' if stk is None else '(stroke%d)' % stk, t))
+    for stk, (g, v) in sorted(path_rep(sw).items(), key=lambda x: -1 if x[0] is None else x[0]):
+        gated = stk not in info
+        if gated:
+            ok = ok and g
+        txt.append('rep%s=%.3f/%.2f%s%s' % ('' if stk is None else '(stroke%d)' % stk, v, REP_MAX, '' if g else ':BAD', '' if gated else '(info)'))
     return ok, txt
