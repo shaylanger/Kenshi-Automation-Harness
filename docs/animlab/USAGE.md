@@ -19,6 +19,11 @@ Pieces:
 
 ## One-liners (WSL)
 
+Live animation tables (KenshiFP `fp_tables`, file `fp_tables.txt`, format in KenshiFP `docs/LIVE_TABLES.md`): the lab
+reads the same files. `kfpvm_replay`/`kfpvm_drive --tables <file>` apply a variant (after the recording's own `# set`
+lines, which already carry the variant a game recording was filmed with); `kfpvm_tables check <file>` gives the game's
+hash offline; `tools/animlab/fptables.py make|show|check|expand` writes variant files and expands sweep lists.
+
 ```
 # build the KenshiFP adapter against a read-only copy of the current source (+ the rec-native patch if not merged yet)
 bash components/KenshiFP/animlab/build.sh --sync [--patch pending-fixes/kfp-rec-native-meta.py] --out /root/animlab-build/kfpvm_cur
