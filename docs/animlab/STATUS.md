@@ -353,7 +353,7 @@ The largest human-vs-ours gaps (elbow bent through the stroke, short arcs, no to
 yaw 37-99 deg per stroke) follow from the fixed FP camera + R22 (no framing change): do not gate them without Shay (PR4, PR8).
 Live-tables naming bug found on the way: `kfp_tables.inc` names row 0 of `fist_guard` / `fist_<tech>` 'L' (KT_RLR / KT_RLRN), but the
 C arrays hold the RIGHT hand first (kfp_viewmodel.inc `g_vm_fist_guard` comment `/* R */`, native.py writes R, L): `fist_guard.L`
-edits the right fist (owner: live-tables / kfp-fixer).
+edits the right fist (owner: live-tables / kfp-fixer). Fix pending 2026-10-11: `pending-fixes/kfp-fist-rowlabels.py` (row 0 = R; compare.py tells old dumps apart by the guard x).
 
 ## Unarmed spec (NA1, before the fists are built)
 `spec.py unarmed` on metricslab/native.py fist candidates (dir with <technique>/pose.txt; `_*` helper dirs skipped): U1 guard view,
