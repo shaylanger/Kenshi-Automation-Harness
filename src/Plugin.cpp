@@ -394,6 +394,9 @@ void FrameWork(bool fromOgre) {
     g_ogreFrames = true;
   else if (g_ogreFrames)
     return;
+  // cap here, not only in frameStarted: in Kenshi only the MyGUI frame event
+  // fires (GFXM 2026-10-10: framecap.txt=60, harness log cap=0 source=mygui)
+  FrameCap();
   MeasureFrame();
   InputIsolationTick();
   SampleProduction(ou);
@@ -419,7 +422,6 @@ void WorldKeepers() {
 class AutomationFrameListener : public Ogre::FrameListener {
 public:
   virtual bool frameStarted(const Ogre::FrameEvent &) {
-    FrameCap();
     FrameWork(true);
     Tick("ogre");
     return true;
