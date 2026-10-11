@@ -281,10 +281,12 @@ def read_stamp(path):
 
 def stamp_view(kv):
     v = kv.get('view', '').lower()
-    if v in ('eye', 'zoom', 'off', 'freecam'):    # KenshiFP stamp: eye = FP; zoom + viewmodel on = FP pulled back;
-        if v == 'eye' or (v == 'zoom' and kv.get('vm') == '1'):   # zoom + viewmodel off = band until the body shows
-            return 'fp'
-        return 'band' if v == 'zoom' else '3p'
+    if v in ('eye', 'zoom', 'off', 'freecam'):    # KenshiFP stamp: eye = FP; zoom = 3P (the viewmodel flag stays 1
+        if v == 'eye':                            # there: 03-stamp-zoomview-1011-0043 switch sweep, zoom+vm=1 = vmrec 3p
+            return 'fp'                           # on 956/960 frames, the 4 at vmrec's sampled edges); zoom + viewmodel
+        if v == 'zoom':                           # off = band until the body shows
+            return '3p' if kv.get('vm') == '1' else 'band'
+        return '3p'
     if v:
         return v
     if kv.get('band_hidden') == '1':
@@ -323,11 +325,12 @@ def frame_views(t, cnt, stamp=None, vmrec=None):
         if rows:
             byframe = all(r[1] for r in rows)
             j = 0
-            for i in range(n):
+            eps = 1e-6 if byframe else 2e-3   # stamp table times are written to 0.1 ms: 57.3667 > pts 57.36667 lagged
+            for i in range(n):                # the switch one frame (03-stamp-zoomview-1011-0043)
                 key = i if byframe else t[i]
-                while j + 1 < len(rows) and rows[j + 1][0] <= key + 1e-6:
+                while j + 1 < len(rows) and rows[j + 1][0] <= key + eps:
                     j += 1
-                if rows[j][0] <= key + 1e-6:
+                if rows[j][0] <= key + eps:
                     kv = rows[j][2]
                     views[i] = stamp_view(kv); sts[i] = kv.get('st') or kv.get('ui_state')
             i = 0                     # stamp 'band' (zoom, viewmodel off) ends where the body shows: the first image
