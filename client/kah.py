@@ -192,7 +192,7 @@ def send(d, cmd, args, timeout=None):
                     parts = raw.decode('utf-8', errors='replace').rstrip('\r\n').split('\t', 2)
                     if parts[0] == cid and len(parts) == 3:
                         return parts[1] == 'ok', parts[2]
-        time.sleep(0.2)
+        time.sleep(0.05)   # speed-scout 2026-10-11: 0.2 s polls added ~0.1 s to every call (the harness answers within its 250 ms poll)
     sys.exit('no answer within %ds (Kenshi not running or stuck loading?)' % timeout)
 
 
@@ -240,7 +240,7 @@ def wait_world(d, limit):
             ok, detail = False, 'no answer (loading?)'
         if ok and 'phase=world' in detail:
             return True, detail
-        time.sleep(2)
+        time.sleep(0.5)   # was 2 s: every load waited ~1 s longer than needed
     return False, 'world not ready after %ds: %s' % (limit, detail)
 
 
@@ -562,6 +562,19 @@ def main():
             return 0
         csv_path = args[args.index('--csv') + 1] if '--csv' in args else None
         return run_scenario(d, args[0], csv_path, '--stop' in args)
+    if cmd == 'many':
+        # many "<cmd> [args]" ...: all commands in ONE inbox write = one round trip (send_many) instead of ~0.5 s each
+        # (speed-scout 2026-10-11: take-preflight pf_clean spent ~20 s on 40 single pin/ko calls). Each argument is one
+        # command line, split like a shell (quote names with spaces). Prints one reply line per command, in order;
+        # exit 0 only if every command answered ok.
+        import shlex
+        cmds = [shlex.split(c) for c in args if c.strip()]
+        if not cmds:
+            sys.exit('usage: kah many "<cmd> [args]" ...')
+        res = send_many(d, [(c[0], c[1:]) for c in cmds], timeout=20 + len(cmds))
+        for ok, detail in res:
+            print(('' if ok else 'ERROR: ') + detail)
+        return 0 if all(ok for ok, _ in res) else 1
     ok, detail = send(d, cmd, args)
     print(('' if ok else 'ERROR: ') + detail)
     return 0 if ok else 1
