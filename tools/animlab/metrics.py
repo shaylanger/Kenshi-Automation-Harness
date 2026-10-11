@@ -394,6 +394,8 @@ def churn_check(S, rev_max=CHURN_REV, grip_max=CHURN_GRIP, tw=CHURN_T, win=CHURN
     (e) gate with sroll_gate (else info; the current game swing rolls ~150 deg here): stroke start (u0 .. u0+sroll_du): the hand may roll only a little and gradually: max |cumulative twist|
         <= sroll_max deg, largest step <= sroll_step deg per 1/60 s."""
     n = len(S); rev = (0.0, None); ratio = (0.0, None)
+    gsuf = {}   # e -> (lo, suf): suf[q - lo] = max(_d2(g_e, g_q') for q' in q..e-1); the same values as the per-i max (gpu-lab
+                # 2026-10-11: was O(window^2) per start frame, ~60% of a pool job's Python time)
     for i in range(skip, n):
         if not S[i]:
             continue
@@ -402,7 +404,15 @@ def churn_check(S, rev_max=CHURN_REV, grip_max=CHURN_GRIP, tw=CHURN_T, win=CHURN
             j += 1
         ge, k = 0.0, i
         for e in range(i + 1, j + 1):
-            ge = max(ge, max(_d2(S[e]['g'], S[q]['g']) for q in range(i, e)))
+            gs = gsuf.get(e)
+            if gs is None or gs[0] > i:
+                ge_ = S[e]['g']; suf = [0.0] * (e - i); m = None
+                for q in range(e - 1, i - 1, -1):
+                    d = _d2(ge_, S[q]['g']); m = d if m is None or d > m else m; suf[q - i] = m
+                    if d != d:   # NaN: max() order semantics differ from a suffix max -> exact old path for this e
+                        suf = None; break
+                gs = gsuf[e] = (i, suf)
+            ge = max(ge, gs[1][i - gs[0]] if gs[1] is not None else max(_d2(S[e]['g'], S[q]['g']) for q in range(i, e)))
             if ge > grip_max:
                 break
             if _d2(S[e]['vm'], S[i]['vm']) > _d2(S[k]['vm'], S[i]['vm']):
