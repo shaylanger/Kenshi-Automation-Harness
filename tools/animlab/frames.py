@@ -318,6 +318,11 @@ OV_ZONES = ((0.15, 0.0, 0.85, 0.20), (0.0, 0.70, 1.0, 1.0), (0.43, 0.505, 0.60, 
 #   0.2 H: anim-sword-e6 "stroke 0"), Kenshi's bottom UI panel. The top corners (stray debug strings) stay checked.
 OV_HUD_PX = (-112, 4.5, 160, 58.5)            # the KenshiFP HUD text box zone in px from the screen centre (fixed-px widget;
 #   = OV_ZONES[2] at 1600x900); ov_zones() places it at any frame size
+OV_TEXTURE = 0.05                             # bright speckled surface, not floating text (Misses 2026-10-11 twohand-fix:
+#   Axima's white speckled gauntlet at zoom 0 read as an outlined-text line in 4080 Katana take wm-2hl/001): an outlined-text
+#   line (no dark-panel cell) whose ring (3 cell rows above/below, 1 cell left/right) has >= this share of bright pixels
+#   that are NOT thin strokes is a textured surface. Measured: gauntlet ring 0.19, every real name tag/damage number in
+#   the overlay corpus <= 0.006.
 
 
 def ov_zones(Ww=OW, Hh=OH):
@@ -344,11 +349,12 @@ def _strokes(m):
     return r.reshape(m.shape[0] // CH, CH, m.shape[1] // CW, CW).sum(3).max(1)
 
 
-def text_cells(f):
+def text_cells(f, blob=False):
     """(T, A, B) cell masks of text in a frame at the game's own size (any resolution; cropped to whole cells).
     B: outlined thin text floating over the scene (name tags, damage numbers): neutral-bright or red core pixels with a much darker pixel within 3 px on both sides; A: text on a flat dark
     panel (speech bars, hint lists, debug boxes): dark flat background + low-saturation brighter glyphs. Both need >= 3
-    glyph strokes per cell."""
+    glyph strokes per cell. blob=True adds a 4th item: per cell the count of bright core pixels that are not thin
+    strokes (texture, OV_TEXTURE)."""
     np = gpu.xp_of(f)
     f = fit_cells(f)
     g = f.mean(-1)
@@ -372,7 +378,20 @@ def text_cells(f):
     gs = np.where(glyph, S, 0).sum(-1) / np.maximum(glyph.sum(-1), 1)
     A = (p20 <= 35) & (flat >= 0.45) & (p97 - p20 >= 60) & (glyph.sum(-1) >= 6) & (gs <= 40)
     A &= _strokes(g > (np.repeat(np.repeat(p20, CH, 0), CW, 1) + 50)) >= 3
+    if blob:
+        return A | B, A, B, _ogrid(core & ~thin).sum(-1)
     return A | B, A, B
+
+
+def textured_line(BL, y, x):
+    """True when the 3-cell text line at cell (y, x) sits inside a bright speckled surface (OV_TEXTURE): bright non-stroke
+    pixel share of the ring around it (rows y-3..y+3, cols x-1..x+3, minus rows y-1..y+1 x cols x..x+2)."""
+    nr, nc = BL.shape
+    oy0, oy1, ox0, ox1 = max(0, y - 3), min(nr, y + 4), max(0, x - 1), min(nc, x + 4)
+    iy0, iy1 = max(0, y - 1), min(nr, y + 2)
+    ring = BL[oy0:oy1, ox0:ox1].sum() - BL[iy0:iy1, x:x + 3].sum()
+    area = ((oy1 - oy0) * (ox1 - ox0) - (iy1 - iy0) * 3) * CH * CW
+    return area > 0 and ring >= OV_TEXTURE * area
 
 
 def flat_cells(f, std_max=3.0, sat_max=25):
@@ -444,7 +463,7 @@ def overlay_check(video, fps=2.0, t0=None, t1=None, zones=None, frames=None):
     if frames is None:
         frames = iter_frames_full(video, fps, t0, t1)
     Z = Zs = None
-    ts, TX, AX, PX = [], [], [], []
+    ts, TX, AX, PX, BX = [], [], [], [], []
     for t, f in frames:
         if is_flash(f):   # harness sync_flash marker frame
             continue
@@ -456,13 +475,13 @@ def overlay_check(video, fps=2.0, t0=None, t1=None, zones=None, frames=None):
         if st:
             Zs = zone_mask([stamp_zone(C, Ww, Hh)], Ww, Hh)
         fd = gpu.dev(f)   # per-pixel work on the GPU when it is on (gpu.py); cell masks back on host
-        T, A, _ = (gpu.host(x) for x in text_cells(fd))
+        T, A, _, BL = (gpu.host(x) for x in text_cells(fd, blob=True))
         P = np.zeros_like(T)
         for x0, y0, x1, y1 in panel_rects(*(gpu.host(x) for x in flat_cells(fd))):
             P[y0:y1, x0:x1] = True
         if st:   # frame stamp corner: the stamp's own cells
             T = T & ~Zs; A = A & ~Zs; P = P & ~Zs
-        ts.append(t); TX.append(T); AX.append(A); PX.append(P)
+        ts.append(t); TX.append(T); AX.append(A); PX.append(P); BX.append(BL)
     if not ts:
         return False, 'no frames:BAD'
     TX, AX, PX = np.stack(TX), np.stack(AX), np.stack(PX)
@@ -472,6 +491,10 @@ def overlay_check(video, fps=2.0, t0=None, t1=None, zones=None, frames=None):
     for k, t in enumerate(ts):
         fo = TX[k] & ~bt & ~Z
         ln = fo[:, :-2] & fo[:, 1:-1] & fo[:, 2:]
+        ao = AX[k] & ~bt & ~Z
+        for y, x in zip(*np.nonzero(ln)):   # outlined-text lines on a bright speckled surface (armour) are texture
+            if not ao[y, x:x + 3].any() and textured_line(BX[k], y, x):
+                ln[y, x] = False
         pa = PX[k] & ~bp & ~Z
         if ln.any() or pa.sum() >= 12:
             if ln.any():

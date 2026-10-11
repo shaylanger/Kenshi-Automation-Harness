@@ -138,6 +138,32 @@ class Overlay(unittest.TestCase):   # class of the cursor miss: nothing foreign 
         fs[4] = tag(fs[4], 40, 40, 'debug: x=12')                       # stray string in the top-left corner stays checked
         self.assertFalse(self.run_(fs)[0])
 
+    def test_speckled_gauntlet_passes(self):   # Misses 2026-10-11 twohand-fix: white speckled armour read as outlined text
+        r = np.random.RandomState(7)
+        fs = []
+        for k in range(4):
+            f = scene(k)
+            p = r.randint(150, 256, (180, 250, 1)) + r.randint(-20, 21, (180, 250, 3))   # speckled off-white
+            p[r.rand(180, 250) < 0.08] = (220, 150, 60)                                 # orange specks
+            for s in range(0, 250, 22):                                                   # dark stitched stripes
+                for yy in range(180):
+                    xx = s + yy // 3
+                    if xx + 2 < 250 and (yy // 2) % 2 == 0:
+                        p[yy, xx:xx + 2] = 25
+            p[r.rand(180, 250) < 0.12] = 30                                               # dark speckles
+            f[460:640, 1120:1370] = np.clip(p, 0, 255)
+            fs.append(f)
+        old = FR.OV_TEXTURE
+        try:
+            FR.OV_TEXTURE = 99.0   # texture filter off: the patch must read as text, else this test proves nothing
+            self.assertFalse(self.run_(fs)[0])
+        finally:
+            FR.OV_TEXTURE = old
+        ok, txt = self.run_(fs)
+        self.assertTrue(ok, txt)
+        fs[1] = tag(fs[1], 700, 350, '[Axima]')   # a real tag elsewhere in the same take still fails
+        self.assertFalse(self.run_(fs)[0])
+
     def test_persistent_name_tag_fails(self):   # Misses 2026-10-10: [Axima] tag in every frame was hidden by the text baseline
         fs = [tag(scene(k), 720, 325, '[Axima]') for k in range(6)]
         ok, txt = self.run_(fs)
