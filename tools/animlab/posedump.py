@@ -6,7 +6,8 @@ The game writes `fp_posedump <file> [frames N] [warm W]` (KenshiFP patch kfp-pos
 vm_pd_write, compiled from the same client source) at the dumped records and this script prints flat per-bone deltas.
 
   posedump.py compare <game.pd> [--rec <rec>] [--lab-bin <kfpvm_replay with posedump>] [--lab <lab.pd>] [--tables <file>]
-                      [--pos-tol 0.5] [--ang-tol 15] [--row POSEDUMP] [--out <dir>]
+                      [--pos-tol 0.5] [--ang-tol 15] [--row POSEDUMP] [--out <dir>] [--skip N]
+      --skip N = leave out the first N records (warm-up: solver state from before the recording settles).
       --lab given = compare two existing dumps (no replay). Else replays --rec (default <game.pd>.rec).
   posedump.py fromrec <rec.txt> <out.pd> [--frames a,b,c-d] [--all]
       (default: only records where the viewmodel is fully up, on + w=1, this and the previous record; --all = every one)
@@ -121,14 +122,14 @@ def run_lab(rec, frames, tables, outpd):
 
 def cmd_compare(a):
     game = a[0]
-    o = dict(rec=game + '.rec', lab=None, tables=None, pos_tol=0.5, ang_tol=15.0, row='POSEDUMP', out=None)
+    o = dict(rec=game + '.rec', lab=None, tables=None, pos_tol=0.5, ang_tol=15.0, row='POSEDUMP', out=None, skip=0)
     i = 1
     while i < len(a):
         k = a[i].lstrip('-').replace('-', '_')
         if k == 'lab_bin':
             os.environ['KFPVM_POSEDUMP'] = a[i + 1]
         elif k in o:
-            o[k] = a[i + 1] if k not in ('pos_tol', 'ang_tol') else float(a[i + 1])
+            o[k] = a[i + 1] if k not in ('pos_tol', 'ang_tol', 'skip') else (int(a[i + 1]) if k == 'skip' else float(a[i + 1]))
         else:
             sys.exit('posedump.py: unknown arg %s' % a[i])
         i += 2
@@ -148,6 +149,10 @@ def cmd_compare(a):
         except Exception as e:  # noqa
             print('RESULT %s FAIL lab: %s' % (row, e)); return 1
     l = parse(labpd)
+    if o['skip'] and g['B']:   # warm-up records (solver history from before the recording: swing/roll settle)
+        f0 = min(g['B'])
+        for f in [f for f in g['B'] if f < f0 + o['skip']]:
+            del g['B'][f]
     out = sys.stdout
     if o['out']:
         os.makedirs(o['out'], exist_ok=True)
