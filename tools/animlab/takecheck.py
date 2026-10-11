@@ -44,8 +44,9 @@ Exit 0 = PASS or PASS-REC. Prints one line per check, then `RESULT <name> PASS|P
 
 PRODUCT vs RECORDING checks (Shay 2026-10-10: no refilms caused only by PC load; tur-b-2 T6 passed review but FAILed on a
 1.1 s sampler gap, a 0.45 s short video and 0.55 s label lag at WSL load 60). PRODUCT = what the game showed: claim values,
-pre, forbid, cursor, overlay, animlive (+ the wrapper's openground/moves/look checks). RECORDING = how well the take was
-captured: claim/cover sampler gaps, video length, sync flash lag. When only recording checks fail the take is judged on
+pre, forbid, cursor, animlive (+ the wrapper's openground/moves/look checks). RECORDING = how well the take was
+captured: claim/cover sampler gaps, video length, sync flash lag, foreign overlay (game hint popups, name tags, OS
+toasts over the scene: twohand-fix 2026-10-11, a row FAILed on a recording-only overlay). When only recording checks fail the take is judged on
 what was recorded: `RESULT <name> PASS-REC <n> checks rec-warn=<which>`. A recording failure still FAILs (`rec-hid=`) when
 it hides a whole state, because a state with no evidence is not judged:
   claim gap   >= half the segment, > 3 x maxgap, or < 2 samples in it
@@ -510,8 +511,9 @@ def main():
         import frames
         vok, vtxt = frames.overlay_check(a.video)
         lines.append('overlay %s %s' % ('PASS' if vok else 'FAIL', vtxt))
-        if not vok:
-            ok = False; fails.append('overlay')
+        if not vok:   # a RECORDING check (twohand-fix 2026-10-11): game UI / OS popups over the take say how it was
+            # captured, not what KenshiFP did; reviewers still get the flags (autoreview) and the setup misses list
+            ok = False; fails.append('overlay'); rec['overlay'] = 'warn'
     if sync_res is not None:
         sok, stxt, synced = sync_res
         lines.append('sync %s %s' % (('PASS' if sok else 'FAIL') if not stxt.startswith('SKIP') else 'SKIP', stxt))

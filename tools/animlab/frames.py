@@ -20,6 +20,12 @@
       own HUD (baseline); text has NO baseline (a name tag shown in every frame is still foreign, Misses 2026-10-10
       persistent tag); expected zones: centred label band (x .15-.85, top 20%), Kenshi's bottom UI panel (bottom 30%) and
       the KenshiFP HUD text box (at W/2-90, H/2+20: LOADED / RELOAD n / NO POWER). takecheck.py runs it on every take given with --video.
+      Framed UI boxes (ui_boxes: game hint/notification popups, Misses 2026-10-10 tutorial hint popups) outside the
+      zones and blue-grey toasts (toast_cells: Steam toast, anywhere incl. the HUD band) have no baseline.
+      A take recording check: takecheck grades an overlay FAIL as PASS-REC (rec-warn=overlay), reviewers see the flags.
+  overlay|cursor <png|jpg> [--sheet]
+      The same checks on a STILL (harness screenshot): a 16:9 image gets every overlay detector (no baseline) + the
+      cursor tests; a contact sheet (other aspect or --sheet) only the scale-free toast test (steam-popup 2026-10-11).
   syncmarks <video> [--fps 30] [--from s] [--to s]
       Sync flashes (harness `sync_flash`, sent by take-sample.sh take_mark with every label; T6 label lag 2026-10-10):
       frames where >= 85% of the pixels are flash magenta (r, b > 170, g < 90). Prints `marks=<n> at=<onset s>,...`
@@ -235,6 +241,9 @@ def find_cursor(f, white=200, dark=110):
             prof += abs(wr - r) <= max(1.5, 0.2 * r); ws.append(wr)
         n = h - 1
         grow = ws[-1] - ws[0] >= 0.7 * (h - 2) and ws[0] <= 3   # sharp tip, 45 deg growth (a glyph stem stays wide)
+        # the head still widens at its last rows: a lit strip between two HUD panels (tapered top, then a straight
+        # right edge) plateaus (Z1 zs-sword-fade-on 38.8 s x1124,y853: widths 1,4,4,5,5,5 at L=14; Shay review 2026-10-11)
+        grow = grow and ws[-1] > ws[-3]
         if grow and ins >= 0.9 * tot and outt and outw <= 0.2 * outt and dk >= 0.7 * n and prof >= 0.8 * n:
             out.append((int(x), int(y), int(L))); seen.add((x, y))
     return out
@@ -249,7 +258,9 @@ def find_kcursor(f, a0=5, a1=11, con=25, bright=90, share=0.8):
     anim-xbow-z25 7-37 s and vm-rework anim-sword/xbow-z0, where the arrow test (find_cursor) saw nothing. Per centre:
     each arm (offsets a0..a1 px) is a thin line (brighter than the pixels 2 px to either side) on >= share of its
     pixels, the arrows stop short of the centre (a plain cross / grid line runs through) and every arm has arrowhead
-    pixels beside the line (a UI grid line has none)."""
+    pixels beside the line (a UI grid line has none). The arms END (~12 px from the centre): a junction of long lines
+    (scene seen through the 1-2 px gaps between stacked UI boxes, Z1 hint-popup X buttons x182,y395, Shay review
+    2026-10-11) has >= 3 arms that run on past a1 + 3 .. a1 + 8 px and is no cursor."""
     np = gpu.xp_of(f)
     L = f.min(2).astype(np.int16)
     Hh, Ww = L.shape
@@ -257,15 +268,18 @@ def find_kcursor(f, a0=5, a1=11, con=25, bright=90, share=0.8):
     V = (L - np.maximum(Pd[2:-2, :-4], Pd[2:-2, 4:]) > con) & (L > bright)
     Hm = (L - np.maximum(Pd[:-4, 2:-2], Pd[4:, 2:-2]) > con) & (L > bright)
     B = L > bright
-    m = a1 + 2
+    m = a1 + 9
     def sl(A, dy, dx):
         return A[m + dy:Hh - m + dy, m + dx:Ww - m + dx].astype(np.int16)
     need = int(np.ceil(share * (a1 - a0 + 1)))
     c = np.ones((Hh - 2 * m, Ww - 2 * m), bool)
+    runon = np.zeros((Hh - 2 * m, Ww - 2 * m), np.int16)
     for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
         A = V if dx == 0 else Hm
         c &= sum(sl(A, dy * k, dx * k) for k in range(a0, a1 + 1)) >= need
         c &= sum(sl(B, dy * k + dx * s_, dx * k + dy * s_) for k in range(a0, a1 + 1) for s_ in (-1, 1)) >= 2
+        runon += sum(sl(A, dy * k, dx * k) for k in range(a1 + 3, a1 + 9)) >= 4
+    c &= runon < 3
     c &= (sum(sl(V, k, 0) for k in range(-2, 3)) <= 1) & (sum(sl(Hm, 0, k) for k in range(-2, 3)) <= 1)
     ys, xs = np.nonzero(c)
     ys, xs = gpu.host(ys), gpu.host(xs)
@@ -445,6 +459,99 @@ def panel_rects(F, M=None, min_w=6, min_h=4, tol=1, uni=2.0, step=15.0):
     return out
 
 
+OV_BOX_CELLS = 6          # framed UI box: top edge + bottom border line >= this many 16-px cells wide (96 px)
+OV_BOX_H = (8, 60)        # px between the top edge and the bottom border line
+OV_TOAST_CELLS = 12       # toast: >= this many dark blue-grey cells in one block (bbox >= 5 x 3 cells, text inside)
+
+
+def ui_boxes(f, ncells=OV_BOX_CELLS, hrange=OV_BOX_H):
+    """framed UI boxes (game hint/notification popups, dialog bars): [(x0, y0, x1, y1)] in cells. Misses 2026-10-10
+    "overlay: tutorial hint popups" (Z1 zs-sword-switch-on 94: four dark boxes with dim grey text and X buttons at
+    x0-200 y335-415, the whole take; text_cells saw no text (contrast ~55 on fill ~42) and panel_rects no panel (the
+    boxes touch the frame's left edge and are 2 cells tall)). Pixel rows per 16-px cell: a BORDER segment = flat (range
+    <= 8) and dark (max <= 32); a FILL segment = flat (range <= 6) and >= 10 grey levels lighter than the border.
+    Top edge = border with a fill segment 1-3 px below; a box = a top edge run of >= ncells cells and, hrange px below,
+    a border run overlapping it by >= ncells cells. Constant grey over 96 px does not occur in a lit scene (texture,
+    noise, video compression); in a black/fade frame no fill row exists."""
+    import numpy
+    np = gpu.xp_of(f)
+    f = fit_cells(f)
+    g = f.mean(-1)
+    Hh, Ww = g.shape
+    nc = Ww // CW
+    R = g.reshape(Hh, nc, CW)
+    mx, mn, me = R.max(-1), R.min(-1), R.mean(-1)
+    Bd = (mx <= 32) & (mx - mn <= 8)
+    Fl = (mx - mn <= 6)
+    TE = np.zeros_like(Bd)
+    for k in (1, 2, 3):
+        TE[:-k] |= Bd[:-k] & Fl[k:] & (me[k:] - me[:-k] >= 10)
+    Bd, TE = gpu.host(Bd), gpu.host(TE)
+    np = numpy
+
+    def runs(row):
+        out, x = [], 0
+        while x < nc:
+            if row[x]:
+                x0 = x
+                while x < nc and row[x]:
+                    x += 1
+                if x - x0 >= ncells:
+                    out.append((x0, x))
+            else:
+                x += 1
+        return out
+    boxes = []
+    for y in np.nonzero(TE.sum(1) >= ncells)[0]:
+        for a, b in runs(TE[y]):
+            if any(bx[1] * CH <= y < bx[3] * CH and bx[0] <= a < bx[2] for bx in boxes):
+                continue
+            for y1 in range(y + hrange[0], min(Hh, y + hrange[1] + 1)):
+                if any(min(b, d) - max(a, c) >= ncells for c, d in runs(Bd[y1])):
+                    boxes.append((a, y // CH, b, -(-(y1 + 1) // CH)))
+                    break
+    return boxes
+
+
+def toast_cells(f, ncells=OV_TOAST_CELLS):
+    """cell mask of system toasts / foreign popups in dark blue-grey (Steam "Access Steam features..." toast, Z1 zf
+    sheets 2026-10-11, fill ~(20,24,33)): >= 60% of a cell's pixels dark (grey 10-70) with blue above red by >= 7 and
+    above green by >= 3, in a 4-connected block of >= ncells cells (bbox >= 5 x 3 cells) with bright neutral text
+    pixels (>= 4 per cell) in >= 2 of its cells; the block fills >= 60% of its bbox (a box, not a sky band). Grey <= 48:
+    the 4080 Katana take's dusk sky at the frame top (69,75,87 ~ grey 70) is no toast. Kenshi's HUD is neutral grey / warm brown, so this also judges the
+    bottom HUD band where the toast sits."""
+    import numpy
+    np = gpu.xp_of(f)
+    f = fit_cells(f)
+    r, gg, b = f[..., 0], f[..., 1], f[..., 2]
+    lum = f.mean(-1)
+    M = (b - r >= 7) & (b - gg >= 3) & (lum >= 10) & (lum <= 48)
+    T = (f.min(-1) >= 140) & (f.max(-1) - f.min(-1) <= 40)
+    C = gpu.host(_ogrid(M).mean(-1) >= 0.6)
+    TX = gpu.host(_ogrid(T).sum(-1) >= 4)
+    np = numpy
+    out = np.zeros(C.shape, bool)
+    seen = np.zeros(C.shape, bool)
+    nr, ncl = C.shape
+    for y0, x0 in zip(*np.nonzero(C)):
+        if seen[y0, x0]:
+            continue
+        st, comp = [(y0, x0)], []
+        seen[y0, x0] = True
+        while st:
+            y, x = st.pop(); comp.append((y, x))
+            for yy, xx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                if 0 <= yy < nr and 0 <= xx < ncl and C[yy, xx] and not seen[yy, xx]:
+                    seen[yy, xx] = True; st.append((yy, xx))
+        if len(comp) < ncells:
+            continue
+        ys, xs = zip(*comp)
+        ya, yb, xa, xb = min(ys), max(ys) + 1, min(xs), max(xs) + 1
+        if xb - xa >= 5 and yb - ya >= 3 and len(comp) >= 0.6 * (xb - xa) * (yb - ya) and TX[ya:yb, xa:xb].sum() >= 2:
+            out[ya:yb, xa:xb] = True
+    return out
+
+
 def zone_mask(zones, Ww=OW, Hh=OH):
     """cell mask (Hh//CH x Ww//CW) of the zones (x0, y0, x1, y1 frame fractions) in a Ww x Hh frame"""
     import numpy as np
@@ -454,16 +561,17 @@ def zone_mask(zones, Ww=OW, Hh=OH):
     return Z
 
 
-def overlay_check(video, fps=2.0, t0=None, t1=None, zones=None, frames=None):
+def overlay_check(video, fps=2.0, t0=None, t1=None, zones=None, frames=None, still=False):
     """(ok, text): no foreign overlay in any sampled frame. A text line (>= 3 adjacent text cells in a cell row) or a
-    flat UI panel (>= 12 cells) outside the expected zones and outside the take's baseline (its own HUD) = FAIL.
+    flat UI panel (>= 12 cells) outside the expected zones and outside the take's baseline (its own HUD), a framed UI
+    box (ui_boxes: hint/notification popups) outside the zones, or a blue-grey toast (toast_cells, anywhere) = FAIL.
     Frames at the video's own size (any resolution); zones default ov_zones() of that size.
-    `frames` = iterable of (t, frame) instead of reading the video (tests)."""
+    `frames` = iterable of (t, frame) instead of reading the video (tests). still=True: one screenshot, no baseline."""
     import numpy as np
     if frames is None:
         frames = iter_frames_full(video, fps, t0, t1)
     Z = Zs = None
-    ts, TX, AX, PX, BX = [], [], [], [], []
+    ts, TX, AX, PX, BX, UX, QX = [], [], [], [], [], [], []
     for t, f in frames:
         if is_flash(f):   # harness sync_flash marker frame
             continue
@@ -479,14 +587,18 @@ def overlay_check(video, fps=2.0, t0=None, t1=None, zones=None, frames=None):
         P = np.zeros_like(T)
         for x0, y0, x1, y1 in panel_rects(*(gpu.host(x) for x in flat_cells(fd))):
             P[y0:y1, x0:x1] = True
+        U = np.zeros_like(T)
+        for x0, y0, x1, y1 in ui_boxes(fd):
+            U[y0:y1, x0:x1] = True
+        Q = toast_cells(fd)
         if st:   # frame stamp corner: the stamp's own cells
-            T = T & ~Zs; A = A & ~Zs; P = P & ~Zs
-        ts.append(t); TX.append(T); AX.append(A); PX.append(P); BX.append(BL)
+            T = T & ~Zs; A = A & ~Zs; P = P & ~Zs; U = U & ~Zs; Q = Q & ~Zs
+        ts.append(t); TX.append(T); AX.append(A); PX.append(P); BX.append(BL); UX.append(U & ~Z); QX.append(Q)
     if not ts:
         return False, 'no frames:BAD'
     TX, AX, PX = np.stack(TX), np.stack(AX), np.stack(PX)
     bt = TX.mean(0) >= OV_BASE_TEXT if OV_BASE_TEXT else np.zeros(TX.shape[1:], bool)
-    bp = PX.mean(0) >= OV_BASE_PANEL
+    bp = PX.mean(0) >= OV_BASE_PANEL if not still else np.zeros(PX.shape[1:], bool)
     hits = []
     for k, t in enumerate(ts):
         fo = TX[k] & ~bt & ~Z
@@ -496,13 +608,18 @@ def overlay_check(video, fps=2.0, t0=None, t1=None, zones=None, frames=None):
             if not ao[y, x:x + 3].any() and textured_line(BX[k], y, x):
                 ln[y, x] = False
         pa = PX[k] & ~bp & ~Z
-        if ln.any() or pa.sum() >= 12:
-            if ln.any():
-                ys, xs = np.nonzero(ln)
-                kind = 'text-panel' if (AX[k] & ~bt & ~Z)[ys, xs + 1].any() else 'text'
-            else:
-                ys, xs = np.nonzero(pa); kind = 'panel'
-            hits.append((t, kind, int(xs.min()) * CW, int(ys.min()) * CH))
+        if ln.any():
+            ys, xs = np.nonzero(ln)
+            kind = 'text-panel' if (AX[k] & ~bt & ~Z)[ys, xs + 1].any() else 'text'
+        elif UX[k].any():   # framed UI boxes / toasts: never baselined (hint popups stayed the whole take)
+            ys, xs = np.nonzero(UX[k]); kind = 'uibox'
+        elif QX[k].any():
+            ys, xs = np.nonzero(QX[k]); kind = 'toast'
+        elif pa.sum() >= 12:
+            ys, xs = np.nonzero(pa); kind = 'panel'
+        else:
+            continue
+        hits.append((t, kind, int(xs.min()) * CW, int(ys.min()) * CH))
     spans = []
     for t, kind, x, y in hits:
         if spans and t - spans[-1][1] <= 1.5 / fps and spans[-1][2] == kind:
@@ -513,6 +630,47 @@ def overlay_check(video, fps=2.0, t0=None, t1=None, zones=None, frames=None):
     if spans:
         txt += ' at=' + ','.join('%.1f-%.1fs(%s x%d,y%d)' % tuple(s) for s in spans[:10]) + ('...' if len(spans) > 10 else '')
     return not hits, txt
+
+
+def is_image(path):
+    return str(path).lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))
+
+
+def read_image(path):
+    """a still (screenshot / sheet) as an HxWx3 int16 frame"""
+    import numpy as np
+    from PIL import Image
+    return np.asarray(Image.open(path).convert('RGB')).astype(np.int16)
+
+
+def still_overlay_check(path, sheet=None):
+    """(ok, text): foreign overlay in a STILL (harness screenshot, contact sheet; steam-popup 2026-10-11: a Steam toast
+    bottom-right in Z1 zf sheets d=9.5/10 passed). A game-size screenshot (16:9) gets the full video detectors (text,
+    panels without a baseline, framed UI boxes, toasts) with the expected zones; a contact sheet (any other aspect, or
+    sheet=True: tile labels and the sheet's own dark layout would read as text/panels) gets the scale-free toast test
+    only. Prints spans like the video check (t = 0)."""
+    f = read_image(path)
+    Hh, Ww = f.shape[:2]
+    if sheet is None:
+        sheet = abs(Ww / float(Hh) - 16 / 9.0) > 0.04
+    if not sheet:
+        return overlay_check(path, frames=[(0.0, f)], still=True)
+    Q = gpu.host(toast_cells(gpu.dev(f)))
+    if Q.any():
+        import numpy as np
+        ys, xs = np.nonzero(Q)
+        return False, 'frames=1 overlay_frames=1:BAD sheet at=0.0-0.0s(toast x%d,y%d)' % (int(xs.min()) * CW, int(ys.min()) * CH)
+    return True, 'frames=1 overlay_frames=0 sheet'
+
+
+def still_cursor_check(path):
+    """(ok, text): no mouse cursor (Windows arrow or Kenshi's target cursor off the screen centre) in a still"""
+    f = read_image(path)
+    blank_stamp(f)
+    fd = gpu.dev(f)
+    Hh, Ww = f.shape[:2]
+    c = find_cursor(fd) or [(x, y, 0) for x, y in find_kcursor(fd) if abs(x - Ww / 2) > KC_CENTRE or abs(y - Hh / 2) > KC_CENTRE]
+    return not c, 'frames=1 cursor_frames=%d%s' % (1 if c else 0, (':BAD at=0.0-0.0s(x%d,y%d)' % c[0][:2]) if c else '')
 
 
 # Decode + judge once per video (framecache.py): identical calls (same video content, check, arguments, this file's
@@ -542,7 +700,7 @@ def main():
     p.add_argument('--name', default='take')
     p = sp.add_parser('overlay'); p.add_argument('video'); p.add_argument('--fps', type=float, default=2.0)
     p.add_argument('--from', dest='t0', type=float); p.add_argument('--to', dest='t1', type=float)
-    p.add_argument('--name', default='take')
+    p.add_argument('--name', default='take'); p.add_argument('--sheet', action='store_true', help='still: contact sheet')
     p = sp.add_parser('syncmarks'); p.add_argument('video'); p.add_argument('--fps', type=float, default=30.0)
     p.add_argument('--from', dest='t0', type=float); p.add_argument('--to', dest='t1', type=float)
     p.add_argument('--name', default='take')
@@ -553,11 +711,11 @@ def main():
                                                           ','.join('%.3f' % x for x in m) or '-'))
         return 0 if m else 1
     if a.cmd == 'overlay':
-        ok, txt = overlay_check(a.video, a.fps, a.t0, a.t1)
+        ok, txt = still_overlay_check(a.video, True if a.sheet else None) if is_image(a.video) else overlay_check(a.video, a.fps, a.t0, a.t1)
         print('RESULT %s %s overlay %s' % (a.name, 'PASS' if ok else 'FAIL', txt))
         return 0 if ok else 1
     if a.cmd == 'cursor':
-        ok, txt = cursor_check(a.video, a.fps, a.t0, a.t1)
+        ok, txt = still_cursor_check(a.video) if is_image(a.video) else cursor_check(a.video, a.fps, a.t0, a.t1)
         print('RESULT %s %s cursor %s' % (a.name, 'PASS' if ok else 'FAIL', txt))
         return 0 if ok else 1
     if a.cmd != 'openground':

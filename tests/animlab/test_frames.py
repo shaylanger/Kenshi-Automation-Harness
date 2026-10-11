@@ -53,7 +53,7 @@ class Cursor(unittest.TestCase):   # Shay 2026-10-10 ticket A: no mouse cursor i
     def test_arrow_any_scale(self):
         for sc in (1.0, 1.5, 2.25, 3.0):
             c = FR.find_cursor(cursor_frame(500, 300, sc))
-            self.assertTrue(c, 'scale %g' % sc); self.assertLessEqual(abs(c[0][0] - 500), 1.5 * sc); self.assertLessEqual(abs(c[0][1] - 300), 1.5 * sc)
+            self.assertTrue(c, 'scale %g' % sc); self.assertLessEqual(abs(c[0][0] - 500), 1.5 * sc); self.assertLessEqual(abs(c[0][1] - 300), 2 * sc)   # tip row: the widening-head rule (Z1 HUD strip) may start 1 px lower
 
     def test_kenshi_cursor(self):   # Misses 2026-10-10 cursor variants: Kenshi's 4-arrow target cursor
         f = np.zeros((900, 1600, 3), int); f[...] = (40, 40, 40)
@@ -189,6 +189,58 @@ class SyncMarks(unittest.TestCase):   # T6 label lag 2026-10-10
     def test_overlay_skips_flash_frames(self):   # a flat full-view panel would otherwise be a foreign UI panel
         ok, txt = FR.overlay_check(None, frames=[(k * 0.5, f) for k, f in enumerate([scene(0), flash(), scene(1)])])
         self.assertTrue(ok, txt); self.assertIn('frames=2', txt)
+
+
+def hint_box(f, x0, y0, w=200, h=22):
+    """a Kenshi tutorial hint popup: dark border, flat grey fill, dim grey text (Z1 zs-sword-switch-on 94)."""
+    f[y0:y0 + h + 2, x0:x0 + w] = 18                        # border (top + bottom line)
+    f[y0 + 2:y0 + h, x0:x0 + w - 2] = 42                    # flat fill
+    f[y0 + 8:y0 + 14, x0 + 20:x0 + 120:3] = 97              # dim text strokes (contrast ~55)
+    return f
+
+
+def toast(f, x0, y0, w=300, h=70):
+    """a Steam overlay toast: dark blue-grey box with white text (Z1 zf sheets 2026-10-11)."""
+    f[y0:y0 + h, x0:x0 + w] = (20, 24, 33)
+    for k in range(3):
+        f[y0 + 15 + 18 * k:y0 + 20 + 18 * k, x0 + 40:x0 + 260:2] = 230
+    return f
+
+
+class OverlayBoxes(unittest.TestCase):   # Misses 2026-10-10 hint popups + steam-popup 2026-10-11
+    def run_(self, fs):
+        return FR.overlay_check(None, frames=[(k * 0.5, f) for k, f in enumerate(fs)])
+
+    def test_hint_popups_whole_take_fail(self):   # never baselined: they stayed the whole take
+        fs = [hint_box(hint_box(scene(k), 0, 350), 0, 390) for k in range(8)]
+        ok, txt = self.run_(fs)
+        self.assertFalse(ok, txt); self.assertIn('uibox', txt); self.assertIn('overlay_frames=8', txt)
+        self.assertTrue(FR.ui_boxes(scene(3)) == [], 'textured scene has no framed box')
+
+    def test_toast_fails_also_in_hud_band(self):
+        fs = [scene(k) for k in range(6)]
+        fs[2] = toast(fs[2], 1250, 780)                        # bottom right, inside Kenshi's bottom UI zone
+        ok, txt = self.run_(fs)
+        self.assertFalse(ok, txt); self.assertIn('toast', txt); self.assertIn('1.0-1.0s', txt)
+
+    def test_dusk_sky_is_no_toast(self):   # 4080 Katana take: grey-blue sky (69,75,87) at the frame top
+        f = scene(0); f[:300] = (69, 75, 87)
+        self.assertFalse(FR.toast_cells(f).any())
+
+    def test_still_screenshot_and_sheet(self):
+        import tempfile
+        from PIL import Image
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, 'shot.png'); Image.fromarray(hint_box(scene(1), 0, 350).astype(np.uint8)).save(p)
+        ok, txt = FR.still_overlay_check(p); self.assertFalse(ok, txt)
+        Image.fromarray(scene(1).astype(np.uint8)).save(p)
+        ok, txt = FR.still_overlay_check(p); self.assertTrue(ok, txt)
+        sh = np.concatenate([scene(k) for k in range(2)], 0)    # 1600x1800 sheet (not 16:9): toast test only
+        q = os.path.join(d, 'sheet.png'); Image.fromarray(sh.astype(np.uint8)).save(q)
+        ok, txt = FR.still_overlay_check(q); self.assertTrue(ok, txt); self.assertIn('sheet', txt)
+        Image.fromarray(toast(sh, 1250, 1600).astype(np.uint8)).save(q)
+        ok, txt = FR.still_overlay_check(q); self.assertFalse(ok, txt); self.assertIn('toast', txt)
+        ok, txt = FR.still_cursor_check(p); self.assertTrue(ok, txt)
 
 
 if __name__ == '__main__':
