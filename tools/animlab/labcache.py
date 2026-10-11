@@ -300,7 +300,8 @@ atexit.register(_flush)
 class _Budget:
     """One CPU budget (Shay 2026-10-10): a computed (cache-miss) adapter run / build outside any labnice.sh job takes one
     labnice slot (/tmp/labnice/slot.<i>, the same pool labnice.sh uses, LABNICE_SLOTS default nproc/2) and runs at
-    nice 15, and waits while a 5090 take records (lab-recpause.sh --recording). So ad-hoc climbs, auto-review and
+    nice 15; while a 5090 take records (lab-recpause.sh --recording) it takes only slots 1..LABNICE_REC_SLOTS (12, the
+    recording budget; LABNICE_REC_SLOTS=0: waits for the recording to end). So ad-hoc climbs, auto-review and
     weapon-matrix runs started without the wrapper still count against the one budget. Inside a labnice job
     (LABNICE_SLOT set) the job's own slots apply (pool sized by LABNICE_J). LABNICE_EXEMPT=1 skips it."""
     D = '/tmp/labnice'
@@ -315,13 +316,18 @@ class _Budget:
         except OSError:
             pass
         t0 = time.time()
-        while os.path.isfile(self.PAUSE) and time.time() - t0 < 1800 and \
-                subprocess.run(['bash', self.PAUSE, '--recording'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        recs = int(os.environ.get('LABNICE_REC_SLOTS') or 12)
+
+        def recording():
+            return os.path.isfile(self.PAUSE) and subprocess.run(['bash', self.PAUSE, '--recording'], stdout=subprocess.DEVNULL,
+                                                                 stderr=subprocess.DEVNULL).returncode == 0
+        while recs <= 0 and time.time() - t0 < 1800 and recording():
             time.sleep(3)
         n = int(os.environ.get('LABNICE_SLOTS') or max(1, (os.cpu_count() or 2) // 2))
         os.makedirs(self.D, exist_ok=True)
         while True:
-            for i in range(1, n + 1):
+            lim = recs if 0 < recs < n and recording() else n   # recording budget: slots 1..LABNICE_REC_SLOTS only
+            for i in range(1, lim + 1):
                 f = open(os.path.join(self.D, 'slot.%d' % i), 'a')
                 try:
                     fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -329,7 +335,7 @@ class _Budget:
                     return self
                 except OSError:
                     f.close()
-            time.sleep(0.5)
+            time.sleep(1)
 
     def __exit__(self, *e):
         if self.f:

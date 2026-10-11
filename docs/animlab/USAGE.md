@@ -142,6 +142,25 @@ cannot run, e.g. the 4080's Windows python). Known limits: image-only oneview mi
 swing (2E66 33.67 s; a stamp/vmrec view source covers it); occluder flags a fully extended punch near 15-17% too
 (review pointer, not a verdict); weapon references so far: crossbow reload/aim/fired (XBMESH-A stills).
 
+## CPU: result cache, search, one CPU budget (Shay 2026-10-10)
+- **Result cache** `tools/animlab/labcache.py` (store `/root/animlab-cache`, 6 GB LRU; header has the CLI): adapter
+  builds (`build.sh`: key = content of every compile input, so the same source under another name/tree hits), adapter
+  replays (`labcache.py replay <adapter> <rec> <out> args`, used by regress.sh as `rp`), drive runs, recording checks and
+  mutation verdicts (mutate.py: key = mutation code + base material + the check code it runs) are memoised by content
+  hash. A fists patch never re-replays sword/crossbow. `ANIMLAB_CACHE=0` recomputes, `=verify` recomputes and compares;
+  `labcache.py stats|prune|clear`. Gate on an unchanged tree: 390 -> ~196 CPU-s, 279 -> 160 s wall, verdicts identical
+  (124 verdicts, pool, mutations; /root/cpu-lab m-before1 vs m-cold1/m-warm1).
+- **Search** `tools/animlab/optim.py`: CMA-ES (default) / Nelder-Mead / coarse-to-fine with early stop (`target`,
+  convergence `tol`, `maxevals`) and batched parallel evaluation; CLI `optim.py run`. Climbs use it instead of grids or
+  random mutation loops (e.g. `components/KenshiFP/animlab/e1-climb.py`, `METHOD=cma|nm|cf|random TARGET=<score>`).
+- **One CPU budget** (`tools/automation/labnice.sh` + `lab-recpause.sh`): every offline lab job runs through labnice
+  (nice 15, ionice idle, all-or-nothing slots); `LABNICE_SLOTS` (default nproc/2 = 16 workers) normally,
+  `LABNICE_REC_SLOTS` (default 12) while a 5090 take records: new jobs then take only slots 1..12 and lab-recpause
+  SIGSTOPs only job trees holding a slot above 12 (`/tmp/labnice/held.<pid>`), SIGCONT when the recording ends.
+  Cache-miss adapter runs outside labnice take one slot of the same pool. `LABNICE_REC_SLOTS=0` = pause everything
+  while recording. `lab-recpause.sh --status|--which`, `labnice.sh --status`.
+- weapon_matrix temp dirs (`/tmp/animlab-wm-replay*`) are removed at exit.
+
 ## Metrics (per state)
 
 States: `ready`, `swing`, `block`, `swing->block`, `aim`, `reload` (crossbow), `settle` (gate only: 0.3 s after a
