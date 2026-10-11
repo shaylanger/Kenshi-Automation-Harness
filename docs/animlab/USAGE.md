@@ -476,6 +476,14 @@ Scripts live in KenshiModding `components/KenshiFP/animlab/` (run in WSL); each 
   + E6 swing pool + mutation tests + flips vs `corpus/gate-baseline.tsv`; one `RESULT ANIMLAB-REGRESS PASS|FAIL ...` line,
   cached per source/lab/manifest hash in `/root/animlab-gate/`. Runs on every KenshiFP viewmodel build before VMQUICK
   (fp-viewmodel.sh `vmq_gate`). After a lab-check commit: run it, read the flips, then `--update-baseline`.
+  E6 coverage steps (2026-10-11): the pool runs `--checks arc,blade,stroke,churn,inline` per stroke and records two verdicts,
+  `POOL stroke s` (arc/blade/stroke/churn) and `POOL-INLINE stroke s` (the take judge's inline; RESULT field `pinl=`);
+  3b `stroke-cycle.py --adapter <kfpvm> --src <client>` replays a corpus sword rec UNFORCED per weapon class
+  (`corpus/pools/stroke-cycle/classes.tsv`: class wcat wpom wtip expect) and FAILs a class whose picked strokes miss
+  the source's default mask (or the listed set): a FAIL fails the gate (`cycle=`); 3c `e6-takes.py --adapter <kfpvm>
+  [--args "--tables f"]` replays every corpus E6 game take (`corpus/pools/e6-takes/takes.list`) with the candidate source
+  and judges each take x stroke inline + arc like fp-e6-strokes.sh (`E6TAKE <rec> s<n> <check>` verdicts, baseline-judged,
+  `e6takes=<n>/<fail>`). Both run standalone on any adapter build (build.sh --src <tarball client>) to vet a candidate.
 - **Mutations** `mutate.py --work <gate work dir>`: synthetic corruptions of known-good corpus material (recording edits,
   video overlays); each check must FAIL its own kind. Known gaps (no check yet) in `corpus/mutations-known.tsv`; a gap is a
   Misses row for the maintainer, not a gate FAIL.
