@@ -280,8 +280,10 @@ def cmd_zoomband(a):
     rec = recfmt.parse(a.rec)
     F = rec.frames
     ok, txt = M.zoomband_check(M.zoomband_series(F, a.head_show), a.max_frames, M.flag_lag(F, "band_hidden", M.band_expect(F, a.head_show)))
-    lok, ltxt = M.bandleak_check(M.bandleak_series(F, a.head_show, band_clip=a.band_clip), a.max_frames)
-    ok, txt = ok and lok, txt + ltxt
+    lag = M.nc_lag(F, M.nc_expect(F))   # recorded nc one frame late = rec bug (Misses 2026-10-11 zs-sword-fade-stamp)
+    lok, ltxt = M.bandleak_check(M.bandleak_series(F, a.head_show, band_clip=a.band_clip, nc_fix={i: e for i, v, e in lag}), a.max_frames)
+    ltxt.append('nc_lag=%d%s' % (len(lag), (':BAD@' + ','.join('%d(nc%.1f,want%.1f)' % x for x in lag[:6])) if lag else ''))
+    ok, txt = ok and lok and not lag, txt + ltxt
     print('zoomband %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
     return 0 if ok else 1
 

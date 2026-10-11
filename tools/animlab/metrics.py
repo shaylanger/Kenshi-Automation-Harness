@@ -1110,15 +1110,51 @@ ZB_LEAK_PARTS = ('nk', 'sp', 'Lsh', 'Rsh', 'chest', 'hd', 'hat')   # head + tors
 # (8b3f, 4080 recs) and rendered clean (8B3F339C every-frame review): the arm meshes are covered by the band hide itself.
 
 
-def bandleak_series(F, head_show=ZB_HEAD_SHOW, eye=ZB_HIDE_EYE, band_clip=None, near=ZB_NEAR):
+# ---- nc label lag (Misses 2026-10-11 ZOOMSWEEP-zs-sword-fade-stamp 98B3173A, 4080: band_leak 2/231 at the first band
+# frame of a wheel-out, rec nc=3.0 at zoom 5.0, next frames nc = previous zoom + 5; the frame-stamped video is clean at
+# exactly those frames). vm_frame records before fp_tick's near-clip block sets this frame's clip, so the rec's nc was the
+# previous frame's (fixed in kfp-vmrec-nc: late write vm_rec_nc). CLASS: same as flag_lag (recorded label vs rendered
+# state): a recorded near clip whose rule is known from the same frame must agree with it on that frame; a lagged value is
+# a recording bug (nc_lag:BAD), and band_leak judges those frames with the clip the build rule applied that frame.
+ZB_BAND_CLIP = 5.0   # dm: KenshiFP g_cfg_band_clip_dm default (near = applied + this while the band hide is on)
+
+
+def nc_expect(F, band_clip=ZB_BAND_CLIP):
+    """expect(frame) for the rec's nc: the FP clip (most common nc off the band) or max(that, zoom + band_clip) on
+    band_hidden frames; None when the rec has no nc."""
+    vals = [round(r['nc'], 3) for r in F if r.get('nc') is not None and r['nc'] >= 0 and not r.get('band_hidden')]
+    if not vals:
+        return lambda r: None
+    base = max(set(vals), key=vals.count)
+    def want(r):
+        if r.get('nc') is None or r['nc'] < 0:
+            return None
+        return max(base, r.get('zoom', 0.0) + band_clip) if r.get('band_hidden') else base
+    return want
+
+
+def nc_lag(F, want, tol=0.05):
+    """[(frame, recorded nc, expected nc)]: frames whose nc misses this frame's rule but equals the previous frame's."""
+    out = []
+    for i in range(1, len(F)):
+        v, e, ep = F[i].get('nc'), want(F[i]), want(F[i - 1])
+        if v is None or e is None or ep is None:
+            continue
+        if abs(v - e) > tol and abs(v - ep) <= tol:
+            out.append((i, v, e))
+    return out
+
+
+def bandleak_series(F, head_show=ZB_HEAD_SHOW, eye=ZB_HIDE_EYE, band_clip=None, near=ZB_NEAR, nc_fix=None):
     """[(frame, zoom, nc, [(part, x_ndc, y_ndc, depth)])] for band_hidden band frames; parts in view whose far extent
-    (depth + ZB_CLIP_MARGIN) lies beyond the near clip. nc None = near clip unknown (frame not judged)."""
+    (depth + ZB_CLIP_MARGIN) lies beyond the near clip. nc None = near clip unknown (frame not judged). nc_fix
+    {frame: nc}: the applied clip on frames whose recorded nc lags (nc_lag)."""
     out = []
     for i, r in enumerate(F):
         d = r.get('zoom', 0.0)
         if not r.get('band_hidden') or not (eye <= d < head_show) or r.get('nk') is None:
             continue
-        nc = r.get('nc')
+        nc = (nc_fix or {}).get(i, r.get('nc'))
         if nc is None or nc < 0:
             nc = None if band_clip is None else max(near, d + band_clip if band_clip > 0 else near)
         pts = dict(nk=r['nk'], sp=r['sp'], Lsh=r['Lsh'], Rsh=r['Rsh'], Lel=r['Lel'], Rel=r['Rel'], Lwr=r['Lwr'], Rwr=r['Rwr'])
