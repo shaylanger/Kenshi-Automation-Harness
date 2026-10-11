@@ -6,6 +6,7 @@ Files are read at run time from a game install; nothing here ships assets.
 Quaternions are (w, x, y, z) numpy arrays; positions numpy float32/float64 arrays.
 """
 import math
+import os
 import struct
 
 import numpy as np
@@ -101,8 +102,26 @@ def _geometry(r, end):
     return out.get(VES_POSITION), out.get(VES_NORMAL)
 
 
+def hostpath(path):
+    """game paths in catalogs/configs are WSL paths (/mnt/d/Steam/...); a rig with the game elsewhere (4080: Windows
+    Python, C:/Program Files (x86)/Steam) maps them with ANIMLAB_PATHMAP="from=to[;from=to]" (rig-env.sh). The prefix
+    may sit after a drive: os.path.realpath on Windows turns /mnt/d/x into C:/mnt/d/x)."""
+    m = os.environ.get('ANIMLAB_PATHMAP')
+    if not m:
+        return path
+    q = str(path).replace(chr(92), '/')
+    for pair in m.split(';'):
+        if '=' in pair:
+            fr, to = pair.split('=', 1)
+            fr = '/' + fr.strip().lstrip('/')   # rig-env writes it without the leading / (Git Bash rewrites /-paths in env)
+            i = q.find(fr)
+            if fr and i >= 0 and (i == 0 or q[:i].endswith(':')):
+                return to + q[i + len(fr):]
+    return path
+
+
 def load_mesh(path):
-    with open(path, 'rb') as f:
+    with open(hostpath(path), 'rb') as f:
         r = _R(f.read())
     if r.u16() != M_HEADER:
         raise ValueError('%s: not an Ogre mesh' % path)
@@ -201,7 +220,7 @@ class Skeleton:
 
 
 def load_skeleton(path):
-    with open(path, 'rb') as f:
+    with open(hostpath(path), 'rb') as f:
         r = _R(f.read())
     if r.u16() != M_HEADER:
         raise ValueError('%s: not an Ogre skeleton' % path)
@@ -271,7 +290,7 @@ def _read_animation(r, end):
 
 def load_animations(path, names=None):
     """{name: Animation} from an Ogre .skeleton (v1.8x). `names` restricts which animations are decoded."""
-    with open(path, 'rb') as f:
+    with open(hostpath(path), 'rb') as f:
         r = _R(f.read())
     if r.u16() != M_HEADER:
         raise ValueError('%s: not an Ogre skeleton' % path)

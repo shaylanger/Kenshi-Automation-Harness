@@ -212,7 +212,11 @@ def _tmpdir(prefix):
 
 def load_weapons(a, cfg):
     if a.weapons_json:
-        return json.load(open(a.weapons_json))['weapons']
+        W = json.load(open(a.weapons_json))['weapons']
+        for w in W:   # WSL game paths -> this host's (ANIMLAB_PATHMAP, 4080 rig); no-op without the env
+            if w.get('mesh_path'):
+                w['mesh_path'] = ogre.hostpath(w['mesh_path'])
+        return W
     import weapons
     d = _tmpdir('animlab-weapons-')
     rows = weapons.write(cfg, d)

@@ -28,7 +28,16 @@ CLI (shell callers, e.g. regress.sh):
            is left out of the key, --in must then name every input, e.g. build.sh's compile-input manifest)
   labcache.py stats | prune | clear | key <file>
 """
-import contextlib, fcntl, hashlib, io, json, os, shlex, shutil, subprocess, sys, tempfile, time
+import contextlib, hashlib, io, json, os, shlex, shutil, subprocess, sys, tempfile, time
+try:
+    import fcntl
+except ImportError:  # Windows Python (4080 rig shim): no flock; one analysis per take there, locks are best effort
+    class fcntl:
+        LOCK_EX, LOCK_NB, LOCK_UN = 2, 4, 8
+
+        @staticmethod
+        def flock(f, op):
+            pass
 
 DIR = os.environ.get('ANIMLAB_CACHE_DIR', '/root/animlab-cache')
 MAX_MB = float(os.environ.get('ANIMLAB_CACHE_MAX_MB', '6000'))
