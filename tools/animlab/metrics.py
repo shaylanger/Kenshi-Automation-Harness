@@ -1550,6 +1550,13 @@ def inline_each(F, P, slack=INL_EACH_SLACK, **kw):
 #   ang   = fitted line angle from the screen horizontal, 0-90 deg (gated for PATH_DIAG strokes)
 #   edge  = end tip distance to the nearest screen edge, min(x/W, 1-x/W, y/H, 1-y/H), 0 when off screen
 #   len   = extent along the fitted line, fraction of the screen width
+#   Shay 17:05 swing rules (sword-judge owns these three; blade angular sweep = animlab-maintainer's check):
+#   span  = the path spans most of the screen: the start tip lies in an outer PATH_BAND band (left/right/top/bottom; off
+#           screen counts) and the end tip in the OPPOSITE band (left->right, bottom->top, ...); 'span=L>R' / 'span=-'
+#   ctr   = the straight path passes through the screen centre: perpendicular distance of the screen centre from the fitted
+#           line / screen height (the shorter side), <= PATH_CTR
+#   fast  = fastest through the middle: where along the path (0 = start, 1 = end, by projection on the line) the tip speed
+#           (3-sample mean, px per stroke-u) peaks; gated inside PATH_FAST
 # CLASS: any stroke's screen path (scripted 1H/2H strokes, new families): a check per swing, never a pooled value.
 PATH_U1 = 0.78                          # follow-through end (SWING_PHASES 'follow')
 PATH_LATE = 0.35                        # late share of the path (by arc length) judged for drift
@@ -1558,6 +1565,7 @@ PATH_ANG = (35.0, 50.0)                 # diagonal strokes: fitted line angle fr
 PATH_DIAG = (0, 3)                      # scripted stroke ids that are diagonals (angle gated); others: angle reported
 PATH_INFO = (1, 2)                      # Shay 16:27: change only strokes 0 + 3 (and new strokes); stroke 1 (backhand, accepted) and stroke 2 (overhead, not under review) measured, non-blocking (info)
 PATH_MIN_N = 4
+PATH_BAND, PATH_CTR, PATH_FAST = 0.20, 0.12, (0.25, 0.75)
 
 
 def _tls(pts):
@@ -1572,7 +1580,7 @@ def _perp(p, c, d):
     return abs((p[0] - c[0]) * d[1] - (p[1] - c[1]) * d[0])
 
 
-def path_metrics(pts, late=PATH_LATE):
+def path_metrics(pts, late=PATH_LATE, us=None):
     """screen tip path [(x, y) px] -> dict(dev, late, ang, edge, len, n) (see the block comment)."""
     c, d = _tls(pts)
     along = [(p[0] - c[0]) * d[0] + (p[1] - c[1]) * d[1] for p in pts]
@@ -1591,8 +1599,30 @@ def path_metrics(pts, late=PATH_LATE):
     edge = max(0.0, min(x / W_PX, 1 - x / W_PX, y / H_PX, 1 - y / H_PX))
     ang = abs(math.degrees(math.atan2(d[1], d[0])))
     ang = 180 - ang if ang > 90 else ang
+    def bands(q):
+        b = set()
+        if q[0] <= PATH_BAND * W_PX: b.add('L')
+        if q[0] >= (1 - PATH_BAND) * W_PX: b.add('R')
+        if q[1] <= PATH_BAND * H_PX: b.add('T')
+        if q[1] >= (1 - PATH_BAND) * H_PX: b.add('B')
+        return b
+    opp = {'L': 'R', 'R': 'L', 'T': 'B', 'B': 'T'}
+    sb, eb = bands(pts[0]), bands(pts[-1])
+    span = sorted('%s>%s' % (a, opp[a]) for a in sb if opp[a] in eb)
+    ctr = _perp((W_PX / 2.0, H_PX / 2.0), c, d) / H_PX
+    fast = None
+    if us is not None and len(pts) >= 4:
+        sp = []
+        for i in range(1, len(pts)):
+            du = max(us[i] - us[i - 1], 1e-4)
+            sp.append(math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) / du)
+        sm = [sum(sp[max(0, i - 1):i + 2]) / len(sp[max(0, i - 1):i + 2]) for i in range(len(sp))]
+        k = max(range(len(sm)), key=lambda i: sm[i])
+        a0, a1 = along[0], along[-1]
+        mid = 0.5 * (along[k] + along[k + 1])
+        fast = (mid - a0) / (a1 - a0) if abs(a1 - a0) > 1e-6 else 0.0
     return dict(dev=max(_perp(p, c, d) for p in pts) / ext, late=lt, ang=ang, edge=edge, len=ext / W_PX, n=len(pts),
-                end=(x, y), start=pts[0])
+                end=(x, y), start=pts[0], span=span, ctr=ctr, fast=fast)
 
 
 def path_series(F, P, u0=ARC_U0, u1=PATH_U1):
@@ -1614,15 +1644,19 @@ def path_one(stk, S, dev=PATH_DEV, late=PATH_LATE_MAX, edge=PATH_EDGE, angr=PATH
     """one swing -> (ok, gated, text): ok = every gated limit met; gated False = stroke in `info` (reported, never blocks)."""
     if len(S) < PATH_MIN_N:
         return False, stk not in info, 'n=%d:BAD(no stroke frames)' % len(S)
-    m = path_metrics([s[2] for s in S])
+    m = path_metrics([s[2] for s in S], us=[s[0] for s in S])
     bad = lambda g: '' if g else ':BAD'
     g_dev, g_late, g_edge = m['dev'] <= dev, m['late'] <= late, m['edge'] <= edge
     g_ang = (angr[0] <= m['ang'] <= angr[1]) if stk in diag else True
-    ok = g_dev and g_late and g_edge and g_ang
+    g_span, g_ctr = bool(m['span']), m['ctr'] <= PATH_CTR
+    g_fast = m['fast'] is not None and PATH_FAST[0] <= m['fast'] <= PATH_FAST[1]
+    ok = g_dev and g_late and g_edge and g_ang and g_span and g_ctr and g_fast
     txt = 'dev=%.3f/%.2f%s,late=%.3f/%.2f%s,ang=%.0f%s%s,edge=%.3f/%.2f%s,len=%.2f,u=%.2f-%.2f,end=%.0f,%.0f(frame%d),n=%d' % (
         m['dev'], dev, bad(g_dev), m['late'], late, bad(g_late), m['ang'],
         '/%.0f-%.0f' % angr if stk in diag else '(info)', bad(g_ang), m['edge'], edge, bad(g_edge), m['len'],
-        S[0][0], S[-1][0], m['end'][0], m['end'][1], S[-1][1], m['n'])
+        S[0][0], S[-1][0], m['end'][0], m['end'][1], S[-1][1], m['n']) + ',span=%s%s,ctr=%.3f/%.2f%s,fast=%s/%.2f-%.2f%s' % (
+        '+'.join(m['span']) or '-', bad(g_span), m['ctr'], PATH_CTR, bad(g_ctr),
+        '-' if m['fast'] is None else '%.2f' % m['fast'], PATH_FAST[0], PATH_FAST[1], bad(g_fast))
     return ok, stk not in info, txt + ('(info)' if stk in info else '')
 
 

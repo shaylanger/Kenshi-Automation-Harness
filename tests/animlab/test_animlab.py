@@ -405,5 +405,20 @@ class T(unittest.TestCase):
         ok, gated, t = M.path_one(0, [(0.3 + 0.03 * i, i, (200 + 30 * i, 700 - 30 * i)) for i in range(13)])
         self.assertFalse(ok, t); self.assertIn('edge=', t)                             # stops mid-screen
 
+    def test_path_span_ctr_fast(self):   # Shay 17:05: band to opposite band, through the centre, fastest in the middle
+        S = []
+        for i in range(17):
+            s = i / 16.0; t = -650 * math.cos(math.pi * s)                            # ease in-out along a 40 deg line
+            S.append((0.30 + 0.03 * i, i, (800 + 0.766 * t, 450 - 0.643 * t)))
+        ok, gated, t = M.path_one(3, S)
+        self.assertTrue(ok, t); self.assertIn('span=', t)
+        lin = [(u, i, (800 + 0.766 * (-650 + 1300 * (k / 16.0) ** 0.3), 450 - 0.643 * (-650 + 1300 * (k / 16.0) ** 0.3)))
+               for k, (u, i, p) in enumerate(S)]                                       # fast start, slow end
+        ok, gated, t = M.path_one(3, lin)
+        self.assertFalse(ok, t); self.assertIn(':BAD', t.split('fast=')[1])
+        off = [(u, i, (p[0], p[1] - 250)) for u, i, p in S]                            # misses the centre
+        ok, gated, t = M.path_one(3, off)
+        self.assertFalse(ok, t); self.assertIn(':BAD', t.split('ctr=')[1].split(',')[0])
+
 if __name__ == '__main__':
     unittest.main(verbosity=1)
