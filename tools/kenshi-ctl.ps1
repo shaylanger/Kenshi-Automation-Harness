@@ -150,7 +150,14 @@ function Start-Kenshi {
     "background: foreground lock $(if ($script:FgLocked) { 'ON (game starts without the right to take the foreground)' } else { 'not taken (this shell may not force the foreground, so the game may not either)' })"
   }
   $t0 = Get-Date
-  Start-Process -FilePath "$Kenshi\kenshi_x64.exe" -WorkingDirectory $Kenshi | Out-Null
+  # background (test) launches: no Steam overlay UI (the "Access Steam features from the overlay" toast showed in test
+  # screenshots, SETUP_MISSES Z1). gameoverlayrenderer64.dll still loads but draws nothing when SteamNoOverlayUIDrawing=1
+  # (the same switch Steam sets for a game with the overlay turned off); the game inherits it, Steam itself is untouched.
+  # Normal (-Play / foreground) launches keep the overlay. $env:KAH_STEAM_OVERLAY=1 keeps it for a test launch too.
+  $noOverlay = $Background -and $env:KAH_STEAM_OVERLAY -ne '1'
+  if ($noOverlay) { $env:SteamNoOverlayUIDrawing = '1'; 'steam overlay UI: off for this launch (SteamNoOverlayUIDrawing=1)' }
+  try { Start-Process -FilePath "$Kenshi\kenshi_x64.exe" -WorkingDirectory $Kenshi | Out-Null }
+  finally { if ($noOverlay) { Remove-Item Env:\SteamNoOverlayUIDrawing -ErrorAction SilentlyContinue } }
   $launcher = Wait-Until { Get-Launcher } 120 'the launcher dialog'
   # Let the dialog finish initialising (mod list) before pressing OK.
   Start-Sleep -Seconds 2
