@@ -1391,6 +1391,8 @@ def check_suite(rec, overhead=(2,)):
             run('inline' + tag, lambda: _both(inline_check(inline_table(inline_series(F, P))), inline_each(F, P)))
             run('blade' + tag, lambda: blade_check(F, P))
             run('stroke' + tag, lambda: stroke_check(F, P, overhead))
+            # R30 E6 screen path (sj-path): game and replay agree on it on every agree row (15/15, animlab-m-agree 2026-10-11)
+            run('path' + tag, lambda: path_check(F, P))
             if any(f.get('hua') for f in F):
                 run('hinge' + tag, lambda: hinge_check(hinge_series(F, P), P)[:2])
     finally:
