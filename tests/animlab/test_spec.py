@@ -48,13 +48,19 @@ def pose_file(frames):
 GL, GR, HIT = (-2.0, -2.0, 4.0), (2.0, -2.0, 4.0), (0.3, -1.0, 6.5)
 
 
-def punch(n=60, dur=1.0, peak=None, opts=lambda k, u: {}):
+# guard wrists clear of the game HUD (U23, c1bb254): GL/GR at (+-2, -2, 4) project to y=771 px, under the portrait
+# bar (>= 738 px); the compiled fist guard sits at y 692-727 px. Only the clean-punch test uses it (the other tests'
+# expectations were tuned on GL/GR).
+GL_HUD, GR_HUD = (-2.2, -1.8, 4.8), (2.0, -1.8, 4.8)   # left wrist x px 505 / y 691: inside the U21 + U23 window
+
+
+def punch(n=60, dur=1.0, peak=None, opts=lambda k, u: {}, gl=GL, gr=GR):
     fr = []
     for k in range(n):
         u = k / (n - 1.0)
         a = math.sin(math.pi * u) if peak is None else peak(u)
-        fr.append((dur * u, GL, lerp(GR, HIT, a), opts(k, u)))
-    return [(-0.2, GL, GR, {})] + fr
+        fr.append((dur * u, gl, lerp(gr, HIT, a), opts(k, u)))
+    return [(-0.2, gl, gr, {})] + fr
 
 
 def checks(F):
@@ -69,7 +75,7 @@ def tmp(text, suffix='.txt'):
 
 class TestUnarmed(unittest.TestCase):
     def test_clean_punch_passes(self):
-        res = S.unarmed_checks(S.read_pose(tmp(pose_file(punch()))))
+        res = S.unarmed_checks(S.read_pose(tmp(pose_file(punch(gl=GL_HUD, gr=GR_HUD)))))
         bad = [r for r in res if r[1] not in ('PASS', 'INFO')]
         self.assertFalse(bad, bad)
         self.assertTrue(any(r[0] == 'U4' and 'strike R' in r[2] for r in res))
