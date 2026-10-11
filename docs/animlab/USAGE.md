@@ -129,6 +129,10 @@ each with a `<t> mark sync=<n>` evidence line; `takecheck.py --video` pairs send
 label's flash is missing or reaches the screen > 0.15 s (`set synclag`) earlier/later than the T0 flash, or a flash has
 no send; `--synced-out <file>` writes the labels at their measured video times for the burn-in. Without take_mark (old
 takes, harness without sync_flash) it is SKIP unless the rules say `set sync 1`. openground/cursor/overlay skip flash frames.
+- **Punch reads** (NA1 fists, Misses 2026-10-11 "fist punch read"): `python3 components/KenshiFP/animlab/fist-punch-check.py <vmrec> [-v] [--camera]`
+  judges every punch of a fist take (native es >= .5) on the per-frame vmrec: C1 depth, C2 aim, C3 travel, C4 snap, C5 recovery,
+  C6 wind-up, C7 hand, C8 off hand, hold; C9 camera impulse INFO unless `--camera`. `RESULT FIST-PUNCH PASS|FAIL`; synthetic PASS
+  reference `fist-punch-synth.py <src vmrec> <out>`.
 
 ## Video: decode once, NVDEC, GPU checks (cpu-video, Shay 2026-10-10)
 - **Frame cache** `tools/animlab/framecache.py`: never decode a take video yourself; read frames through it.
