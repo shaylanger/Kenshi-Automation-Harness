@@ -315,6 +315,73 @@ void MeasureFrame() {
   g_lastFrame = now;
 }
 
+// Frame cap for automated runs (Shay 2026-10-10: VSync is off for tests, so the
+// game rendered flat out while takes record at 30 fps). <mod folder>\framecap.txt
+// holds the target fps (written by kenshi-ctl / the 4080 ctl at a test launch,
+// deleted for play); absent, empty or 0 = uncapped. Re-read once a second, so it
+// can change in a running game. Waits at the start of the Ogre frame with a
+// high-resolution waitable timer (Sleep fallback), no busy spin.
+int g_capFps = 0;
+DWORD g_capReadTick = 0;
+LARGE_INTEGER g_capNext = {0};
+HANDLE g_capTimer = nullptr;
+
+void ReadFrameCap() {
+  int fps = 0;
+  FILE *f = nullptr;
+  if (fopen_s(&f, (HarnessDir() + "\framecap.txt").c_str(), "r") == 0 && f) {
+    if (fscanf_s(f, "%d", &fps) != 1)
+      fps = 0;
+    fclose(f);
+  }
+  if (fps < 0 || fps > 1000)
+    fps = 0;
+  if (fps != g_capFps)
+    Log("KAH: frame cap " + (fps ? Int(fps) + " fps" : std::string("off")));
+  g_capFps = fps;
+}
+
+void FrameCap() {
+  const DWORD tick = GetTickCount();
+  if (g_capReadTick == 0 || tick - g_capReadTick > 1000) {
+    g_capReadTick = tick;
+    ReadFrameCap();
+  }
+  if (g_capFps <= 0 || g_qpcFreq <= 0.0) {
+    g_capNext.QuadPart = 0;
+    return;
+  }
+  const long long period = (long long)(g_qpcFreq / g_capFps);
+  LARGE_INTEGER now;
+  QueryPerformanceCounter(&now);
+  if (g_capNext.QuadPart == 0 || now.QuadPart - g_capNext.QuadPart > period) {
+    g_capNext.QuadPart = now.QuadPart + period; // first frame or a long frame: no catch-up burst
+    return;
+  }
+  long long left = g_capNext.QuadPart - now.QuadPart;
+  if (left > 0) {
+    if (!g_capTimer) { // CREATE_WAITABLE_TIMER_HIGH_RESOLUTION (Win10 1803+), else a normal timer;
+      // looked up at run time (the VS2010/SDK 7.1 headers target XP)
+      typedef HANDLE(WINAPI * CreateTimerEx)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD);
+      CreateTimerEx create =
+          (CreateTimerEx)GetProcAddress(GetModuleHandleA("kernel32.dll"), "CreateWaitableTimerExW");
+      if (create)
+        g_capTimer = create(nullptr, nullptr, 0x00000002, 0x1F0003 /* TIMER_ALL_ACCESS */);
+      if (!g_capTimer)
+        g_capTimer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+    }
+    LARGE_INTEGER due;
+    due.QuadPart = -(long long)((double)left / g_qpcFreq * 1e7); // relative, 100 ns units
+    if (g_capTimer && SetWaitableTimer(g_capTimer, &due, 0, nullptr, nullptr, FALSE))
+      WaitForSingleObject(g_capTimer, 100);
+    else
+      Sleep((DWORD)((double)left / g_qpcFreq * 1000.0));
+  }
+  g_capNext.QuadPart += period;
+}
+
+int FrameCapFps() { return g_capFps; }
+
 // Per-frame work (fps timing, production sampling). Run m13: in Kenshi only
 // the MyGUI frame event fires, Ogre's frameStarted never did, so timing fed
 // from there stayed at 0 frames. Both sources call this; once Ogre frames
@@ -340,7 +407,7 @@ void FrameWork(bool fromOgre) {
     WorldKeepers();
   if (++g_framesSinceLaunch % 600 == 0)
     Log("KAH: fps frames=" + Int(g_framesSinceLaunch) + " source=" + (fromOgre ? "ogre" : "mygui") +
-        " window: " + g_frameStats.Report());
+        " window: " + g_frameStats.Report() + " cap=" + Int(g_capFps));
 }
 
 void WorldKeepers() {
@@ -352,6 +419,7 @@ void WorldKeepers() {
 class AutomationFrameListener : public Ogre::FrameListener {
 public:
   virtual bool frameStarted(const Ogre::FrameEvent &) {
+    FrameCap();
     FrameWork(true);
     Tick("ogre");
     return true;
@@ -363,7 +431,7 @@ AutomationFrameListener g_frameListener;
 } // namespace
 
 std::string FpsReport(bool reset) {
-  const std::string out = g_frameStats.Report();
+  const std::string out = g_frameStats.Report() + " cap=" + Int(FrameCapFps());
   if (reset)
     g_frameStats.Reset();
   return out;
