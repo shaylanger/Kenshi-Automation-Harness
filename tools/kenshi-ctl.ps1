@@ -55,7 +55,15 @@ $LauncherOkId = 1003
 if (-not (Test-Path "$Kenshi\kenshi_x64.exe")) { throw "no kenshi_x64.exe in $Kenshi (use -Kenshi or KENSHI_DIR)" }
 
 # The leading comma keeps a one-process result an array (so .Count works).
-function Get-KenshiProcs { , @(Get-CimInstance Win32_Process -Filter "Name='kenshi_x64.exe'") }
+# Only the game processes of THIS install (-Kenshi, incl. its RE_Kenshi\kenshi_x64.exe restart): a second install copy
+# (multi-instance, e.g. D:\KenshiInst\2) can run its own game alongside, and status/stop/launch here must not see or kill
+# it. With one install this is every kenshi_x64.exe, as before; a process whose path can't be read still counts.
+$KenshiRoot = ([IO.Path]::GetFullPath($Kenshi)).TrimEnd('\') + '\'
+function Get-KenshiProcs {
+  , @(Get-CimInstance Win32_Process -Filter "Name='kenshi_x64.exe'" |
+      Where-Object { -not $_.ExecutablePath -or $_.ExecutablePath.StartsWith($KenshiRoot, [StringComparison]::OrdinalIgnoreCase) })
+}
+function Get-KenshiPids { , [uint32[]]@((Get-KenshiProcs) | ForEach-Object { [uint32]$_.ProcessId }) }
 
 function Get-Launcher {
   $procs = Get-KenshiProcs
@@ -177,7 +185,7 @@ function Get-ForegroundDesc {
 # processes goes to -Monitor without activation; with -Background, if a game
 # window took the foreground, it goes back to the window that had it before.
 function Keep-Background {
-  $pids = [uint32[]]@(Get-Process kenshi_x64 -ErrorAction SilentlyContinue | ForEach-Object { [uint32]$_.Id })
+  $pids = Get-KenshiPids
   if ($script:FgLocked) { [KenshiPlace]::LockForeground($true) | Out-Null }
   if ($pids.Count -eq 0) { return }
   if ($Monitor) {
@@ -199,7 +207,7 @@ function Keep-BackgroundNow {
   $win = Get-GameWindow
   if (-not $win) { throw 'no game window' }
   if ($Monitor) { $where = ''; [KenshiPlace]::Place($win.Handle, $Monitor, [ref]$where) | Out-Null }
-  $pids = [uint32[]]@(Get-Process kenshi_x64 -ErrorAction SilentlyContinue | ForEach-Object { [uint32]$_.Id })
+  $pids = Get-KenshiPids
   $note = ''
   if ([KenshiPlace]::ForegroundOf($pids) -ne [IntPtr]::Zero) {
     $note = if ([KenshiPlace]::Demote([KenshiPlace]::ForegroundOf($pids))) { ' (foreground dropped)' } else { ' (STILL FOREGROUND)' }
