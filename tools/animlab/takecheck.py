@@ -35,7 +35,18 @@ animation (`... end: ... live=1`); a press whose progress never went live (fb_li
 
 Usage: takecheck.py --labels L --ev E [--ev E2 ...] --rules R [--video V [--no-cursor] [--no-overlay] | --video-len S] [--kfplog LOG
        [--log-t0 T]] [--name take]
-Exit 0 = PASS. Prints one line per check, then `RESULT <name> PASS|FAIL <failed checks>`.
+Exit 0 = PASS or PASS-REC. Prints one line per check, then `RESULT <name> PASS|PASS-REC|FAIL <failed checks>`.
+
+PRODUCT vs RECORDING checks (Shay 2026-10-10: no refilms caused only by PC load; tur-b-2 T6 passed review but FAILed on a
+1.1 s sampler gap, a 0.45 s short video and 0.55 s label lag at WSL load 60). PRODUCT = what the game showed: claim values,
+pre, forbid, cursor, overlay, animlive (+ the wrapper's openground/moves/look checks). RECORDING = how well the take was
+captured: claim/cover sampler gaps, video length, sync flash lag. When only recording checks fail the take is judged on
+what was recorded: `RESULT <name> PASS-REC <n> checks rec-warn=<which>`. A recording failure still FAILs (`rec-hid=`) when
+it hides a whole state, because a state with no evidence is not judged:
+  claim gap   >= half the segment, > 3 x maxgap, or < 2 samples in it
+  cover gap   > 3 x maxgap, or a gap that contains a whole labelled segment
+  video       shorter than the start of the last state + grace (the last state has no frames)
+  sync        no flash paired at all, or a label lag beyond 1.0 s
 """
 import argparse, re, shlex, subprocess, sys
 
@@ -150,6 +161,16 @@ def coverage(samples, a, b):
     return max(pts[i + 1] - pts[i] for i in range(len(pts) - 1))
 
 
+def gaps(samples, a, b, mg):
+    """[(g0, g1)] unsampled intervals in [a, b] longer than mg (edges count, like coverage)."""
+    pts = [a] + sorted(t for t, _ in samples if a <= t <= b) + [b]
+    return [(pts[i], pts[i + 1]) for i in range(len(pts) - 1) if pts[i + 1] - pts[i] > mg]
+
+
+REC_HOLE = 3.0      # a recording gap > REC_HOLE x maxgap hides too much to judge (FAIL rec-hid)
+SYNC_HIDE = 1.0     # a label lag beyond this (s) can put a short state on the wrong frames (FAIL rec-hid)
+
+
 def sync_check(L, S, marks, maxlag=0.15, require=False, pair_win=1.0, label_win=0.25):
     """T6 label lag (2026-10-10): pair the take's `sync=<n>` evidence lines (take_mark send times, script clock) with
     the sync flashes found in the video (`marks`, video clock). lag_i = (mark_i - send_i) - (mark_0 - send_0): how
@@ -224,9 +245,12 @@ def video_len(path):
         return None
 
 
-def check(L, S, R, cfg, vlen=None):
-    """returns (ok, [lines], [failed short names])."""
+def check(L, S, R, cfg, vlen=None, rec=None):
+    """returns (ok, [lines], [failed short names]). `rec` (dict, optional) gets {failed name: 'warn'|'hid'} for every
+    failure that is a RECORDING check (sampler gap / video length): 'hid' = it hides a whole state (see grade())."""
     lines, fails = [], []
+    rec = {} if rec is None else rec
+    prod = set()
     g, mg = cfg['grace'], cfg['maxgap']
     end = next((t for t, x in L if x.lower() == 'end'), None)
     segs = segments(L)
@@ -262,8 +286,14 @@ def check(L, S, R, cfg, vlen=None):
                         why = 'no sample of %s in %.2f..%.2f' % (c[0], a, b)
                     elif gap > mg:
                         why = 'unverified %.1f s (max gap %.1f s, %d samples in %.1f s)' % (gap, mg, len(ins), b - a)
+                        # recording: every sample holds, only the sampler left a hole; whole-state holes stay FAIL
+                        hid = gap >= 0.5 * (b - a) or gap > REC_HOLE * mg or len(ins) < 2
+                        rec['claim:%s' % txt[:30]] = 'hid' if hid else rec.get('claim:%s' % txt[:30], 'warn')
+                        why += ' [rec-%s]' % ('hid' if hid else 'warn')
                     else:
                         lines.append('claim PASS "%s" %s over %.2f..%.2f (%d samples)' % (txt, fmt_cond(c), a, b, len(ins))); continue
+                    if bad or not ins:
+                        prod.add('claim:%s' % txt[:30])   # a wrong value / no sample at all: product, never PASS-REC
                     fails.append('claim:%s' % txt[:30]); lines.append('claim FAIL "%s" wants %s over %.2f..%.2f: %s' % (txt, fmt_cond(c), a, b, why))
         elif kind == 'forbid':
             c = conds[0]
@@ -281,18 +311,52 @@ def check(L, S, R, cfg, vlen=None):
             for k in conds:
                 gap = coverage(S.get(k, []), t_first, t_last)
                 if gap > mg:
-                    fails.append('cover:%s' % k); lines.append('cover FAIL %s: largest unsampled gap %.1f s (max %.1f) over %.2f..%.2f' % (k, gap, mg, t_first, t_last))
+                    # recording check; it hides a state when a hole is huge or swallows a whole labelled segment
+                    holes = gaps(S.get(k, []), t_first, t_last, mg)
+                    hidden = [s[2] for s in segs for g0, g1 in holes
+                              if g0 <= s[0] and (t_last if s[1] is None else s[1]) <= g1]
+                    hid = gap > REC_HOLE * mg or bool(hidden)
+                    rec['cover:%s' % k] = 'hid' if hid else 'warn'
+                    fails.append('cover:%s' % k); lines.append('cover FAIL %s: largest unsampled gap %.1f s (max %.1f) over %.2f..%.2f [rec-%s%s]' % (
+                        k, gap, mg, t_first, t_last, 'hid' if hid else 'warn', (': hides "%s"' % hidden[0][:40]) if hidden else ''))
                 else:
                     lines.append('cover PASS %s' % k)
     if vlen is not None and end is not None:
         over = vlen - (end + cfg['offset'])
         if over > cfg['endslack'] or over < -0.2:
             fails.append('video-length')
-            lines.append('end FAIL video %.2f s vs end label %.2f + offset %.2f: %+.2f s %s' % (vlen, end, cfg['offset'], over,
-                         'past the end label' if over > 0 else 'short'))
+            # recording check; a video that ends before the last state (+ grace) has no frames of it: hid
+            last = segs[-1][0] if segs else 0.0
+            hid = over < 0 and vlen < last + cfg['offset'] + g
+            rec['video-length'] = 'hid' if hid else 'warn'
+            lines.append('end FAIL video %.2f s vs end label %.2f + offset %.2f: %+.2f s %s [rec-%s]' % (vlen, end, cfg['offset'], over,
+                         'past the end label' if over > 0 else 'short', 'hid' if hid else 'warn'))
         else:
             lines.append('end PASS video %.2f s, end label %.2f (%+.2f s)' % (vlen, end, over))
+    for n in prod:
+        rec.pop(n, None)
     return not fails, lines, fails
+
+
+def sync_grade(stxt):
+    """'warn' | 'hid' for a failed sync check text: no flash paired at all, or a lag beyond SYNC_HIDE, hides states."""
+    m = re.search(r'paired=(\d+)', stxt)
+    if not m or int(m.group(1)) == 0:
+        return 'hid'
+    lag = re.search(r'lag=([-+\d.]+)\.\.([-+\d.]+)', stxt)
+    if lag and max(abs(float(lag.group(1))), abs(float(lag.group(2)))) > SYNC_HIDE:
+        return 'hid'
+    return 'warn'
+
+
+def grade(fails, rec):
+    """(verdict, rec_warn, rec_hid): PASS / PASS-REC (only recording checks failed, none hides a state) / FAIL."""
+    if not fails:
+        return 'PASS', [], []
+    warn = [f for f in fails if rec.get(f) == 'warn']
+    hid = [f for f in fails if rec.get(f) == 'hid']
+    product = [f for f in fails if f not in rec]
+    return ('FAIL' if product or hid else 'PASS-REC'), warn, hid
 
 
 # ---- native animation liveness from the KenshiFP log (Misses 2026-10-10 fb_lives: fb_lives stayed 0 over 90+ free
@@ -386,7 +450,8 @@ def main():
             vlen = video_len(a.video)
         else:
             pre.append('trim FAILED (%s), judged untrimmed' % (r.stderr.strip()[-120:] or 'no output'))
-    ok, lines, fails = check(L, S, R, ecfg, vlen)
+    rec = {}
+    ok, lines, fails = check(L, S, R, ecfg, vlen, rec)
     lines = pre + lines
     if a.video and not a.no_cursor:   # Shay 2026-10-10 ticket A: the mouse cursor must never show in a take
         import os
@@ -408,7 +473,7 @@ def main():
         sok, stxt, synced = sync_res
         lines.append('sync %s %s' % (('PASS' if sok else 'FAIL') if not stxt.startswith('SKIP') else 'SKIP', stxt))
         if not sok:
-            ok = False; fails.append('sync')
+            ok = False; fails.append('sync'); rec['sync'] = sync_grade(stxt)
         if synced and a.synced_out:
             with open(a.synced_out, 'w') as fh:
                 for t, x in synced:
@@ -422,7 +487,12 @@ def main():
             ok = False; fails.append('animlive')
     for x in lines:
         print(x)
-    print('RESULT %s %s %s' % (a.name, 'PASS' if ok else 'FAIL', ' '.join(fails) if fails else '%d checks' % len(lines)))
+    verdict, warn, hid = grade(fails, rec)   # PASS-REC: only recording checks failed (judged on what was recorded)
+    if verdict == 'PASS-REC':
+        print('RESULT %s PASS-REC %d checks rec-warn=%s' % (a.name, len(lines), ','.join(warn)))
+        return 0
+    print('RESULT %s %s %s%s' % (a.name, 'PASS' if ok else 'FAIL', ' '.join(fails) if fails else '%d checks' % len(lines),
+                                 (' rec-hid=' + ','.join(hid)) if hid else ''))
     return 0 if ok else 1
 
 

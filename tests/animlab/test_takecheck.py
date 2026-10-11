@@ -77,6 +77,40 @@ class TakeCheck(unittest.TestCase):
         ok, lines, fails = run(LAB.replace('9.0 end\n', ''), samples(0, 9, good))
         self.assertIn('no-end-label', fails)
 
+
+    # PASS-REC (Shay 2026-10-10: no refilms caused only by PC load): recording-only failures vs whole-state holes
+    def grade_of(self, labels, ev, vlen=None):
+        rec = {}
+        d = tempfile.mkdtemp()
+        p = lambda n, s: (open(os.path.join(d, n), "w").write(s), os.path.join(d, n))[1]
+        L = T.read_labels(p("l.txt", labels)); S = T.read_ev([p("e.txt", ev)]); R, cfg = T.read_rules(p("r.txt", RULES))
+        ok, lines, fails = T.check(L, S, R, cfg, vlen, rec)
+        return T.grade(fails, rec), lines
+
+    def test_sampler_gap_and_short_video_pass_rec(self):   # tur-b-2 T6: 1.1 s sampler hole + 0.45 s short video
+        ev = "\n".join(l for l in samples(0, 9, good).splitlines() if not 4.0 < float(l.split()[0]) < 5.2) + "\n"
+        (v, warn, hid), lines = self.grade_of(LAB, ev, vlen=8.55)
+        self.assertEqual(v, "PASS-REC", lines); self.assertIn("video-length", warn); self.assertIn("cover:ui", warn); self.assertEqual(hid, [])
+
+    def test_wrong_value_stays_fail_with_gaps(self):
+        ev = "\n".join(l for l in samples(0, 9, lambda t: good(t).replace("aiming", "reloading")).splitlines() if not 7.0 < float(l.split()[0]) < 8.2) + "\n"
+        (v, warn, hid), lines = self.grade_of(LAB, ev, vlen=9.4)
+        self.assertEqual(v, "FAIL", lines)
+
+    def test_hole_hiding_a_state_fails(self):   # the aim segment 2.0..6.0 has (almost) no samples
+        ev = "\n".join(l for l in samples(0, 9, good).splitlines() if not 1.9 < float(l.split()[0]) < 6.1) + "\n"
+        (v, warn, hid), lines = self.grade_of(LAB, ev, vlen=9.4)
+        self.assertEqual(v, "FAIL", lines)
+
+    def test_video_missing_last_state_fails(self):
+        (v, warn, hid), lines = self.grade_of(LAB, samples(0, 9, good), vlen=6.2)
+        self.assertEqual(v, "FAIL", lines); self.assertIn("video-length", hid)
+
+    def test_sync_grade(self):
+        self.assertEqual(T.sync_grade("sends=5 flashes=5 paired=5 t0_offset=0.80 lag=-0.10..+0.55 lag>0.15s at n=3(+0.55):BAD"), "warn")
+        self.assertEqual(T.sync_grade("sends=5 flashes=5 paired=5 t0_offset=0.80 lag=-0.10..+1.40 x:BAD"), "hid")
+        self.assertEqual(T.sync_grade("sends=5 flashes=0 (no sync flash in the video):BAD"), "hid")
+
     def test_cond_ops(self):
         c = T.parse_cond
         self.assertTrue(T.cond_ok(c('a=x|y'), 'y')); self.assertFalse(T.cond_ok(c('a!=x|y'), 'y'))
