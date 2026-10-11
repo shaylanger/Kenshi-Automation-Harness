@@ -6,7 +6,7 @@ Work runs on a lowest-priority CUDA stream so Kenshi's rendering during takes ke
   xp_of(a)    numpy or cupy module for array a (write array code as `np = gpu.xp_of(a)`)
   dev(a)      a on the GPU when the GPU path is on, else a unchanged
   host(a)     a as a numpy array (no-op for numpy)
-ANIMLAB_GPU=0 forces the CPU path.  CLI: gpu.py  (prints which path is active)
+ANIMLAB_GPU=0 or the host file /etc/kah-no-gpu forces the CPU path.  CLI: gpu.py  (prints which path is active)
 """
 import os, sys
 
@@ -18,7 +18,7 @@ def cupy():
     global _cp, _stream
     if _cp is False:
         _cp = None
-        if os.environ.get('ANIMLAB_GPU', '1') != '0':
+        if os.environ.get('ANIMLAB_GPU', '1') != '0' and not os.path.exists('/etc/kah-no-gpu'):
             try:
                 import cupy as cp
                 if cp.cuda.runtime.getDeviceCount() > 0:

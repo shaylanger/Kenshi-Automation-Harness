@@ -91,11 +91,11 @@ _hw = None
 def hwdec():
     """ffmpeg input args for NVDEC decode (-hwaccel cuda) when an NVIDIA GPU is visible, else []. ffmpeg falls back to
     software decoding by itself if the hwaccel cannot open. Cuts the decode CPU ~2-3x (41 s 1600x900 take: 4.5 -> 2 cpu-s)
-    for ~1 s more wall. ANIMLAB_HWDEC=0 turns it off."""
+    for ~1 s more wall. ANIMLAB_HWDEC=0 or the host file /etc/kah-no-gpu turns it off."""
     global _hw
     if _hw is None:
         import shutil
-        on = os.environ.get('ANIMLAB_HWDEC', '1') != '0' and bool(
+        on = os.environ.get('ANIMLAB_HWDEC', '1') != '0' and not os.path.exists('/etc/kah-no-gpu') and bool(
             shutil.which('nvidia-smi') or os.path.exists('/usr/lib/wsl/lib/nvidia-smi'))
         _hw = ['-hwaccel', 'cuda'] if on else []
     return list(_hw)
