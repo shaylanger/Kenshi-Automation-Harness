@@ -1554,7 +1554,7 @@ PATH_LATE = 0.35                        # late share of the path (by arc length)
 PATH_DEV, PATH_LATE_MAX, PATH_EDGE = 0.08, 0.05, 0.12
 PATH_ANG = (35.0, 50.0)                 # diagonal strokes: fitted line angle from horizontal
 PATH_DIAG = (0, 3)                      # scripted stroke ids that are diagonals (angle gated); others: angle reported
-PATH_INFO = (1,)                        # Shay 16:27: stroke 1 (backhand) accepted as it is -> measured, non-blocking (info)
+PATH_INFO = (1, 2)                      # Shay 16:27: change only strokes 0 + 3 (and new strokes); stroke 1 (backhand, accepted) and stroke 2 (overhead, not under review) measured, non-blocking (info)
 PATH_MIN_N = 4
 
 
