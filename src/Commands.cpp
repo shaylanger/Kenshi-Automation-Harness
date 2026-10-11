@@ -1604,12 +1604,14 @@ std::string SyncFlash(const std::vector<std::string> &f, bool &ok) {
   if (ms < 30 || ms > 2000)
     return "usage: sync_flash [ms 30..2000, default 150] [n]";
   if (g_stamp.on) { // the stamp carries the mark, exact to the frame; the full-view flash only with `stamp on .. flash`
+    // No paint here: commands run after this frame's render, so a mark painted now first shows on frame fc+1 while the
+    // log said fc (proof 60-stamp-proof-1010-2231: every mark one frame late vs the log). The next StampFrame paints
+    // and logs it at the frame that really shows it.
     g_stamp.mark = (unsigned)n & 0xff;
-    StampPaint(g_stamp.setsSince > 0 ? 1u : 0u);
-    Log("KAH: sync mark n=" + Int(n) + " stamp fc=" + Int(g_stamp.fc));
+    Log("KAH: sync mark n=" + Int(n) + " stamp fc=" + Int(g_stamp.fc + 1));
     if (!g_stamp.flash) {
       ok = true;
-      return "sync_flash n=" + Int(n) + " stamp mark fc=" + Int(g_stamp.fc);
+      return "sync_flash n=" + Int(n) + " stamp mark fc=" + Int(g_stamp.fc + 1);
     }
   }
   MyGUI::Gui *g = MyGUI::Gui::getInstancePtr();

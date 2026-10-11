@@ -146,13 +146,16 @@ def read_rules(path):
     return R, cfg
 
 
-def segments(L):
-    """[(t0, t1, text)] per label (the `end` label closes the last one and has no segment)."""
+def segments(L, early=None):
+    """[(t0, t1, text)] per label (the `end` label closes the last one and has no segment). early {(t, text): t'}:
+    frame stamp, the next label's earliest video time (observation labels: the state changed before their mark)."""
     out = []
     for i, (t, txt) in enumerate(L):
         if txt.lower() == 'end':
             break
         t1 = L[i + 1][0] if i + 1 < len(L) else None
+        if t1 is not None and early:
+            t1 = max(t, min(t1, early.get(tuple(L[i + 1][:2]), t1)))
         out.append((t, t1, txt))
     return out
 
@@ -250,7 +253,7 @@ def video_len(path):
         return None
 
 
-def check(L, S, R, cfg, vlen=None, rec=None):
+def check(L, S, R, cfg, vlen=None, rec=None, early=None):
     """returns (ok, [lines], [failed short names]). `rec` (dict, optional) gets {failed name: 'warn'|'hid'} for every
     failure that is a RECORDING check (sampler gap / video length): 'hid' = it hides a whole state (see grade())."""
     lines, fails = [], []
@@ -258,7 +261,7 @@ def check(L, S, R, cfg, vlen=None, rec=None):
     prod = set()
     g, mg = cfg['grace'], cfg['maxgap']
     end = next((t for t, x in L if x.lower() == 'end'), None)
-    segs = segments(L)
+    segs = segments(L, early)
     if end is None:
         fails.append('no-end-label'); lines.append('end FAIL no `end` label: take length unknown')
     t_first = L[0][0] if L else 0.0
@@ -433,7 +436,8 @@ def main():
         print('video FAIL cannot read the length of %s' % a.video); return 1
     sync_res, t0off = None, None
     # Frame stamp (frame-stamp, 2026-10-10): the video carries the game frame + FP state + label mark in every frame
-    # (stamp.py). Labels move to the frame their mark shows, the stamp keys (ui_state, hud_text, loaded, stroke, ...)
+    # (stamp.py). Labels move to the frame their mark shows (a claim window ends at the next label's mark or its
+    # earliest time on the send clock, whichever is first: stamp.py `early`), the stamp keys (ui_state, hud_text, loaded, stroke, ...)
     # replace the sampled ones (one sample per video frame: a gap is a real capture/game gap), the other evidence is
     # shifted by the measured T0 (mark 0), so everything is judged on the video clock (offset 0) and the flash sync
     # check is replaced by the mark check (every label's mark shown).
@@ -442,7 +446,7 @@ def main():
         import os
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import stamp as stampmod
-        stamp = stampmod.take_inputs(a.video, L)
+        stamp = stampmod.take_inputs(a.video, L, sends=S.get('sync'))
         if stamp is None and a.stamp == 'on':
             print('stamp FAIL no frame stamp in %s' % a.video)
             print('RESULT %s FAIL stamp' % a.name)
@@ -481,7 +485,7 @@ def main():
         else:
             pre.append('trim FAILED (%s), judged untrimmed' % (r.stderr.strip()[-120:] or 'no output'))
     rec = {}
-    ok, lines, fails = check(L, S, R, ecfg, vlen, rec)
+    ok, lines, fails = check(L, S, R, ecfg, vlen, rec, stamp['early'] if stamp is not None else None)
     lines = pre + lines
     if a.video and not a.no_cursor:   # Shay 2026-10-10 ticket A: the mouse cursor must never show in a take
         import os

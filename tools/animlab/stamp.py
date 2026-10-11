@@ -307,12 +307,16 @@ def ev_series(rows):
     return S
 
 
-def take_inputs(video, L, cell=8, view_w=None):
+def take_inputs(video, L, cell=8, view_w=None, sends=None):
     """For takecheck / review-pack: None when the video has no stamp, else dict(
-         labels=[(video t, text)]  (label k at the first frame showing mark k; `end` shifted like the last mark),
+         labels=[(video t, text)]  (label k at the first frame showing mark k; `end` shifted like the last mark;
+         early={(video t, text): t}  with `sends` (the take's `<t> mark sync=<n>` send times, script clock): the
+                 label's script time + the lowest-latency clock offset (see below); takecheck ends the previous
+                 label's claim window there when that is before the mark,
          off0 = video time of take T0 (mark 0; else derived from the first mark found) or None,
          series = stamp evidence {key: [(video t, value)]}, rows, marks, missing=[k...], text=one summary line,
-         merge(S) -> evidence S in video time: the stamp keys replace the sampled ones, the rest shifted by off0,
+         merge(S) -> evidence S in video time: the stamp keys replace the sampled ones, the rest shifted by off0
+                     (with `sends`: by the lowest-latency send offset),
                      the flash-sync keys (sync, sync_off) dropped)"""
     rows, C = decode_video(video, cell, view_w)
     ok = [r for r in rows if r['d']]
@@ -339,6 +343,31 @@ def take_inputs(video, L, cell=8, view_w=None):
             labels.append((t + (shift or 0.0), text))
     if off0 is None:
         off0 = 0.0
+    # Early label times from the send times (frame-stamp proof 60-stamp-proof-1010-2231, T6 on the 4080): a mark reaches
+    # the screen 0.0-0.3 s after take_mark sent it. Action labels (label, then the key) are right at their mark (the key
+    # waits as long as the mark), but observation labels (the script saw the state, then labels it: "Reloaded: LOADED",
+    # "Power cut") show their mark AFTER the state changed, so the previous label's window caught the new state (claim
+    # FAILs). off_k = video(mark k) - send(k) = true offset + latency_k: the lower envelope min(off_k) maps a label's
+    # script time to the earliest video time it can mean; the previous window ends there, the label still starts at
+    # its mark.
+    clock, early, soff = '', {}, off0
+    if sends:
+        offs = []
+        for t, n in sends:
+            try:
+                n = int(float(n))
+            except (TypeError, ValueError):
+                continue
+            if n in marks:
+                offs.append(marks[n]['t'] - t)
+        if offs:
+            omin = min(offs)
+            for (t, text), lab in zip(L, labels):
+                early[(lab[0], text)] = t + omin
+            clock = ' lat=0..%.3f' % (max(offs) - omin)
+            soff = omin       # sampled evidence (harness epoch - T0, no command latency) maps like a zero-latency send
+            # `end` has no mark (the recorder stops on it): at its earliest time, not shifted like the last (late) mark
+            labels = [(L[i][0] + omin, x) if x.strip().lower() == 'end' else (u, x) for i, (u, x) in enumerate(labels)]
     series = ev_series(rows)
     # the FP keys only when a mod (KenshiFP kfp-frame-stamp) really filled the payload: else (old KenshiFP, payload 0)
     # the stamp gives frames + marks only and the sampled state keys stay
@@ -347,21 +376,21 @@ def take_inputs(video, L, cell=8, view_w=None):
         series = {k: series[k] for k in ('gf', 'mark')}
     dup = sum(1 for r in ok[1:] if r['dfc'] == 0)
     skip = max([r['dfc'] for r in ok[1:]] or [0])
-    text = 'stamp frames=%d ok=%d dup=%d skip_max=%d marks=%d/%d t0=%.3f payload=%s%s' % (
+    text = 'stamp frames=%d ok=%d dup=%d skip_max=%d marks=%d/%d t0=%.3f payload=%s%s%s' % (
         len(rows), len(ok), dup, skip, k - len(missing), k, off0, 'fp' if fresh >= 0.5 else 'none(%.2f)' % fresh,
-        (' missing=' + ','.join(map(str, missing))) if missing else '')
+        clock, (' missing=' + ','.join(map(str, missing))) if missing else '')
 
     def merge(S):
         out = {}
         for key, ser in S.items():
             if key in series or key in ('sync', 'sync_off'):
                 continue
-            out[key] = [(t + off0, v) for t, v in ser]
+            out[key] = [(t + soff, v) for t, v in ser]
         for key, ser in series.items():
             out[key] = list(ser)
         return out
     return dict(labels=labels, off0=off0, series=series, rows=rows, marks=marks, missing=missing, text=text,
-                merge=merge)
+                merge=merge, early=early)
 
 
 def pack_events(video, labels_path):
