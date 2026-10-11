@@ -27,14 +27,21 @@
       frame checks (openground, cursor, overlay) skip flash frames.
 Needs ffmpeg on PATH. Exit 0 = PASS. Last line: `RESULT <name> PASS|FAIL ...`.
 """
-import argparse, subprocess, sys
+import argparse, os, subprocess, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import framecache  # noqa: E402
+import gpu  # noqa: E402
 
 W, H = 160, 90
 
 
 def read_frames(video, fps, t0=None, t1=None):
     import numpy as np
-    cmd = ['ffmpeg', '-nostdin', '-loglevel', 'error']
+    c = framecache.frames(video, fps, W, H, t0, t1)   # decoded once per video, shared by every consumer
+    if c is not None:
+        return np.asarray(c).astype(int)
+    cmd = ['ffmpeg', '-nostdin', '-loglevel', 'error'] + framecache.hwdec()
     if t0:
         cmd += ['-ss', str(t0)]
     cmd += ['-i', video]
@@ -93,6 +100,33 @@ def openground(shares, fps, t0=0.0, min_sky=0.08, share=0.9):
     return ok, txt
 
 
+# ---------------- frame stamp corner (harness `stamp on`, stamp.py; frame-stamp 2026-10-10) ----------------
+# cell 8 px at 1600x900: (24+2) x (5+2) cells = 208 x 56 px in the top-left corner. In a frame that shows it, the
+# corner is never a foreign overlay or a cursor; without a stamp the corner stays checked like the rest.
+STAMP_ZONE = (0.0, 0.0, 0.135, 0.07)
+
+
+def has_stamp(f):
+    """the stamp's sync row (row 0: even cells white, odd black, on a black backing) is in this frame"""
+    Hh, Ww = f.shape[:2]
+    C = 8.0 * Ww / 1600.0
+    if Hh < 7 * C or Ww < 26 * C:
+        return False
+    g = f.mean(2) if f.ndim == 3 else f
+    y0, y1 = int(C * 1.25), max(int(C * 1.75), int(C * 1.25) + 1)
+    v = [float(g[y0:y1, int((c + 1.25) * C):max(int((c + 1.75) * C), int((c + 1.25) * C) + 1)].mean()) for c in range(24)]
+    return min(v[0::2]) - max(v[1::2]) > 60 and float(g[:max(1, int(C * 0.75)), :int(26 * C)].mean()) < 60
+
+
+def blank_stamp(f):
+    """black out the stamp corner of a frame that shows the stamp (in place); True when it did"""
+    if not has_stamp(f):
+        return False
+    Hh, Ww = f.shape[:2]
+    f[:int(STAMP_ZONE[3] * Hh), :int(STAMP_ZONE[2] * Ww)] = 0
+    return True
+
+
 # ---------------- mouse cursor in frame (Shay 2026-10-10, ticket A) ----------------
 def iter_frames_full(video, fps, t0=None, t1=None, size=None):
     """(t, HxWx3 int frame) at the video's own resolution (or size=(w, h)), streamed (a full-res take does not fit in memory)."""
@@ -102,7 +136,13 @@ def iter_frames_full(video, fps, t0=None, t1=None, size=None):
     w, h = int(pr[0]), int(pr[1])
     if size:
         w, h = size
-    cmd = ['ffmpeg', '-nostdin', '-loglevel', 'error']
+    c = framecache.frames(video, fps, w, h, t0, t1)   # small sizes: decoded once per video, shared (framecache.py)
+    if c is not None:
+        i0 = max(0, int(round((t0 or 0) * fps)))
+        for k in range(len(c)):
+            yield (i0 + k) / fps, np.asarray(c[k]).astype(np.int16)
+        return
+    cmd = ['ffmpeg', '-nostdin', '-loglevel', 'error'] + framecache.hwdec()
     if t0:
         cmd += ['-ss', str(t0)]
     cmd += ['-i', video]
@@ -128,7 +168,8 @@ def find_cursor(f, white=200, dark=110):
     tip pixel dark, a white run down the next column with a dark outline left of it, and a filled white right
     triangle whose row width grows 1 px per row (45 deg hypotenuse) over the head (55% of the run), not white just
     right of the hypotenuse. Text glyphs (constant stroke width) and UI edges fail the width profile."""
-    import numpy as np
+    import numpy
+    np = gpu.xp_of(f)
     W = f.min(2) > white
     D = f.max(2) < dark
     Hh, Ww = W.shape
@@ -139,6 +180,8 @@ def find_cursor(f, white=200, dark=110):
     def s(A, dy, dx):
         return A[dy:dy + Hh, dx:dx + Ww]
     c = s(Dp, 0, 0) & s(Wp, 3, 1) & s(Wp, 6, 1) & s(Wp, 6, 3) & s(Dp, 4, 0) & ~s(Wp, 2, 5)
+    c, W, D = gpu.host(c), gpu.host(W), gpu.host(D)   # candidate search above on the GPU (if on), shape test below on host
+    np = numpy
     out, seen = [], set()
     for y, x in zip(*np.nonzero(c)):
         if (x, y - 1) in seen or (x, y - 2) in seen:
@@ -176,7 +219,7 @@ def find_kcursor(f, a0=5, a1=11, con=25, bright=90, share=0.8):
     each arm (offsets a0..a1 px) is a thin line (brighter than the pixels 2 px to either side) on >= share of its
     pixels, the arrows stop short of the centre (a plain cross / grid line runs through) and every arm has arrowhead
     pixels beside the line (a UI grid line has none)."""
-    import numpy as np
+    np = gpu.xp_of(f)
     L = f.min(2).astype(np.int16)
     Hh, Ww = L.shape
     Pd = np.pad(L, 2, mode='edge')
@@ -194,6 +237,7 @@ def find_kcursor(f, a0=5, a1=11, con=25, bright=90, share=0.8):
         c &= sum(sl(B, dy * k + dx * s_, dx * k + dy * s_) for k in range(a0, a1 + 1) for s_ in (-1, 1)) >= 2
     c &= (sum(sl(V, k, 0) for k in range(-2, 3)) <= 1) & (sum(sl(Hm, 0, k) for k in range(-2, 3)) <= 1)
     ys, xs = np.nonzero(c)
+    ys, xs = gpu.host(ys), gpu.host(xs)
     return [(int(x + m), int(y + m)) for y, x in zip(ys, xs)]
 
 
@@ -205,6 +249,8 @@ def cursor_check(video, fps=5.0, t0=None, t1=None, name='take'):
         if is_flash(f):   # harness sync_flash marker frame
             continue
         nfr += 1
+        blank_stamp(f)   # frame stamp corner (black/white cells)
+        f = gpu.dev(f)
         c = find_cursor(f)
         if not c:   # Kenshi's own cursor anywhere but the screen centre (there it is the FP crosshair)
             Hh, Ww = f.shape[:2]
@@ -244,7 +290,7 @@ def _ogrid(a):
 
 def _strokes(m):
     """per cell: max over pixel rows of rising edges of mask m (glyph strokes; text has several per 16 px, an edge one)."""
-    import numpy as np
+    np = gpu.xp_of(m)
     r = m[:, 1:] & ~m[:, :-1]
     r = np.concatenate([r, np.zeros((OH, 1), bool)], 1)
     return r.reshape(OH // CH, CH, OW // CW, CW).sum(3).max(1)
@@ -255,7 +301,7 @@ def text_cells(f):
     numbers): neutral-bright or red core pixels with a much darker pixel within 3 px on both sides; A: text on a flat dark
     panel (speech bars, hint lists, debug boxes): dark flat background + low-saturation brighter glyphs. Both need >= 3
     glyph strokes per cell."""
-    import numpy as np
+    np = gpu.xp_of(f)
     g = f.mean(-1)
     mx, mn = f.max(-1), f.min(-1)
     spread = mx - mn
@@ -346,14 +392,19 @@ def overlay_check(video, fps=2.0, t0=None, t1=None, zones=OV_ZONES, frames=None)
     if frames is None:
         frames = iter_frames_full(video, fps, t0, t1, size=(OW, OH))
     Z = zone_mask(zones)
+    Zs = zone_mask([STAMP_ZONE])
     ts, TX, AX, PX = [], [], [], []
     for t, f in frames:
         if is_flash(f):   # harness sync_flash marker frame
             continue
-        T, A, _ = text_cells(f)
+        st = has_stamp(f)
+        fd = gpu.dev(f)   # per-pixel work on the GPU when it is on (gpu.py); cell masks back on host
+        T, A, _ = (gpu.host(x) for x in text_cells(fd))
         P = np.zeros_like(T)
-        for x0, y0, x1, y1 in panel_rects(*flat_cells(f)):
+        for x0, y0, x1, y1 in panel_rects(*(gpu.host(x) for x in flat_cells(fd))):
             P[y0:y1, x0:x1] = True
+        if st:   # frame stamp corner: the stamp's own cells
+            T = T & ~Zs; A = A & ~Zs; P = P & ~Zs
         ts.append(t); TX.append(T); AX.append(A); PX.append(P)
     if not ts:
         return False, 'no frames:BAD'
@@ -382,6 +433,21 @@ def overlay_check(video, fps=2.0, t0=None, t1=None, zones=OV_ZONES, frames=None)
     if spans:
         txt += ' at=' + ','.join('%.1f-%.1fs(%s x%d,y%d)' % tuple(s) for s in spans[:10]) + ('...' if len(spans) > 10 else '')
     return not hits, txt
+
+
+# Decode + judge once per video (framecache.py): identical calls (same video content, check, arguments, this file's
+# source) share one run; concurrent ones wait for it. Calls with frames= (tests) are not cached.
+syncmarks = framecache.cached_check('syncmarks', syncmarks)
+cursor_check = framecache.cached_check('cursor', cursor_check)
+overlay_check = framecache.cached_check('overlay', overlay_check)
+
+
+def openground_check(video, fps=2.0, t0=None, t1=None, band=(0.08, 0.62), min_sky=0.08, share=0.9):
+    fr = read_frames(video, fps, t0, t1)
+    return openground([sky_share(f, band) for f in fr if not is_flash(f)], fps, t0 or 0.0, min_sky, share)
+
+
+openground_check = framecache.cached_check('openground', openground_check)
 
 
 def main():
@@ -417,8 +483,7 @@ def main():
     if a.cmd != 'openground':
         ap.print_help(); return 2
     band = tuple(float(x) for x in a.band.split(','))
-    fr = read_frames(a.video, a.fps, a.t0, a.t1)
-    ok, txt = openground([sky_share(f, band) for f in fr if not is_flash(f)], a.fps, a.t0 or 0.0, a.min_sky, a.share)
+    ok, txt = openground_check(a.video, a.fps, a.t0, a.t1, band, a.min_sky, a.share)
     print('RESULT %s %s openground %s' % (a.name, 'PASS' if ok else 'FAIL', txt))
     return 0 if ok else 1
 

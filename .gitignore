@@ -9,3 +9,4 @@ inbox.txt.tmp
 outbox.txt
 autoload.txt
 harness.log
+.framecache/
