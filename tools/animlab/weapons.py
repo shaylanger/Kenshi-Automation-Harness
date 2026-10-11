@@ -199,7 +199,10 @@ def build(cfg):
         fl, it = r['floats'], r['ints']
         ov = it.get('skill category animation override', NO_OVERRIDE)
         anim_cls = k if ov in (NO_OVERRIDE, None) or ov not in CLASSNAME else ov
-        mrel = r['files'].get('mesh', '')
+        # the mesh in hand: `bare sword` when set (the drawn weapon), `mesh` is the sheathed one (2026-10-11 twohand
+        # refilm 5: catalog had warhammersheathed.mesh pom 1.33 / tip 10.34, KenshiFP read the drawn warhammer.mesh
+        # 3.67 / 8.03 in game; 49 of 160 weapons were measured on their sheathed mesh)
+        mrel = r['files'].get('bare sword', '') or r['files'].get('mesh', '')
         mp = resolve(cfg, order, mrel, r.get('src_folder'))
         g = None; err = ''
         if mp:
