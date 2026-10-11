@@ -51,6 +51,20 @@ VIS_PART, VIS_SHARE = 0.50, 0.90
 TWO_D, TWO_SHARE = 1.5, 0.80
 TWO_CLS = (3, 8)                # item skill categories held two-handed (R2H-1)
 TWO_SP = {3: (-3.5, -0.5), 8: (3.0, 7.5)}   # R2H-2 wrist-to-wrist along the shaft, dm (heavy: down to hands together on short handles)
+TWO_LIGHT = ()                 # light 2H classes (KenshiFP kfp-2h-light g_vm_2hl_mask): 2H only with handle room behind the grip
+TWO_LROOM, TWO_LMIN = 1.9, 10.0   # KenshiFP g_vm_2hroom / g_vm_2hlmin (dm): pom >= room and pom + tip >= min, else one-handed
+if os.environ.get('AL_TWO_LIGHT') == '1':   # builds with kfp-2h-light: katanas/sabre/blunt/hackers 2H when long enough
+    TWO_CLS = (0, 1, 2, 3, 4, 8); TWO_LIGHT = (0, 1, 2, 4); TWO_SP.update({c: TWO_SP[3] for c in TWO_LIGHT})
+
+
+def two_held(w):
+    """the weapon is held two-handed in FP (KenshiFP 2H mask; a light class only when long enough with handle room)"""
+    if w['cls'] not in TWO_CLS:
+        return False
+    if w['cls'] not in TWO_LIGHT:
+        return True
+    pom, tip = two_dims(w)
+    return pom >= TWO_LROOM and tip > 0 and pom + tip >= TWO_LMIN
 FLAT_MIN = 1.8                  # width/thickness ratio: a flat (edged) weapon
 SEE_RATIO = M.SEE_L / 10.42     # katana05 tip 10.42 dm
 from weapons import REF   # noqa: E402  (reference weapons: the ones the fixture takes use)
@@ -136,7 +150,7 @@ def judge(w, path):
             if st in ('ready', 'block', 'aim'):
                 s = vis.setdefault(st, [0, 0]); s[0] += 1
                 s[1] += onscreen(C[strike], NEARC[cls]).mean() >= VIS_PART
-        if cls == 0 and w['cls'] in TWO_CLS and st in MELEE_STATES:
+        if cls == 0 and two_held(w) and st in MELEE_STATES:
             wr = np.asarray(p['J'][2])   # weapon hand R (KenshiFP g_vm_whand default): off hand = L wrist
             a = np.asarray(p['mp']) - nz(p['mf']) * pom; b = np.asarray(p['mp']) + nz(p['mf']) * 0.6 * tip
             on = seg_dist(wr, a, b) <= TWO_D
@@ -178,6 +192,8 @@ def judge(w, path):
 def two_kind(w):
     """2H grip kind (TWO_SP key): polearm (8), or heavy (3); a heavy weapon with no handle behind the grip (mesh starts at
     or ahead of the hand, e.g. Crab Maul, native anim class polearm) is held like a polearm (KenshiFP g_vm_2hk, wpom < 0.5)"""
+    if w['cls'] in TWO_LIGHT:
+        return 3   # light 2H: heavy spacing (KenshiFP g_vm_2hk = 0 for the light kind)
     return 8 if w['cls'] == 8 or two_dims(w)[0] < 0.5 else 3
 
 
@@ -286,7 +302,7 @@ def run(a, cfg):
 
     def recs_of(w, c):
         """a 2H weapon's recordings replayed as the game would solve it (the source reads the skill category per weapon)"""
-        if not a.adapter or c != 0 or w['cls'] not in TWO_CLS:
+        if not a.adapter or c != 0 or not two_held(w):
             return recs[c]
         pom, tip = two_dims(w)   # what the game reads per weapon (kfp-two-hand: mesh bounds x item length scale)
         k = (w['cls'], round(pom, 2), round(tip, 2))
@@ -331,7 +347,7 @@ def run(a, cfg):
             except Exception as e:   # noqa: BLE001
                 J = {'error': (False, str(e)[:60], 1)}
             R0 = ref_result(c, r)
-            if c == 0 and w["cls"] in TWO_CLS:
+            if c == 0 and two_held(w):
                 # 2H: a new pose, judged strictly, except `seen` (blade snap at a fixed recording frame, e6fix swing0 frame
                 # ~272: the reference katana fails it too = a property of the recording, not of the 2H grip)
                 R0 = {k: v for k, v in R0.items() if k == 'seen'}
