@@ -25,7 +25,8 @@ Usage (WSL python3, ffmpeg on PATH):
                `label k t_script -> t_video gf` lines; a label whose mark never shows = `label k MISSING`.
   --log        the harness stamp log (`stamp on .. log <file>`: `<fc> <epoch> <lo> <hi> <mark> <flags>` per change):
                agreement check: every logged change inside the decoded fc range must show in the video at exactly that
-               fc, or at the first decoded fc after it when the game frame was not captured (counted, not a fail);
+               fc (a change painted on set, flags bit1, counts from fc+1: KenshiFP sets it after frame fc rendered),
+               or at the first decoded fc after it when the game frame was not captured (counted, not a fail);
                a decoded frame whose payload/mark differs from the log's value at its fc = disagreement (FAIL).
 Last line: `RESULT <name> PASS|FAIL frames=.. ok=.. dup=.. skip_max=.. marks=.. [agree=..]`.
 """
@@ -253,12 +254,16 @@ def relabel(rows, marks, labels, out):
 
 def agree(rows, logpath):
     """compare decoded frames with the harness stamp log (changes): exact fc for every captured change"""
+    # a change logged with flags bit1 (painted on KAH_StampSet) was set after frame fc was rendered (KenshiFP sets its
+    # payload in the game update between frames): it first shows at fc+1, together with the scene it describes
+    # (proof 05-stamp-proof2-1011-0018: every set showed one fc after its log line). Stable sort keeps log order.
     ch = []
     for line in open(logpath):
         p = line.split('\t')
         if len(p) >= 6:
-            ch.append((int(p[0]), int(p[2], 16), int(p[3], 16), int(p[4])))
-    ch.sort()
+            fc = int(p[0]) + (1 if int(p[5]) & 2 else 0)
+            ch.append((fc, int(p[2], 16), int(p[3], 16), int(p[4])))
+    ch.sort(key=lambda c: c[0])
     ok_rows = [r for r in rows if r['d']]
     if not ok_rows or not ch:
         return False, 'no decoded frames or empty log', 0, 0, 0
@@ -307,12 +312,13 @@ def ev_series(rows):
     return S
 
 
-def take_inputs(video, L, cell=8, view_w=None, sends=None):
+def take_inputs(video, L, cell=8, view_w=None, sends=None, floors=None):
     """For takecheck / review-pack: None when the video has no stamp, else dict(
          labels=[(video t, text)]  (label k at the first frame showing mark k; `end` shifted like the last mark;
          early={(video t, text): t}  with `sends` (the take's `<t> mark sync=<n>` send times, script clock): the
                  label's script time + the lowest-latency clock offset (see below); takecheck ends the previous
-                 label's claim window there when that is before the mark,
+                 label's claim window there when that is before the mark; `floors` [(script t, text)] (waitlab
+                 `<labels>.snap`) lower a snapped label's script time to its floor first,
          off0 = video time of take T0 (mark 0; else derived from the first mark found) or None,
          series = stamp evidence {key: [(video t, value)]}, rows, marks, missing=[k...], text=one summary line,
          merge(S) -> evidence S in video time: the stamp keys replace the sampled ones, the rest shifted by off0
@@ -362,7 +368,16 @@ def take_inputs(video, L, cell=8, view_w=None, sends=None):
                 offs.append(marks[n]['t'] - t)
         if offs:
             omin = min(offs)
+            # floors (takecheck reads `<labels>.snap`: `<floor t>\t<pattern>\t<text>`): a waitlab label snapped onto the
+            # sampled switch can sit after the action that caused it (proof 05-stamp-proof2-1011-0018: "Power cut" cut
+            # at 48.89, snapped to 49.45, state shown before its window end); its earliest time is the floor
+            fq = {}
+            for ft, ftext in (floors or []):
+                fq.setdefault(ftext.strip(), []).append(ft)
             for (t, text), lab in zip(L, labels):
+                q = fq.get(text.strip())
+                if q:
+                    t = min(t, q.pop(0))
                 early[(lab[0], text)] = t + omin
             clock = ' lat=0..%.3f' % (max(offs) - omin)
             soff = omin       # sampled evidence (harness epoch - T0, no command latency) maps like a zero-latency send

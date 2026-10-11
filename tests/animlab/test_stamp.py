@@ -32,6 +32,19 @@ class StampLayout(unittest.TestCase):
         self.assertEqual((k['ui'], k['stroke'], k['wcls'], k['view'], k['loaded'], k['swings']),
                          ('aiming', 2, 'melee', 'eye', 1, 5))
 
+    def test_agree_set_paint_shows_next_fc(self):
+        # proof 05-stamp-proof2: KAH_StampSet (flags bit1) runs after frame fc rendered; the video shows it at fc+1
+        log = tempfile.NamedTemporaryFile('w', suffix='.log', delete=False)
+        log.write('0\t0\t00000000\t0000\t0\t0\n1\t0\t02000403\t0000\t0\t1\n1\t0\t04000403\t0000\t0\t3\n'
+                  '2\t0\t06000403\t0000\t0\t3\n')
+        log.close()
+        rows = [dict(vf=i, fc=fc, d=dict(lo=v, hi=0, mark=0))
+                for i, (fc, v) in enumerate([(1, 0x02000403), (2, 0x04000403), (3, 0x06000403)])]
+        good, info, exact, late, nbad = S.agree(rows, log.name)
+        os.unlink(log.name)
+        self.assertTrue(good, info)
+        self.assertEqual(nbad, 0)
+
 
 class StampTake(unittest.TestCase):
     """10.2 s take at 30 fps, game at 60 fps: T0 mark at 0.5 s, the aim label's mark 0.7 s late on the script clock,

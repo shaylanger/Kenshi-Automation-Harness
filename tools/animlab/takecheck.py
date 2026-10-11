@@ -446,7 +446,16 @@ def main():
         import os
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import stamp as stampmod
-        stamp = stampmod.take_inputs(a.video, L, sends=S.get('sync'))
+        floors = []   # waitlab floors (`<labels>.snap`: `<t>\t<pattern>\t<text>`): earliest time of a snapped label
+        if os.path.exists(a.labels + '.snap'):
+            for line in open(a.labels + '.snap'):
+                p = line.rstrip('\r\n').split('\t')
+                try:
+                    if len(p) >= 3:
+                        floors.append((float(p[0]), p[2]))
+                except ValueError:
+                    pass
+        stamp = stampmod.take_inputs(a.video, L, sends=S.get('sync'), floors=floors)
         if stamp is None and a.stamp == 'on':
             print('stamp FAIL no frame stamp in %s' % a.video)
             print('RESULT %s FAIL stamp' % a.name)
