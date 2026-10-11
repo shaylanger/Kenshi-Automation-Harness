@@ -329,7 +329,7 @@ HANDLE g_capTimer = nullptr;
 void ReadFrameCap() {
   int fps = 0;
   FILE *f = nullptr;
-  if (fopen_s(&f, (HarnessDir() + "\framecap.txt").c_str(), "r") == 0 && f) {
+  if (fopen_s(&f, (HarnessDir() + "\\framecap.txt").c_str(), "r") == 0 && f) {
     if (fscanf_s(f, "%d", &fps) != 1)
       fps = 0;
     fclose(f);
