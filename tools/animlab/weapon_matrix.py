@@ -33,6 +33,8 @@ DIR/matrix.tsv, and `RESULT WEAPON-MATRIX PASS|FAIL weapons=<n> fail=<n> (base <
 --sheet: DIR/sheets/<sid>.png per weapon (visual lab render of the first zoom-0 recording with that weapon's mesh).
 """
 import json, math, os, shlex, subprocess, sys, tempfile
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import labcache  # noqa: E402
 
 import numpy as np
 
@@ -186,11 +188,33 @@ def two_dims(w):
     return max(float(-V[:, 1].min()), 0.0), float(V[:, 1].max())
 
 
+_TMP = []
+
+
+def _tmpdir(prefix):
+    """self-cleaning temp dir: removed at exit, also on error / SIGTERM (animlab.py turns SIGTERM into SystemExit).
+    Coordinator 2026-10-10: leaked /tmp/animlab-wm-replay-* dirs (~205 MB each) filled 11 GB. Replays themselves live in
+    the result cache (labcache.py), so nothing reusable is lost. Leftovers of killed runs (> 6 h untouched) are swept."""
+    import glob, shutil, time
+    for old in glob.glob(os.path.join(tempfile.gettempdir(), prefix + '*')):
+        try:
+            if time.time() - os.path.getmtime(old) > 6 * 3600:
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            pass
+    d = tempfile.mkdtemp(prefix=prefix)
+    if not _TMP:
+        import atexit
+        atexit.register(lambda: [shutil.rmtree(x, ignore_errors=True) for x in _TMP])
+    _TMP.append(d)
+    return d
+
+
 def load_weapons(a, cfg):
     if a.weapons_json:
         return json.load(open(a.weapons_json))['weapons']
     import weapons
-    d = tempfile.mkdtemp(prefix='animlab-weapons-')
+    d = _tmpdir('animlab-weapons-')
     rows = weapons.write(cfg, d)
     return rows
 
@@ -245,12 +269,12 @@ def run(a, cfg):
                 recs[k].append(r)
     rawrecs = {c: list(recs[c]) for c in recs}; rd = None; vrecs = {}
     if a.adapter:   # replay every recording through the current solver first (judge the current source)
-        rd = tempfile.mkdtemp(prefix='animlab-wm-replay-')
+        rd = _tmpdir('animlab-wm-replay-')
         for c in recs:
             L = []
             for r in recs[c]:
                 o = os.path.join(rd, os.path.basename(r))
-                subprocess.run(shlex.split(a.adapter) + [r, o], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                labcache.run_cmd(shlex.split(a.adapter) + [r, o], [o], kind='replay')   # cached by content (labcache.py)
                 if os.path.exists(o):
                     L.append(o)
             recs[c] = L
@@ -265,8 +289,8 @@ def run(a, cfg):
             L = []
             for r in rawrecs[c]:
                 o = os.path.join(rd, 'wcat%d-%.2f-%.2f-%s' % (k + (os.path.basename(r),)))
-                subprocess.run(shlex.split(a.adapter) + [r, o, '--set', 'wcat=%d' % k[0], '--set', 'wpom=%.3f' % pom, '--set', 'wtip=%.3f' % tip],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                labcache.run_cmd(shlex.split(a.adapter) + [r, o, '--set', 'wcat=%d' % k[0], '--set', 'wpom=%.3f' % pom, '--set', 'wtip=%.3f' % tip],
+                                 [o], kind='replay')
                 if os.path.exists(o):
                     L.append(o)
             vrecs[k] = L or recs[c]   # a source without the two-hand path rejects wcat: judge its plain replay

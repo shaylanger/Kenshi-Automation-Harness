@@ -18,6 +18,20 @@ import argparse, atexit, json, os, shlex, shutil, signal, subprocess, sys, tempf
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Result cache (labcache.py): a pure check (output = f(lab code, argument files, args)) prints its stored result without
+# importing numpy or judging again; gate replays through the adapter (hashed by content) the same way.
+_PURE = {'metrics', 'compare', 'blade', 'bolt', 'branch', 'churn', 'hinge', 'inline', 'stock', 'reload', 'spike',
+         'zoomband', 'stroke', 'guard', 'gate'}
+if __name__ == '__main__' and os.environ.get('ANIMLAB_CACHE', '1') != '0' and not os.environ.get('_ANIMLAB_CACHE_IN'):
+    _sub = next((x for x in sys.argv[1:] if not x.startswith('-')), None)
+    if _sub in _PURE and not {'-o', '--keep', '-h', '--help'} & set(sys.argv):
+        import labcache
+        os.environ['_ANIMLAB_CACHE_IN'] = '1'
+
+        def _inner():
+            import runpy
+            runpy.run_path(os.path.abspath(__file__), run_name='__main__')
+        sys.exit(labcache.memo_call('check', labcache.check_key(sys.argv[1:]), _inner, what='animlab.py ' + ' '.join(sys.argv[1:])))
 import recfmt
 from recfmt import sub, ln, ang
 import metrics as M
@@ -73,13 +87,14 @@ def mark_settle(Pr, Ps, F, settle_s):
 
 def run_adapter(cmd, rec, out, args):
     full = shlex.split(cmd) + [rec, out] + list(args)
-    p = subprocess.run(full, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    import labcache   # result cache keyed by adapter binary + recording + args content (ANIMLAB_CACHE=0 off, verify)
+    rc, so, se = labcache.replay(shlex.split(cmd), rec, out, list(args))
     calib = None
-    for l in p.stdout.splitlines():
+    for l in so.splitlines():
         if l.startswith('calib '):
             calib = l.split()[1]
-    if p.returncode != 0 or not os.path.exists(out):
-        raise RuntimeError('adapter failed (%d): %s\n%s' % (p.returncode, ' '.join(full), p.stderr[-2000:]))
+    if rc != 0 or not os.path.exists(out):
+        raise RuntimeError('adapter failed (%d): %s\n%s' % (rc, ' '.join(full), se[-2000:]))
     return calib
 
 

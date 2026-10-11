@@ -365,12 +365,13 @@ def run_motion(m, adapter, body, body_frame, out, extra=(), quiet=False):
         fp, op = os.path.join(out, 'frames_%s.txt' % s), os.path.join(out, 'solved_%s.txt' % s)
         write_frames(fp, fr)
         cmd = shlex.split(adapter) + [body, fp, op, '--body-frame', str(body_frame), '--side', s] + list(extra)
-        p = subprocess.run(cmd, capture_output=True, text=True)
-        if p.returncode != 0:
-            raise RuntimeError('adapter failed (%d): %s\n%s' % (p.returncode, ' '.join(cmd), p.stderr[-2000:]))
+        import labcache   # drive adapter run cached by content (adapter binary, body rec, frames, args)
+        rc_, so_, se_ = labcache.run_cmd(cmd, [op], kind='drive')
+        if rc_ != 0:
+            raise RuntimeError('adapter failed (%d): %s\n%s' % (rc_, ' '.join(cmd), se_[-2000:]))
         rows, calib = parse_solved(op)
         if calib is None:
-            for line in p.stdout.splitlines():
+            for line in so_.splitlines():
                 if line.startswith('calib '):
                     calib = [float(x) for x in line.split()[1].split(',')]
         solved[s], frames[s] = (rows, calib), fr
