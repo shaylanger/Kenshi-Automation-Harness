@@ -106,6 +106,19 @@ class NativeCheck(unittest.TestCase):
                 nat = FC.native_call(raw.__wrapped__, {'video': v})
                 self.assertEqual(tuple(loc), tuple(nat), (fn.__name__, v))
 
+    def test_still_same_verdict(self):
+        import frames as FR
+        png = os.path.join(os.path.dirname(video('tmp')), 'still.png')
+        subprocess.run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360',
+                        '-frames:v', '1', png], check=True)
+        for fn in (FR.still_overlay_check, FR.still_cursor_check):
+            os.environ['ANIMLAB_NATIVE_CHECKS'] = '0'
+            try:
+                loc = fn(png)
+            finally:
+                os.environ.pop('ANIMLAB_NATIVE_CHECKS')
+            self.assertEqual(tuple(loc), tuple(FC.native_call(fn.__wrapped__, {'path': png}, 'path')), fn.__name__)
+
 
 @unittest.skipUnless(WSL, 'WSL only')
 class Slots(unittest.TestCase):

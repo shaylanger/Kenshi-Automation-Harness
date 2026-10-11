@@ -318,7 +318,7 @@ def decode(video, pre=(), post=(), popen=False):
     return r
 
 
-def native_check(fn):
+def native_check(fn, key='video'):
     """Decorator for a check fn(video, ...) -> JSON-able result whose per-pixel work uses CuPy (gpu.py): in WSL with
     native_on() and WIN_PYTHON present, the call runs in Windows python (native_run.py on a content-hashed copy of this
     module directory, so a gate's snapshot sources are the ones that run) on the Windows path of the video (copied to
@@ -337,11 +337,11 @@ def native_check(fn):
         except TypeError:
             return fn(*args, **kw)
         p = dict(b.arguments)
-        video = p.get('video')
+        video = p.get(key)
         if p.get('frames') is not None or p.get('still') or not isinstance(video, str) or not os.path.isfile(video):
             return fn(*args, **kw)
         try:
-            return native_call(fn, p)
+            return native_call(fn, p, key)
         except Exception as e:   # noqa: BLE001  any native failure: the local (WSL) path, same verdict
             sys.stderr.write('framecache: native %s failed (%s): local run\n' % (fn.__name__, str(e)[:300]))
             return fn(*args, **kw)
@@ -389,7 +389,7 @@ def _prune_snapshots(keep, age=86400):
         pass
 
 
-def native_call(fn, params):
+def native_call(fn, params, key='video'):
     """run fn(**params) in Windows python (see native_check); returns its result (tuples kept), echoes its output"""
     mod = sys.modules.get(fn.__module__)
     srcdir = os.path.dirname(os.path.abspath(mod.__file__))
@@ -397,11 +397,11 @@ def native_call(fn, params):
     runner = winpath(os.path.join(snap, 'native_run.py'))
     if not runner:
         raise OSError('snapshot not visible to Windows')
-    with win_file(params['video']) as wv:
+    with win_file(params[key]) as wv:
         kw = dict(params)
-        kw['video'] = wv
+        kw[key] = wv
         env = {k: v for k, v in os.environ.items() if k.startswith('ANIMLAB_') and not k.startswith('ANIMLAB_WIN_')}
-        if winpath(params['video']) is None:
+        if winpath(params[key]) is None:
             env['ANIMLAB_FRAMECACHE'] = '0'   # temp copy: no cache files left in WIN_TMP (the WSL wrapper caches the result)
         modname = fn.__module__ if fn.__module__ != '__main__' else os.path.splitext(os.path.basename(mod.__file__))[0]
         job = json.dumps({'module': modname, 'fn': fn.__name__, 'kw': kw, 'env': env})

@@ -672,6 +672,8 @@ syncmarks = framecache.cached_check('syncmarks', syncmarks)
 # CuPy checks run in Windows python under WSL (framecache.native_check: no WSL GPU-PV, gpu-native 2026-10-11).
 cursor_check = framecache.cached_check('cursor', framecache.native_check(cursor_check))
 overlay_check = framecache.cached_check('overlay', framecache.native_check(overlay_check))
+still_overlay_check = framecache.native_check(still_overlay_check, 'path')   # stills (gate corpus): Windows CuPy too
+still_cursor_check = framecache.native_check(still_cursor_check, 'path')
 
 
 def openground_check(video, fps=2.0, t0=None, t1=None, band=(0.08, 0.62), min_sky=0.08, share=0.9):
