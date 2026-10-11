@@ -1269,9 +1269,10 @@ def swing_verdicts(F, P, overhead=(), inline=False):
         wb = [P[i]['wb'] for i in idx if P[i]['wb'] is not None]
         bok, btxt = blade_check(F, Pm)
         sok, stxt = stroke_check(F, Pm, overhead)
+        pok, ptxt = path_check(F, Pm)   # E6 screen path (Shay 2026-10-11 PT17); pool --checks ...,path (not in the gate pool: s0/s3 fail by design until refitted)
         us = [F[i]['swu'] for i in idx]
         out.append(dict(k=k, frame=idx[0], stroke=F[idx[0]].get('stroke'), arc_good=sum(1 for x in ar if x >= 0.7), arc_n=len(ar),
-                        wb_max=max(wb) if wb else 0.0, ok=dict(blade=bok, stroke=sok, churn=cok), btxt=btxt, stxt=stxt, ctxt=ctxt,
+                        wb_max=max(wb) if wb else 0.0, ok=dict(blade=bok, stroke=sok, churn=cok, path=pok), btxt=btxt, stxt=stxt, ctxt=ctxt, ptxt=ptxt,
                         full=us[0] <= 0.1 and us[-1] >= 0.9 and len(ar) >= POOL_MIN_ARC_N))
         if inline:
             raw = inline_raw([S[i] if i in keep else None for i in range(len(S))])
@@ -1533,3 +1534,105 @@ def inline_each(F, P, slack=INL_EACH_SLACK, **kw):
     bad = [r for r in res if not r[0]]
     w = bad[0] if bad else res[0]
     return not bad, ['swings %d/%d inline%s' % (len(res) - len(bad), len(res), '' if not bad else ':BAD worst=swing%d@%d' % (w[1], w[2]))] + w[3]
+
+
+# ---- E6 screen path (Shay 2026-10-11, PT17 review, generalised to every stroke): every sword stroke is ONE straight line
+# across the SCREEN (like other games): the screen-projected blade tip from the stroke start (u ARC_U0) to the end of the
+# follow-through (u PATH_U1) is straight (PT17 stroke 3 was straight for 60-70 % of the path, then the blade translated
+# perpendicular to the stroke without rotating and ended tip at screen centre: "/|" not "/"), diagonal strokes run at
+# ~40-45 deg screen angle (PT17 s3 too steep) and the follow-through ends with the tip near a screen edge (PT17 s0 stopped
+# mid-screen). Per swing, tip = grip + BLADE along the blade, FP camera at zoom 0, 1600x900 (16:9), not clipped:
+#   dev   = max perpendicular distance of any path point from the total-least-squares line / path extent along that line
+#   late  = max perpendicular distance of the last PATH_LATE of the path (by arc length) from the line fitted to the first
+#           1-PATH_LATE (the stroke's own direction; a late hook tilts an all-points fit and hides in it) / extent
+#   ang   = fitted line angle from the screen horizontal, 0-90 deg (gated for PATH_DIAG strokes)
+#   edge  = end tip distance to the nearest screen edge, min(x/W, 1-x/W, y/H, 1-y/H), 0 when off screen
+#   len   = extent along the fitted line, fraction of the screen width
+# CLASS: any stroke's screen path (scripted 1H/2H strokes, new families): a check per swing, never a pooled value.
+PATH_U1 = 0.78                          # follow-through end (SWING_PHASES 'follow')
+PATH_LATE = 0.35                        # late share of the path (by arc length) judged for drift
+PATH_DEV, PATH_LATE_MAX, PATH_EDGE = 0.08, 0.05, 0.12
+PATH_ANG = (35.0, 50.0)                 # diagonal strokes: fitted line angle from horizontal
+PATH_DIAG = (0, 3)                      # scripted stroke ids that are diagonals (angle gated); others: angle reported
+PATH_INFO = (1,)                        # Shay 16:27: stroke 1 (backhand) accepted as it is -> measured, non-blocking (info)
+PATH_MIN_N = 4
+
+
+def _tls(pts):
+    """total-least-squares line through pts: (centroid, unit direction)."""
+    n = float(len(pts)); cx = sum(p[0] for p in pts) / n; cy = sum(p[1] for p in pts) / n
+    sxx = sum((p[0] - cx) ** 2 for p in pts); syy = sum((p[1] - cy) ** 2 for p in pts); sxy = sum((p[0] - cx) * (p[1] - cy) for p in pts)
+    t = 0.5 * math.atan2(2 * sxy, sxx - syy)
+    return (cx, cy), (math.cos(t), math.sin(t))
+
+
+def _perp(p, c, d):
+    return abs((p[0] - c[0]) * d[1] - (p[1] - c[1]) * d[0])
+
+
+def path_metrics(pts, late=PATH_LATE):
+    """screen tip path [(x, y) px] -> dict(dev, late, ang, edge, len, n) (see the block comment)."""
+    c, d = _tls(pts)
+    along = [(p[0] - c[0]) * d[0] + (p[1] - c[1]) * d[1] for p in pts]
+    ext = max(max(along) - min(along), 1e-6)
+    cum = [0.0]
+    for i in range(1, len(pts)):
+        cum.append(cum[-1] + math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]))
+    cut = cum[-1] * (1 - late)
+    head = [p for p, s in zip(pts, cum) if s <= cut]
+    tail = [p for p, s in zip(pts, cum) if s >= cut]
+    lt = 0.0
+    if len(head) >= 2 and tail:
+        hc, hd = _tls(head)
+        lt = max(_perp(p, hc, hd) for p in tail) / ext
+    x, y = pts[-1]
+    edge = max(0.0, min(x / W_PX, 1 - x / W_PX, y / H_PX, 1 - y / H_PX))
+    ang = abs(math.degrees(math.atan2(d[1], d[0])))
+    ang = 180 - ang if ang > 90 else ang
+    return dict(dev=max(_perp(p, c, d) for p in pts) / ext, late=lt, ang=ang, edge=edge, len=ext / W_PX, n=len(pts),
+                end=(x, y), start=pts[0])
+
+
+def path_series(F, P, u0=ARC_U0, u1=PATH_U1):
+    """per swing: (stroke, [(u, frame, (x, y) px)]) blade tip on screen over u0..u1 (unclipped projection)."""
+    out = []
+    for idx in swings(F, P):
+        S = []
+        for i in idx:
+            u = F[i].get('swu', 0.0)
+            if u0 <= u <= u1:
+                t = _uproj(P[i]['tip'])
+                if t:
+                    S.append((u, i, t))
+        out.append((F[idx[0]].get('stroke'), S))
+    return out
+
+
+def path_one(stk, S, dev=PATH_DEV, late=PATH_LATE_MAX, edge=PATH_EDGE, angr=PATH_ANG, diag=PATH_DIAG, info=PATH_INFO):
+    """one swing -> (ok, gated, text): ok = every gated limit met; gated False = stroke in `info` (reported, never blocks)."""
+    if len(S) < PATH_MIN_N:
+        return False, stk not in info, 'n=%d:BAD(no stroke frames)' % len(S)
+    m = path_metrics([s[2] for s in S])
+    bad = lambda g: '' if g else ':BAD'
+    g_dev, g_late, g_edge = m['dev'] <= dev, m['late'] <= late, m['edge'] <= edge
+    g_ang = (angr[0] <= m['ang'] <= angr[1]) if stk in diag else True
+    ok = g_dev and g_late and g_edge and g_ang
+    txt = 'dev=%.3f/%.2f%s,late=%.3f/%.2f%s,ang=%.0f%s%s,edge=%.3f/%.2f%s,len=%.2f,u=%.2f-%.2f,end=%.0f,%.0f(frame%d),n=%d' % (
+        m['dev'], dev, bad(g_dev), m['late'], late, bad(g_late), m['ang'],
+        '/%.0f-%.0f' % angr if stk in diag else '(info)', bad(g_ang), m['edge'], edge, bad(g_edge), m['len'],
+        S[0][0], S[-1][0], m['end'][0], m['end'][1], S[-1][1], m['n'])
+    return ok, stk not in info, txt + ('(info)' if stk in info else '')
+
+
+def path_check(F, P, **kw):
+    """E6 screen path per swing (path_one); PASS = every gated swing passes (stroke-1 swings are info: never fail)."""
+    sw = path_series(F, P)
+    if not sw:
+        return False, ['no swing:BAD']
+    ok, txt = True, []
+    for k, (stk, S) in enumerate(sw):
+        g, gated, t = path_one(stk, S, **kw)
+        if gated:
+            ok = ok and g
+        txt.append('swing%d%s:%s' % (k, '' if stk is None else '(stroke%d)' % stk, t))
+    return ok, txt

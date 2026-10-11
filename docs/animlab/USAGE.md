@@ -68,6 +68,16 @@ an odd angle to the forearm, which `inline`'s 0.5 dm grip segments and 3D angle 
 in `--overhead`: blade tilt from screen vertical <= 35 deg over u .28-.78 (`--tilt`) and the blade-middle path over the
 stroke within 20 deg of straight down (`--path`). The tip leaving the top edge at an overhead's wind-up top is not gated
 (a raised sword is expected to leave the frame).
+`animlab.py [--only-stroke N] path <rec> [--stroke N] [--gate-info]` (R30, Shay 2026-10-11 PT17) judges each swing's screen
+path: the blade tip (grip + 8 dm, FP eye, zoom 0, 1600x900, unclipped) from the stroke start (u .28) to the follow-through end
+(u .78) must be ONE straight line: `dev` = max distance from the total-least-squares line / extent along it (<= .08, `--dev`),
+`late` = max distance of the last 35 % of the path (arc length) from the line of the first 65 % / extent (<= .05, `--late`;
+the PT17 "/|" end hook), `ang` = line angle from the horizontal (35-50 for the diagonals 0 and 3, `--ang-min/--ang-max`; other
+strokes reported), `edge` = end tip distance to the nearest screen edge as a fraction (<= .12, `--edge`; PT17 s0 stopped
+mid-screen), `len` = extent / screen width (info). Stroke 1 is accepted as it is (Shay 16:27): measured, never fails
+(`INFO-FAIL`; `--gate-info` gates it, used by mutation rec-path-late-drift). Prints `pathsw s<stroke> swing<k> PASS|FAIL|INFO-FAIL
+<numbers>` per swing (optimizer input) and `path PASS|FAIL swings=n [first_bad=...]`. Also: `pool --checks ...,path`, e6-takes.py
+`E6TAKE <rec> s<n> path` (gate step 3c, new keys: non-blocking until the baseline holds a PASS), taste rule R30 (t90-t92).
 
 ## Take checks (labelled video takes)
 `tools/animlab/takecheck.py --labels <lab> --ev <ev> [--ev ...] --rules <rules> [--video <mp4> | --video-len <s>]` judges a

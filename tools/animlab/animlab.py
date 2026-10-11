@@ -253,6 +253,27 @@ def cmd_stroke(a):
     return 0 if ok else 1
 
 
+def cmd_path(a):
+    """E6 screen path per swing: blade tip one straight line across the screen, diagonals ~40-45 deg, follow-through to a
+    screen edge (metrics.path_check). One `pathsw s<stroke> swing<k> PASS|FAIL|INFO-FAIL ...` line per swing (optimizer input), then
+    `path PASS|FAIL` (stroke-1 swings are info, never fail)."""
+    rec = recfmt.parse(a.rec); P = M.frame_metrics(rec)
+    kw = dict(dev=a.dev, late=a.late, edge=a.edge, angr=(a.ang_min, a.ang_max), info=() if a.gate_info else M.PATH_INFO)
+    ok, n, worst = True, 0, ''
+    for k, (stk, S) in enumerate(M.path_series(rec.frames, P)):
+        if a.stroke is not None and stk != a.stroke:
+            continue
+        g, gated, t = M.path_one(stk, S, **kw)
+        ok = ok and (g or not gated); n += 1
+        if gated and not g and not worst:
+            worst = ' first_bad=swing%d:%s' % (k, t)
+        print('pathsw s%s swing%d %s %s' % ('-' if stk is None else stk, k, 'PASS' if g else ('FAIL' if gated else 'INFO-FAIL'), t))
+    if not n:
+        ok = False
+    print('path %s swings=%d%s%s' % ('PASS' if ok else 'FAIL', n, '' if a.stroke is None else ' stroke=%d' % a.stroke, worst))
+    return 0 if ok else 1
+
+
 def cmd_guard(a):
     """block guard readability: blade not hanging straight down in ANY block press (metrics.guard_check); a .tsv with a
     blade_elev_deg column (blk-survey per-press table) is judged per row (metrics.guard_table_check)."""
@@ -561,6 +582,12 @@ def main():
     p.add_argument('--len', type=float, default=M.STK_LEN_MIN, help='min on-screen blade length px over u .40-.78')
     p.add_argument('--overhead', help='scripted stroke ids that must descend vertically, comma list (E6: 2)')
     p.add_argument('--tilt', type=float, default=M.STK_OH_TILT); p.add_argument('--path', type=float, default=M.STK_OH_PATH)
+    p = sp.add_parser('path', help='E6 screen-space blade tip path per swing (straight line, diagonal angle, ends at a screen edge)')
+    p.add_argument('rec', help='recording (game vmrec or lab replay out)'); p.add_argument('--stroke', type=int, help='only swings of this scripted stroke')
+    p.add_argument('--dev', type=float, default=M.PATH_DEV); p.add_argument('--late', type=float, default=M.PATH_LATE_MAX)
+    p.add_argument('--edge', type=float, default=M.PATH_EDGE); p.add_argument('--ang-min', type=float, default=M.PATH_ANG[0])
+    p.add_argument('--ang-max', type=float, default=M.PATH_ANG[1])
+    p.add_argument('--gate-info', action='store_true', help='also gate the info strokes (stroke 1: accepted look, non-blocking by default)')
     p = sp.add_parser('guard'); p.add_argument('rec'); p.add_argument('--elev', type=float, default=M.GUARD_ELEV, help='min median blade elevation (deg) over block frames')
     p = sp.add_parser('zoomband'); p.add_argument('rec'); p.add_argument('--head-show', type=float, default=M.ZB_HEAD_SHOW, help='dm: head hidden below this camera distance (KenshiFP head_show_dm)')
     p.add_argument('--max-frames', type=int, default=0)
@@ -593,7 +620,7 @@ def main():
     p.add_argument('--replay', action='store_true', help='block: replay the recordings (default: judge them as recorded)')
     p.add_argument('--stroke-args', default='--no-rec-sets --set stroke={stroke}', help='adapter args forcing the stroke (KenshiFP kfpvm_replay default)')
     p.add_argument('--args', help='extra adapter args'); p.add_argument('--overhead', help='overhead stroke ids (stroke check)')
-    p.add_argument('--checks', default='arc,blade,stroke,churn', help='arc,blade,stroke,churn,inline (inline = the take judge\'s E1 inline: pooled + per swing)')
+    p.add_argument('--checks', default='arc,blade,stroke,churn', help='arc,blade,stroke,churn,inline,path (inline = the take judge\'s E1 inline: pooled + per swing; path = E6 screen path per swing)')
     p.add_argument('--take', type=int, default=M.POOL_TAKE)
     p.add_argument('--rate', type=float, default=M.POOL_RATE, help='min predicted take pass rate')
     p.add_argument('-j', type=int, default=int(os.environ.get('LABNICE_J') or min(16, os.cpu_count() or 4))); p.add_argument('--keep'); p.add_argument('-v', dest='verbose', action='store_true')
@@ -615,7 +642,7 @@ def main():
     if not a.cmd:
         ap.print_help(); return 2
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))   # SIGTERM -> SystemExit: atexit removes the temp dirs
-    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'reload': cmd_reload, 'spike': cmd_spike, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool, 'agree': cmd_agree, 'weapons': cmd_weapons}[a.cmd](a) or 0
+    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'reload': cmd_reload, 'spike': cmd_spike, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'path': cmd_path, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool, 'agree': cmd_agree, 'weapons': cmd_weapons}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':

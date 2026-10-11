@@ -392,5 +392,18 @@ class T(unittest.TestCase):
         P = [pose(i, roll=(40.0 if i >= 15 else 0.0)) for i in range(30)]        # 40 deg step: below the limit
         ok, t = run(P); self.assertTrue(ok, t)
 
+    def test_path_metrics(self):   # Shay 2026-10-11 PT17: straight 45 deg stroke to the edge passes; "/|" hook and mid-screen stop fail
+        good = [(200 + 60 * i, 800 - 60 * i) for i in range(13)]                     # 45 deg, ends at (920, 80): 0.089 from the top
+        m = M.path_metrics(good)
+        self.assertLess(m['dev'], 0.01); self.assertLess(m['late'], 0.01); self.assertAlmostEqual(m['ang'], 45.0, 1)
+        self.assertLessEqual(m['edge'], M.PATH_EDGE)
+        hook = [(200 + 60 * i, 800 - 60 * i) for i in range(9)] + [(680 + 30 * k, 320 + 40 * k) for k in range(1, 5)]
+        ok, gated, t = M.path_one(3, [(0.3 + 0.03 * i, i, p) for i, p in enumerate(hook)])
+        self.assertFalse(ok, t); self.assertIn('late=', t); self.assertIn(':BAD', t.split('late=')[1].split(',')[0])
+        ok, gated, t = M.path_one(1, [(0.3 + 0.03 * i, i, p) for i, p in enumerate(hook)])
+        self.assertFalse(gated)                                                        # stroke 1 = info (accepted look)
+        ok, gated, t = M.path_one(0, [(0.3 + 0.03 * i, i, (200 + 30 * i, 700 - 30 * i)) for i in range(13)])
+        self.assertFalse(ok, t); self.assertIn('edge=', t)                             # stops mid-screen
+
 if __name__ == '__main__':
     unittest.main(verbosity=1)
