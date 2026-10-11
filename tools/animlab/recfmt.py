@@ -10,6 +10,7 @@ Line format (groups separated by '|'):
      [nc]: camera near clip applied this frame (world dm, -1 = none; KenshiFP kfp-vmrec-nc), r['nc'] (None in older recordings)
   5  [nok natLsh natLel natLwr natRsh natRel natRwr nhxL nhyL nhxR nhyR nlpL nlqL nlpR nlqR]  native (pre-IK) pose of
      this frame's apply, camera numbers of this record (KenshiFP builds with the rec-native patch); r['nat'] = joints
+  7  [F hxL hyL hxR hyR]  measured hand bone X/Y axes of both hands, camera numbers (KenshiFP kfp-fist-native); r['fh']
   6  [H hinge_upperarm hinge_forearm]  E5: rendered elbow-hinge axis of the weapon-arm upper arm / forearm bone, camera
      numbers (KenshiFP builds with the E5 hinge patch); r['hua'], r['hfa'] (None in older recordings)
      [stroke band_hidden]: E6 scripted stroke (-1 = none); Z1 band_hidden 1 = body + weapon not drawn (KenshiFP 3AFB09A4+)
@@ -83,8 +84,11 @@ def parse(path):
             r['hua'] = r['hfa'] = None   # E5: rendered weapon-arm elbow-hinge axes (upper arm, forearm bone), group 'H'
             r['stroke'] = None           # E6: scripted stroke of the current swing (H 4th token, -1 = no swing)
             r['band_hidden'] = 0         # Z1: character + weapon hidden while the camera is in the head-hidden band (H 5th token)
+            r['fh'] = None               # U25: measured hand X/Y axes of both hands (group 'F': LX LY RX RY; KenshiFP kfp-fist-native)
             for g in pa[5:]:
                 x = g.split()
+                if len(x) >= 5 and x[0] == 'F':
+                    r['fh'] = tuple(v3(t) for t in x[1:5])
                 if len(x) >= 3 and x[0] == 'H':
                     r['hua'], r['hfa'] = v3(x[1]), v3(x[2])
                     if len(x) >= 4 and x[3].lstrip('-').isdigit():
