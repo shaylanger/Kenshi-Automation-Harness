@@ -103,6 +103,11 @@ the protected corpus `C:\KenshiTestRuns\corpus\pools\{sword-swing,block-guard}` 
 `animlab.py zoomband <rec> [--head-show 16]`: no own body in frame while the zoom camera is between the eye and the
 head-show distance (head hidden there): neck/spine/shoulders projected from the camera `zoom` dm behind the eye (orbit 0),
 elbows/wrists too once the viewmodel fades (zf < 0.99). Catches the Z1 crossfade's headless torso / floating hand.
+`band_leak` (same command, `[--band-clip dm]`): on band_hidden frames the hide flag is not trusted (9C9ECB01 hat-brim /
+neck slivers): head, hat (head + 1.2 dm up), neck, spine, shoulders, chest in view must lie inside the camera near clip
+(depth + 1 dm margin <= nc). nc = the rec's group-4 10th token (KenshiFP kfp-vmrec-nc builds), else the build rule
+`--band-clip` (KenshiFP band_clip_dm: 5 from e4bb536, 0 before = near 0.3), else SKIP. Corpus pair: rec/zs-sword-fade-on-07886691.txt
+`--band-clip 0` FAIL, zs-sword-fade-on-8b3f.vmrec.txt `--band-clip 5` PASS.
 Frames of the video itself: `tools/animlab/frames.py openground <mp4> [--from s --to s]` = judgeable open ground on the
 RECORDED frames (sky share of the scene band between the title label and the UI panel >= 0.08 on >= 90% of frames at
 2 fps; prints the closed spans); a setup check before recording is not enough (sword-z25-block: slope for 17 s). Night/fog fails.

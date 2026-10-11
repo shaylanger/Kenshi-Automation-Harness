@@ -280,6 +280,8 @@ def cmd_zoomband(a):
     rec = recfmt.parse(a.rec)
     F = rec.frames
     ok, txt = M.zoomband_check(M.zoomband_series(F, a.head_show), a.max_frames, M.flag_lag(F, "band_hidden", M.band_expect(F, a.head_show)))
+    lok, ltxt = M.bandleak_check(M.bandleak_series(F, a.head_show, band_clip=a.band_clip), a.max_frames)
+    ok, txt = ok and lok, txt + ltxt
     print('zoomband %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt)))
     return 0 if ok else 1
 
@@ -559,6 +561,7 @@ def main():
     p = sp.add_parser('guard'); p.add_argument('rec'); p.add_argument('--elev', type=float, default=M.GUARD_ELEV, help='min median blade elevation (deg) over block frames')
     p = sp.add_parser('zoomband'); p.add_argument('rec'); p.add_argument('--head-show', type=float, default=M.ZB_HEAD_SHOW, help='dm: head hidden below this camera distance (KenshiFP head_show_dm)')
     p.add_argument('--max-frames', type=int, default=0)
+    p.add_argument('--band-clip', type=float, default=None, help='dm: near clip rule for recs without the nc column (KenshiFP band_clip_dm: 5 from e4bb536, 0 before)')
     p = sp.add_parser('stock'); p.add_argument('rec'); p.add_argument('--ref', help='known-good recording for the orientation check')
     p.add_argument('--max', type=float, default=M.STOCK_MAX); p.add_argument('--ori', type=float, default=M.ORI_MAX)
     p.add_argument('--h', type=float, default=M.STOCK_H, help='stock top above the bolt axis (dm)')

@@ -1096,6 +1096,66 @@ def band_expect(F, head_show=ZB_HEAD_SHOW, eye=ZB_HIDE_EYE):
     return lambda r: eye <= r.get('zoom', 0.0) < head_show
 
 
+# ---- band leak (Misses 2026-10-10 ZOOMSWEEP-zs-sword-fade-on 9C9ECB01: hat-brim shard + neck/shoulder slivers for ~0.55 s in
+# the zoom-out ease tail with band_hidden=1; zoomband skipped those frames as "nothing drawn" and PASSed body_in_frame=0/0).
+# CLASS: band_hidden is a visibility flag, not proof nothing renders (worn pieces re-shown, mask holes, attachments the hide
+# misses). On a band_hidden frame every own-body part the zoomed camera has in view must lie inside the camera near clip
+# (KenshiFP kfp-zband-clip e4bb536: near = applied + band_clip_dm while the band hide is on), so nothing can leak.
+# Near clip: the rec's nc column (kfp-vmrec-nc builds), else the build rule given as band_clip (dm; 0 = builds before
+# e4bb536, near = ZB_NEAR), else not judged (SKIP).
+ZB_CLIP_MARGIN = 1.0   # dm: mesh extent past the recorded joint (hat brim, pauldron, sleeve) that must be clipped too
+ZB_HAT_UP = 1.2        # dm: hat crown/brim above the head bone (camera up)
+ZB_LEAK_PARTS = ('nk', 'sp', 'Lsh', 'Rsh', 'chest', 'hd', 'hat')   # head + torso, where the worn pieces leaked (hat brim,
+# neck/shoulder slivers). Elbows/wrists are not judged: in swings the hands reach up to 1.4 dm past applied + 5 dm
+# (8b3f, 4080 recs) and rendered clean (8B3F339C every-frame review): the arm meshes are covered by the band hide itself.
+
+
+def bandleak_series(F, head_show=ZB_HEAD_SHOW, eye=ZB_HIDE_EYE, band_clip=None, near=ZB_NEAR):
+    """[(frame, zoom, nc, [(part, x_ndc, y_ndc, depth)])] for band_hidden band frames; parts in view whose far extent
+    (depth + ZB_CLIP_MARGIN) lies beyond the near clip. nc None = near clip unknown (frame not judged)."""
+    out = []
+    for i, r in enumerate(F):
+        d = r.get('zoom', 0.0)
+        if not r.get('band_hidden') or not (eye <= d < head_show) or r.get('nk') is None:
+            continue
+        nc = r.get('nc')
+        if nc is None or nc < 0:
+            nc = None if band_clip is None else max(near, d + band_clip if band_clip > 0 else near)
+        pts = dict(nk=r['nk'], sp=r['sp'], Lsh=r['Lsh'], Rsh=r['Rsh'], Lel=r['Lel'], Rel=r['Rel'], Lwr=r['Lwr'], Rwr=r['Rwr'])
+        pts['chest'] = mul(add(add(r['Lsh'], r['Rsh']), r['sp']), 1.0 / 3.0)
+        if r.get('hd') is not None:
+            pts['hd'] = r['hd']; pts['hat'] = add(r['hd'], (0.0, ZB_HAT_UP, 0.0))
+        seen = []
+        if nc is not None:
+            for k in ZB_LEAK_PARTS:
+                p = pts.get(k)
+                if p is None:
+                    continue
+                z = p[2] + d
+                if z <= 0.05 or z + ZB_CLIP_MARGIN <= nc:
+                    continue
+                x, y = p[0] / z / TX, p[1] / z / TY
+                if abs(x) <= 1.0 and abs(y) <= 1.0:
+                    seen.append((k, x, y, z))
+        out.append((i, d, nc, seen))
+    return out
+
+
+def bandleak_check(S, max_frames=0):
+    """['band_leak=...'] term for zoomband: FAIL when more than max_frames band_hidden frames leave an own body part in
+    view beyond the near clip; SKIP when no band_hidden frame has a known near clip."""
+    J = [s for s in S if s[2] is not None]
+    if not J:
+        return True, ['band_leak=SKIP(%d band_hidden frames, no nc: pass --band-clip <dm>)' % len(S)]
+    bad = [s for s in J if s[3]]
+    ok = len(bad) <= max_frames
+    txt = ['band_leak=%d/%d%s' % (len(bad), len(J), '' if ok else ':BAD')]
+    if bad:
+        w = max(bad, key=lambda s: len(s[3]))
+        txt.append('leak_worst=frame%d,zoom=%.1f,nc=%.1f,%s' % (w[0], w[1], w[2], '+'.join('%s(z%.1f)' % (p[0], p[3]) for p in w[3])))
+    return ok, txt
+
+
 def zoomband_check(S, max_frames=0, lag=None):
     """FAIL when more than max_frames band frames show an own body part, or (lag = flag_lag result) the band_hidden label
     lags the zoom. Prints the band frames, the zoom range seen and the worst frame (most parts, nearest)."""

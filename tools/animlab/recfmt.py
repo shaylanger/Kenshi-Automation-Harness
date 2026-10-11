@@ -7,6 +7,7 @@ Line format (groups separated by '|'):
   2  eye rt up fw (world)                                      from the unzoomed eye
   3  rootf roota napply phase wih stretch
   4  wb mh mfx zf head neck spine [hy hz]   (wrist bend deg, hand X axis, forearm X axis, zoom fade, head/neck/spine)
+     [nc]: camera near clip applied this frame (world dm, -1 = none; KenshiFP kfp-vmrec-nc), r['nc'] (None in older recordings)
   5  [nok natLsh natLel natLwr natRsh natRel natRwr nhxL nhyL nhxR nhyR nlpL nlqL nlpR nlqR]  native (pre-IK) pose of
      this frame's apply, camera numbers of this record (KenshiFP builds with the rec-native patch); r['nat'] = joints
   6  [H hinge_upperarm hinge_forearm]  E5: rendered elbow-hinge axis of the weapon-arm upper arm / forearm bone, camera
@@ -63,7 +64,7 @@ def parse(path):
                 x = pa[3].split()
                 if len(x) >= 6:
                     r['phase'], r['wih'], r['stch'], r['napp'] = int(x[3]), int(x[4]), float(x[5]), int(x[2])
-            r['wb'], r['zf'] = None, 1.0
+            r['wb'], r['zf'], r['nc'] = None, 1.0, None
             if len(pa) > 4:
                 x = pa[4].split()
                 if len(x) >= 3:
@@ -72,6 +73,8 @@ def parse(path):
                     r['zf'], r['hd'], r['nk'], r['sp'] = float(x[3]), v3(x[4]), v3(x[5]), v3(x[6])
                 if len(x) >= 9:
                     r['hy'], r['hz'] = v3(x[7]), v3(x[8])
+                if len(x) >= 10:
+                    r['nc'] = float(x[9])   # Z1 band clip: camera near clip applied (kfp-vmrec-nc), -1 = none
             r['nat'] = None
             if len(pa) > 5:
                 x = pa[5].split()
