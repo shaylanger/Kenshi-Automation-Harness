@@ -88,14 +88,30 @@ def probe_pts(video):
 
 def load(video, w=W, h=H):
     """(frames uint8 (N,h,w,3), t (N,) s from the first frame): every encoded frame (passthrough). An image = 1 frame.
-    Own decode (not framecache.frames): that one resamples to a constant fps, which duplicates dropped-frame gaps."""
+    Passthrough decode (framecache.frames resamples to a constant fps, which duplicates dropped-frame gaps) with
+    framecache's NVDEC args. Not stored on disk: 256x144 x every frame is ~110 KB/frame (220 MB for a 70 s take, slower to
+    write to /mnt/c than to decode again); the take's other checks share framecache's own caches."""
     import numpy as np
     if video.lower().endswith(('.png', '.jpg', '.jpeg')):
         from PIL import Image
         im = np.asarray(Image.open(video).convert('RGB').resize((w, h), Image.BILINEAR))
         return im[None].copy(), np.zeros(1)
-    raw = subprocess.run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-i', video, '-vf', 'scale=%d:%d' % (w, h),
-                          '-fps_mode', 'passthrough', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], capture_output=True).stdout
+    try:
+        import framecache as fc
+        hw = fc.hwdec()
+    except ImportError:
+        hw = []
+    return _decode(video, w, h, hw)
+
+
+def _decode(video, w, h, hw):
+    import numpy as np
+    cmd = ['ffmpeg', '-nostdin', '-loglevel', 'error'] + hw + ['-i', video, '-vf', 'scale=%d:%d' % (w, h),
+                                                              '-fps_mode', 'passthrough', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']
+    r = subprocess.run(cmd, capture_output=True)
+    if hw and (r.returncode or not r.stdout):   # NVDEC refused: software decode
+        r = subprocess.run([c for c in cmd if c not in hw], capture_output=True)
+    raw = r.stdout
     F = np.frombuffer(raw, np.uint8).reshape(-1, h, w, 3)
     T = probe_pts(video)
     if len(T) < len(F):
