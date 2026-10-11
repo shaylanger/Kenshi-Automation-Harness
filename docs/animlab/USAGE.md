@@ -305,6 +305,9 @@ report.txt/json.
 `metricslab.py` docstring. KenshiFP's `kfpvm_drive` feeds each frame through the plugin's own commanded-pose path
 (`fp_vm replay N t`: g_vm_rp), so vm_targets -> vm_apply (IK, elbow pick with look-ahead over the authored future,
 wrist roll, edge clamp, stretch) is the game's code. The weapon pose is taken as given (no target smoothing).
+Hand scale: default = the body record's recorded non-uniform hand scale (`hs`, rec native v2) when it has one, else
+uniform C_K; `--hs x,y,z` forces a vector (e.g. Axima 0.914,1.058,0.914; zeroes a --l1 build's hoff), `--no-hs` = always
+uniform C_K (a fixed Axima vector on the pre-v2 corpus bodies failed the drive gate: crossbow-z0 elbow95 0.07 -> 1.03).
 
 **Drive gate** (`faithful`): the weapon pose the game rendered (record i+1) as the target on a still-body segment
 (eye within 0.3 dm, full viewmodel, no swing) must give the game's measured arm, p95 <= 0.25 dm. `--commanded` drives the
