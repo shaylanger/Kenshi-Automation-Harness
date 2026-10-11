@@ -812,6 +812,12 @@ def hinge_check(S, P, dev_max=HINGE_DEV, abs_max=HINGE_ABS, grid=HINGE_U):
 # frame). Judged per frame / per video-frame window instead.
 SNAP_WIN, SNAP_U, SNAP_MAX = 0.034, 0.10, 22.0   # s (one 30 fps video frame), u after the wind-up top, deg
 SEE_L, SEE_U0, SEE_U1, SEE_MIN = 7.0, 0.45, 0.95, 0.05   # dm blade seen past the grip, gated u range, min visible blade
+SEE_MID = (0.40, 0.58)   # mid-stroke crossing: blade must be seen here even when the ends run off screen (Shay 17:10)
+
+
+def _tip_onscreen(p, L=SEE_L, zn=3.0):
+    c = add(p['mp'], mul(nz(p['mf']), L))
+    return c[2] >= zn and abs(c[1] / c[2]) <= .85 and abs(c[0] / c[2]) <= 1.5
 # seen counts an edge-on crossing between two frames as 0 (sampling-independent: a 30 fps video catches it at random)
 
 
@@ -919,7 +925,11 @@ def blade_check(F, P, snap_max=SNAP_MAX, see_min=SEE_MIN, win=SNAP_WIN, snap_u=S
             mx = max((r for r in rate if ut <= r[0] <= ut + snap_u), key=lambda r: r[1])
             if ws is None or mx[1] > ws[1]:
                 ws = (k, mx[1], mx[0], mx[2], ut)
-        g = [(blade_seen(P[i]), F[i]['swu'], i) for i in idx if u0 <= F[i]['swu'] <= u1]
+        # Shay 2026-10-11 17:10/17:25: a blade may END off screen (follow-through/recovery leaving the view is normal);
+        # only the mid-stroke crossing (u SEE_MID) must show it: outside SEE_MID a frame whose tip is off screen is not
+        # judged (an on-screen blade there is still judged, e.g. an end-on hairline). Off-screen STARTS: R32 wexit.
+        g = [(blade_seen(P[i]), F[i]['swu'], i) for i in idx if u0 <= F[i]['swu'] <= u1
+             and (SEE_MID[0] <= F[i]['swu'] <= SEE_MID[1] or _tip_onscreen(P[i]))]
         seen = [(x[0][0], x[1], x[2]) for x in g]
         # between frames: a flat-facing sign change means the blade passed edge-on (seen 0) whatever frames were sampled
         seen += [(0.0, g[n + 1][1], g[n + 1][2]) for n in range(len(g) - 1) if g[n][0][2] * g[n + 1][0][2] < 0]
