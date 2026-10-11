@@ -182,9 +182,10 @@ def two_kind(w):
 
 
 def two_dims(w):
-    """handle end behind / tip ahead of the grip along the blade axis, unscaled mesh units (dm) = what KenshiFP's 2H path
-    reads in game (Mesh::getBounds; item scale fields not applied)"""
-    V = mesh_points(w) / np.array([w['scale_thickness'], w['scale_length'], w['scale_width']])
+    """handle end behind / tip ahead of the grip along the blade axis in dm, scaled = what KenshiFP's 2H path reads in game
+    (Mesh::getBounds x the item's GameData "scale length" x "overall scale"; 2026-10-11: unscaled bounds put the off hand
+    past the pommel of scaled-down weapons, Buster Sword 0.73 / Leviathanslayer 0.77)"""
+    V = mesh_points(w)
     return max(float(-V[:, 1].min()), 0.0), float(V[:, 1].max())
 
 
@@ -287,7 +288,7 @@ def run(a, cfg):
         """a 2H weapon's recordings replayed as the game would solve it (the source reads the skill category per weapon)"""
         if not a.adapter or c != 0 or w['cls'] not in TWO_CLS:
             return recs[c]
-        pom, tip = two_dims(w)   # what the game reads per weapon (kfp-two-hand: mesh bounds, unscaled)
+        pom, tip = two_dims(w)   # what the game reads per weapon (kfp-two-hand: mesh bounds x item length scale)
         k = (w['cls'], round(pom, 2), round(tip, 2))
         if k not in vrecs:
             L = []
