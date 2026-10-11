@@ -90,9 +90,20 @@ def probe(video):
 
 def read_corner(video, cw, ch):
     import numpy as np
-    cmd = ['ffmpeg', '-nostdin', '-loglevel', 'error', '-i', video, '-vf', 'crop=%d:%d:0:0,format=gray' % (cw, ch),
+    try:   # NVDEC decode where available (framecache.hwdec; cpu-video 2026-10-10), software fallback below
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import framecache
+        hw = framecache.hwdec()
+    except ImportError:
+        hw = []
+    cmd = ['ffmpeg', '-nostdin', '-loglevel', 'error'] + hw + ['-i', video, '-vf', 'crop=%d:%d:0:0,format=gray' % (cw, ch),
            '-fps_mode', 'passthrough', '-f', 'rawvideo', '-']
-    raw = subprocess.run(cmd, capture_output=True, check=True).stdout
+    r = subprocess.run(cmd, capture_output=True)
+    if hw and (r.returncode or not r.stdout):   # NVDEC refused: software decode
+        r = subprocess.run([c for c in cmd if c not in hw], capture_output=True)
+    if r.returncode:
+        raise subprocess.CalledProcessError(r.returncode, cmd, r.stdout, r.stderr)
+    raw = r.stdout
     n = len(raw) // (cw * ch)
     return np.frombuffer(raw[:n * cw * ch], dtype=np.uint8).reshape(n, ch, cw)
 

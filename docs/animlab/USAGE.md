@@ -120,6 +120,23 @@ label's flash is missing or reaches the screen > 0.15 s (`set synclag`) earlier/
 no send; `--synced-out <file>` writes the labels at their measured video times for the burn-in. Without take_mark (old
 takes, harness without sync_flash) it is SKIP unless the rules say `set sync 1`. openground/cursor/overlay skip flash frames.
 
+## Video: decode once, NVDEC, GPU checks (cpu-video, Shay 2026-10-10)
+- **Frame cache** `tools/animlab/framecache.py`: never decode a take video yourself; read frames through it.
+  `framecache.frames(video, fps, w, h, t0, t1)` = uint8 memmap (N,h,w,3), decoded once per (fps, size) into
+  `<video dir>/.framecache/<stem>-<sha1>/` (corpus videos: `/tmp/animlab-framecache`), shared under a file lock by every
+  concurrent consumer (<= `ANIMLAB_FRAMECACHE_MAX_MB` 256, bigger requests return None: stream). `cached_check(name, fn)`
+  wraps a check `fn(video, ...)` so an identical call (same video content, arguments, checking source) returns the
+  stored result: frames.py syncmarks/cursor/overlay/openground use it, so takecheck, take scripts, the gate and
+  review-pack runs on one take judge it once. `framecache.hwdec()` = ffmpeg `-hwaccel cuda` args (NVDEC; software
+  fallback); autoreview.py and stamp.py use it for their own passthrough decodes. CLI `framecache.py info|clear <video>`;
+  `ANIMLAB_FRAMECACHE=0` / `ANIMLAB_HWDEC=0` turn them off. Corpus turret-fp + sword-z25-block: identical RESULT lines,
+  117 -> 41 and 59 -> 26 cpu-s cold, 0.4 warm.
+- **GPU pixel maths** `tools/animlab/gpu.py` (CuPy, lowest-priority CUDA stream; numpy fallback, `ANIMLAB_GPU=0`):
+  frames.py cursor/overlay candidate search runs on it; `python3 gpu.py` prints the active path.
+- **Recording** `tools/automation/venc.sh` `venc_args <crf> [x264-preset]` (sourced by rig-env.sh / take-preflight.sh):
+  h264_nvenc on both rigs (probe cached per rig/day in `$TMPDIR/kah-venc.<rig>`), libx264 fallback, `VENC=x264|nvenc`
+  forces. New take recorders use `$(venc_args 18)` instead of literal libx264 args.
+
 ## Auto-review (per-frame image checks; reviewers judge only flagged frames)
 
 `tools/animlab/autoreview.py` (usage in its header) looks at EVERY encoded frame of a take video (VFR passthrough,
