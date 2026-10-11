@@ -120,6 +120,28 @@ label's flash is missing or reaches the screen > 0.15 s (`set synclag`) earlier/
 no send; `--synced-out <file>` writes the labels at their measured video times for the burn-in. Without take_mark (old
 takes, harness without sync_flash) it is SKIP unless the rules say `set sync 1`. openground/cursor/overlay skip flash frames.
 
+## Auto-review (per-frame image checks; reviewers judge only flagged frames)
+
+`tools/animlab/autoreview.py` (usage in its header) looks at EVERY encoded frame of a take video (VFR passthrough,
+256x144, NVDEC via framecache) and writes `flags.tsv` + `crops/` (prev | FLAG | next at full resolution) + one
+`RESULT <take>-autoreview PASS|FAIL flags=..` line. Checks: `oneview` (one view per FP/3P switch: no both / neither /
+misplaced frame), `fragments` (no stray body parts while the body is hidden in the zoom fade band), `occluder` (arm /
+body across the lens, edge-connected foreground share per weapon), `weapon` (viewmodel weapon complete vs references in
+`tools/animlab/autoreview-refs/<weapon>/<state>/`), plus frames.py's `overlay`, `cursor`, `openground`.
+View/state per frame: the frame stamp (decoded from the video when it carries one; or `<stem>.stamp.txt`), else the
+take's vmrec, else image-only rules (oneview needs a quiet side, fragments a short-event view showing less than both
+neighbours for >= 0.25 s). Stills (screenshots) take `--plate <same spot, no viewmodel> --state <state>`.
+
+    python3 autoreview.py run <video|png> <out> [--weapon fists|sword|crossbow] [--plate P --state S]
+    python3 autoreview.py ref add <accepted video|png> <weapon> [--states ..] [--plate P]     # weapon references
+    python3 autoreview.py selftest            # corpus rows `autoreview:<check>` FAIL+PASS: RESULT AUTOREVIEW-SELFTEST
+
+`tools/automation/review-pack.py` runs it first (`--autoreview auto`, nice 15) and then builds sheets of the flagged
+frames only (`flag-NN-<t>-<check>.jpg` + crop; `--full` = the old complete pack; falls back to complete when autoreview
+cannot run, e.g. the 4080's Windows python). Known limits: image-only oneview misses a both-frame in the middle of a
+swing (2E66 33.67 s; a stamp/vmrec view source covers it); occluder flags a fully extended punch near 15-17% too
+(review pointer, not a verdict); weapon references so far: crossbow reload/aim/fired (XBMESH-A stills).
+
 ## Metrics (per state)
 
 States: `ready`, `swing`, `block`, `swing->block`, `aim`, `reload` (crossbow), `settle` (gate only: 0.3 s after a
