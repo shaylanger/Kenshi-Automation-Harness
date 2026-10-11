@@ -16,6 +16,7 @@
 #include <core/Functions.h>
 #include <kenshi/GameWorld.h>
 #include <kenshi/GunClass.h>
+#include <kenshi/Character.h>
 #include <kenshi/RootObject.h>
 #include <kenshi/Globals.h> // ou
 #include <kenshi/Kenshi.h>
@@ -558,7 +559,25 @@ void __fastcall Hook_GunShoot(GunClass *gun, Character *me, RootObject *target, 
   g_gunShootOrig(gun, me, target, stat, aimpos);
 }
 
+// "steady" (KenshiFP R11-RACE): a steady character's hit reaction never starts (SteadyCommands.inc).
+typedef void(__fastcall *StartStumbleFn)(Character *, CutDirection, Damages &, GameData *, Character *);
+StartStumbleFn g_startStumbleOrig = nullptr;
+
+void __fastcall Hook_StartStumble(Character *self, CutDirection dir, Damages &damage, GameData *bodyPart,
+                                  Character *attacker) {
+  if (SteadyBlocksStumble(self))
+    return;
+  g_startStumbleOrig(self, dir, damage, bodyPart, attacker);
+}
+
 void InstallHooks() {
+  __int64 stumbleAddr = KenshiLib::GetRealAddress(&Character::_startStumble);
+  if (stumbleAddr) {
+    int s = (int)KenshiLib::AddHook((void *)stumbleAddr, (void *)Hook_StartStumble, (void **)&g_startStumbleOrig);
+    Log("KAH: Character::_startStumble hook status=" + Int(s));
+  } else {
+    Log("KAH: Character::_startStumble not found; steady only ends stumbles per frame");
+  }
   __int64 shootAddr = KenshiLib::GetRealAddress(&GunClass::shoot);
   if (shootAddr) {
     int s = (int)KenshiLib::AddHook((void *)shootAddr, (void *)Hook_GunShoot, (void **)&g_gunShootOrig);

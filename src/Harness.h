@@ -55,6 +55,8 @@ class RootObject;
 void RecordGunShot(GunClass *gun, Character *me, RootObject *target, int stat);
 // "rangedtest": per-shot accuracy inputs and per-session shots/hits; any gun, may run off the main thread.
 void RecordRangedShot(GunClass *gun, Character *me, RootObject *target, int stat);
+// "steady": true = skip this Character::_startStumble (the character is held steady); counts it. Any thread.
+bool SteadyBlocksStumble(Character *c);
 // "turret <b> aim <npc>": keeps that turret's operator on the target; every frame.
 void KeepTurretAim();
 

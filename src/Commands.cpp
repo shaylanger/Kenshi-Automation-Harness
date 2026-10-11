@@ -24,6 +24,7 @@
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
+#include <kenshi/Animation/AnimationClass.h>
 #include <kenshi/CharMovement.h>
 #include <kenshi/CharStats.h>
 #include <kenshi/Building/CraftingBuilding.h>
@@ -760,6 +761,7 @@ std::string CurrentSave() {
 #include "WorldCommands.inc"
 #include "BalanceCommands.inc"
 #include "TurretCommands.inc"
+#include "SteadyCommands.inc"
 #include "RangedCommands.inc"
 
 const char *const kBuiltins[] = {
@@ -773,7 +775,7 @@ const char *const kBuiltins[] = {
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
     "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
     "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "hit", "newgame", "import", "stealth", "crime",
-    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode", "dialog", "input_isolation", "key_inject", "mouse_inject", "chatter", "sync_flash", "stamp", "sampler"};
+    "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode", "steady", "dialog", "input_isolation", "key_inject", "mouse_inject", "chatter", "sync_flash", "stamp", "sampler"};
 
 const char *const kHelp =
     "built-in: help | status | load <save> | save <name> | newgame <start> [edit] | import <save> [flags] | speed <0|0.5..50> [hold] | chatter off|on|status | "
@@ -795,7 +797,7 @@ const char *const kHelp =
     "chance <npc> ko|kidnap|lockpick|steal <target> [item <name>] | detect <sneaker> | detecttime <sneaker> <observer> [timeout <s>] | senses <observer> <who> | face <npc> <who> | pin <npc> [at <npc|x y z>] [dist m] [face <who>] | pin <npc> off | "
     "healtime <medic> <patient> [wound <cut>] [timeout <s>] | water <npc> | findwater <npc> [radius <m>] [depth <m>] | "
     "swimtime <npc> <dist> [+x|-x|+z|-z] [walk|run] | construct <npc> <building> [dist <m>] | construction <building> [reset] [fill] | farm <building> [grown <0..1>] [skip <hours>] [empty] | towns [filter,...] [max <n>] | turret <building> [radius <m>] [target <npc>] [front <m>] [aim <npc>|off] | "
-    "rangedtest <shooter> <target> [shots <n>] [window <s>] [timeout <s>] [noheal] [noaim] [attack] [keepranged] | rangedtest <shooter> last | rangedinfo <npc> [clearturret] | combatmode <npc> [block|ranged|taunt|hold|passive on|off] | dialog [close] | "
+    "rangedtest <shooter> <target> [shots <n>] [window <s>] [timeout <s>] [noheal] [noaim] [attack] [keepranged] | rangedtest <shooter> last | rangedinfo <npc> [clearturret] | combatmode <npc> [block|ranged|taunt|hold|passive on|off] | steady <npc> [on [nocombat]|off] | dialog [close] | "
     "sever <npc> <limb> [noitem] [ko] | hit <attacker> <victim> <part> <damage> | runspeed <npc> | walktime <npc> <dist> [+x|-x|+z|-z] [walk|run] | acceltime <npc> <dist> [+x|-x|+z|-z] [walk|run] [stopat <d>] [halt] [follow] | camfollow <npc> [on|off] | unload <npc> | reload <name> | drop <npc> <item> [count] [owned] | pickup <npc> <item|#serial/index|nearest> [near <npc|building>] [radius <m>] [order|now] | build <building|sid> [near <npc> [dist m] | at x y z] [faction <f>] | "
     "unbuild <name> [radius] | time | buildings [radius] [filter] [near <npc>] | building <name> [radius] | "
     "produced <building> [reset] [radius <m>] | power <building> on|off|charge|supply|unsupply [radius <m>] | fill <building> <item> [n] [section <s>] [radius <m>] | "
@@ -844,6 +846,14 @@ void RecordGunShot(GunClass *gun, Character *me, RootObject *target, int stat) {
   try {
     RecordGunShotImpl(gun, me, target, stat);
   } catch (...) {
+  }
+}
+
+bool SteadyBlocksStumble(Character *c) {
+  try {
+    return SteadyBlocksStumbleImpl(c);
+  } catch (...) {
+    return false;
   }
 }
 
@@ -926,6 +936,10 @@ void KeepWalkTimers() {
   }
   try {
     RangedTick(ou);
+  } catch (...) {
+  }
+  try {
+    SteadyTick(ou);
   } catch (...) {
   }
 }
@@ -1096,6 +1110,7 @@ void WatchLoads() {
         Log("KAH: protect list cleared by the load (" + Int(g_protected.size()) + ")");
         g_protected.clear();
       }
+      SteadyClearOnLoad();
     }
     if (signal != g_lastSignal) {
       // Import is only safe into a fresh new game (KAH 23): remember

@@ -339,6 +339,8 @@ bool RunRangedCommand(GameWorld *world, const std::vector<std::string> &f, Chara
     return RunRangedInfo(f, c, ok, out);
   if (Lower(f[1]) == "combatmode")
     return RunCombatMode(f, c, ok, out);
+  if (Lower(f[1]) == "steady")
+    return RunSteady(f, c, ok, out);
   if (Lower(f[1]) != "rangedtest")
     return false;
   if (f.size() < 4) {
