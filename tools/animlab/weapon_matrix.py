@@ -23,6 +23,8 @@ recorded prop pose (mp, mf, mu):
                  hand is on the shaft.
   With --adapter, a 2H weapon's recordings are replayed with `--set wcat=<skill category>` (what the game reads per
   weapon, kfp-two-hand), so the matrix judges the source's two-hand path; one-handed weapons use the plain replay.
+  framed (melee)  zoom-0 framing (metrics.framed_check): a wrist on screen on >= 80 % of ready/block and 50 % of swing
+                 frames (heavy 2H / polearm reel takes showed only the blade, hands never in view).
   arc    (flat edged weapons)  E1 edge-leads-the-arc gate (metrics.arc_gate) with the mid-blade point at 0.5 x tip.
   seen   (flat edged weapons)  E6 blade visibility (metrics.blade_check) with the seen length scaled to the blade
                  (katana: SEE_L 7 dm of 10.4 dm tip -> 0.67 x tip).
@@ -170,6 +172,10 @@ def judge(w, path):
     if two[0]:
         out['twohand'] = (two[1] >= TWO_SHARE * two[0], '%d/%d' % (two[1], two[0]), two[0] - two[1])
         out['twosp'] = (sp[0] > 0 and sp[1] >= TWO_SHARE * sp[0], '%d/%d(inferred)' % (sp[1], sp[0]), sp[0] - sp[1])
+    if cls == 0:   # zoom-0 framing: a wrist in view at ready/block/swing (REEL Buster/Fragment Axe/Naginata misses)
+        fok, ftxt = M.framed_check(F, P)
+        if ftxt != ['framed=n/a']:
+            out['framed'] = (fok, ','.join(ftxt), sum(1 for t in ftxt if ':BAD' in t))
     if cls == 0 and w.get('flat', 0) >= FLAT_MIN and any(p['state'] == 'swing' for p in P):
         old = M.ARC_MID
         try:
@@ -354,7 +360,7 @@ def run(a, cfg):
             for k, (ok, txt, bad) in J.items():
                 # reference-relative: a check the reference weapon (the one the recording was made with) also fails is a
                 # recording / pose problem, judged by the normal gate: the weapon fails it only when clearly worse
-                rk = R0.get(k)
+                rk = None if k == 'framed' else R0.get(k)   # framed = the recording's own hands: never reference-relative
                 v = 'PASS' if ok else 'FAIL'
                 if not ok and rk is not None and not rk[0]:
                     v = 'FAIL' if bad > rk[2] + max(5, 0.1 * abs(rk[2])) else 'REF-FAIL'

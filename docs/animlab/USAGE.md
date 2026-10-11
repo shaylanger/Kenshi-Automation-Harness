@@ -78,6 +78,13 @@ mid-screen), `len` = extent / screen width (info). Stroke 1 is accepted as it is
 (`INFO-FAIL`; `--gate-info` gates it, used by mutation rec-path-late-drift). Prints `pathsw s<stroke> swing<k> PASS|FAIL|INFO-FAIL
 <numbers>` per swing (optimizer input) and `path PASS|FAIL swings=n [first_bad=...]`. Also: `pool --checks ...,path`, e6-takes.py
 `E6TAKE <rec> s<n> path` (gate step 3c, new keys: non-blocking until the baseline holds a PASS), taste rule R30 (t90-t92).
+Shay 17:05/17:25 rules in the same per-swing line (animlab-maintainer): `sweep=` blade angular sweep >= 70 deg (R31),
+`wexit=` wind-up exit continuity (R32: a stroke starting off screen must be carried off in the wind-up, last on-screen
+point within 25 % of the exit edge, back in through the same edge; `wexit=on` = starts on screen, `mid:` = tip off from
+the ready pose so the blade middle is judged), plus one `pathrep s<stroke> PASS|FAIL rep=` line per stroke (R33, <= .03
+of the width). Thrust strokes (`metrics.PATH_THRUST`) skip span/ang/edge/fast/sweep and gate the end tip near the centre
+(R34). Zoom-0 framing (R35): `spec.py framed <rec>` (also `framed=` in `animlab.py weapons --run` and the gate check_suite):
+a wrist on screen on >= 80 % of ready/block and 50 % of swing frames at zoom 0.
 
 ## Take checks (labelled video takes)
 `tools/animlab/takecheck.py --labels <lab> --ev <ev> [--ev ...] --rules <rules> [--video <mp4> | --video-len <s>]` judges a

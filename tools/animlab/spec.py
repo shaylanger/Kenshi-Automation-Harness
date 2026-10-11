@@ -5,6 +5,7 @@
   spec.py run     <rules.tsv> --checks <checks.json> --class C <rec>... [--set k=v]   every rule of class C on recordings
   spec.py unarmed <cand>... [--rules rules.tsv]              unarmed (fists) spec on metricslab/native.py fist candidates (the
                                                              technique name = the candidate dir; shotei/palm names get U17)
+  spec.py framed <rec>                                       zoom-0 framing: a wrist in view at ready/block/swing
   spec.py restedge <rec>                                     sword edge never toward the camera in the rest states
   spec.py stilljit <rec> [--states aim --max 1.5]            still-state weapon jitter (px at 1600x900)
   spec.py wrist    <rec> [--hold 30 --swing 50]              wrist bend limit per state (holds vs swings)
@@ -799,6 +800,7 @@ def main():
     p = sp.add_parser('run'); p.add_argument('rules'); p.add_argument('rec', nargs='+'); p.add_argument('--checks', required=True)
     p.add_argument('--class', dest='cls', required=True); p.add_argument('--set', action='append'); p.add_argument('--cache')
     p = sp.add_parser('unarmed'); p.add_argument('cand', nargs='+'); p.add_argument('--rules'); p.add_argument('--visual', help='visual.json with the prop convention (default: KenshiFP numbers)')
+    p = sp.add_parser('framed'); p.add_argument('rec')   # zoom-0 hands in view (metrics.framed_check)
     p = sp.add_parser('restedge'); p.add_argument('rec'); p.add_argument('--p05', type=float, default=REST_EDGE_P05)
     p = sp.add_parser('stilljit'); p.add_argument('rec'); p.add_argument('--states', default='aim'); p.add_argument('--max', type=float, default=STILL_JIT)
     p = sp.add_parser('wrist'); p.add_argument('rec'); p.add_argument('--hold', type=float, default=WB_HOLD); p.add_argument('--swing', type=float, default=WB_SWING)
@@ -817,6 +819,9 @@ def main():
         return cmd_unarmed(a)
     if a.cmd == 'restedge':
         ok, txt = restedge(a.rec, a.p05)
+    elif a.cmd == 'framed':
+        import recfmt, metrics as M
+        r = recfmt.parse(a.rec); ok, t = M.framed_check(r.frames, M.frame_metrics(r)); txt = ' '.join(t)
     elif a.cmd == 'stilljit':
         ok, txt = stilljit(a.rec, tuple(a.states.split(',')), a.max)
     elif a.cmd == 'wrist':

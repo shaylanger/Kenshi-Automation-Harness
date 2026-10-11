@@ -1344,6 +1344,42 @@ def _both(a, b):
     return a[0] and b[0], list(a[1]) + ['each:'] + list(b[1])
 
 
+# ---- zoom-0 framing (REEL-Buster_Sword / Fragment_Axe / Naginata, weapon-reel-109 2026-10-11): heavy 2H and polearm takes
+# at zoom 0 showed only the blade (or a thin shaft end), the hands and handle never in view at ready/block, and the
+# matrix passed them (vis judges the strike part only). Per melee state at zoom 0 (zoom < 0.5, viewmodel up): share of
+# frames where at least one wrist projects inside the screen (FRAMED_MARGIN in from every edge) >= FRAMED_MIN[state].
+# Reel 109: Buster ready 0.00 block 0.00 swing 0.47, Fragment Axe ready/block 0.00 swing 0.38, Naginata ready 0.04
+# block 0.00 swing 0.25; 1H sword / ab2h / E6 / f28 recs 0.95-1.00. CLASS: every melee weapon class at zoom 0 (the hands
+# carry the weapon read; a weapon framed so the hands leave the view reads as a floating blade / plank).
+FRAMED_MIN = {'ready': 0.80, 'block': 0.80, 'swing': 0.50}
+FRAMED_MARGIN = 0.02
+
+
+def framed_check(F, P, mins=None, margin=FRAMED_MARGIN):
+    """(ok, [text]) melee only (cls 0); n/a (ok, ['framed=n/a']) when no zoom-0 melee frames."""
+    mins = mins or FRAMED_MIN
+    inside = lambda q: q is not None and margin * W_PX <= q[0] <= (1 - margin) * W_PX and margin * H_PX <= q[1] <= (1 - margin) * H_PX
+    S = {}
+    for i, p in enumerate(P):
+        r = F[i]
+        if r.get('cls', 0) != 0 or not p.get('wih') or r.get('zoom', 0.0) >= 0.5 or r.get('band_hidden'):
+            continue
+        st = p['state']
+        if st not in mins:
+            continue
+        e = S.setdefault(st, [0, 0])
+        e[0] += 1
+        e[1] += inside(_uproj(p['J'][2])) or inside(_uproj(p['J'][5]))
+    if not S:
+        return True, ['framed=n/a']
+    ok, txt = True, []
+    for st in ('ready', 'block', 'swing'):
+        if st in S:
+            n, k = S[st]; g = k >= mins[st] * n; ok = ok and g
+            txt.append('framed_%s=%.2f/%.2f(%d/%d)%s' % (st, k / float(n), mins[st], k, n, '' if g else ':BAD'))
+    return ok, txt
+
+
 def check_suite(rec, overhead=(2,)):
     """[(check, ok, text)] for every check that applies to the recording; swing checks per scripted stroke (E6 recs)."""
     global STROKE_ONLY
@@ -1373,6 +1409,8 @@ def check_suite(rec, overhead=(2,)):
         G = guard_series(F, P)
         if G:
             run('guard', lambda: guard_check(G))
+        if any(f.get('cls', 0) == 0 for f in F):
+            run('framed', lambda: framed_check(F, P))   # zoom-0 hands in view (heavy/polearm reel misses)
         sk = spike_check(F, P)
         if sk[0] is not None:
             run('spike', lambda: sk)

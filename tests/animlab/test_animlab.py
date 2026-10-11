@@ -448,5 +448,16 @@ class T(unittest.TestCase):
         rep = M.path_rep([(3, S), (3, [(u, i, (x, y + 200)) for u, i, (x, y) in S])]); self.assertFalse(rep[3][0], rep)
         ok, t = M.thrust_one(9, [(0.3 + 0.1 * k, k, (400 + 100 * k, 700 - 60 * k)) for k in range(5)]); self.assertTrue(ok, t)
 
+    def test_framed(self):   # REEL Buster/Fragment Axe/Naginata: hands out of view at zoom 0
+        cam = lambda x, y, z=5.0: ((x - 800) / 800.0 * M.TX * z, (450 - y) / 450.0 * M.TY * z, z)
+        def rec(wr):
+            F = [dict(cls=0, zoom=0.0) for _ in range(20)]
+            P = [dict(state='ready' if i < 10 else 'swing', wih=True, J=[None, None, cam(*wr), None, None, cam(*wr)]) for i in range(20)]
+            return F, P
+        ok, t = M.framed_check(*rec((900, 700))); self.assertTrue(ok, t)
+        ok, t = M.framed_check(*rec((900, 1000))); self.assertFalse(ok, t); self.assertIn('framed_ready=0.00', t[0])
+        F, P = rec((900, 700)); F = [dict(f, zoom=25.0) for f in F]
+        self.assertEqual(M.framed_check(F, P), (True, ['framed=n/a']))
+
 if __name__ == '__main__':
     unittest.main(verbosity=1)
