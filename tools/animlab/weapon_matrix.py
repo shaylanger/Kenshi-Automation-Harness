@@ -140,7 +140,7 @@ def judge(w, path):
             on = seg_dist(wr, a, b) <= TWO_D
             two[0] += 1; two[1] += on
             if on:
-                d = float(np.dot(wr - np.asarray(p['J'][5]), nz(p['mf']))); lo, hi = TWO_SP[w['cls']]
+                d = float(np.dot(wr - np.asarray(p['J'][5]), nz(p['mf']))); lo, hi = TWO_SP[two_kind(w)]
                 sp[0] += 1; sp[1] += lo <= d <= hi
     if near:
         bad = {s: v for s, v in near.items() if v[1] > NEAR_SHARE * v[0]}
@@ -171,6 +171,12 @@ def judge(w, path):
         finally:
             M.blade_seen = orig
     return out
+
+
+def two_kind(w):
+    """2H grip kind (TWO_SP key): polearm (8), or heavy (3); a heavy weapon with no handle behind the grip (mesh starts at
+    or ahead of the hand, e.g. Crab Maul, native anim class polearm) is held like a polearm (KenshiFP g_vm_2hk, wpom < 0.5)"""
+    return 8 if w['cls'] == 8 or two_dims(w)[0] < 0.5 else 3
 
 
 def two_dims(w):
@@ -295,7 +301,11 @@ def run(a, cfg):
                 J = judge(w, r)
             except Exception as e:   # noqa: BLE001
                 J = {'error': (False, str(e)[:60], 1)}
-            R0 = {} if (c == 0 and w["cls"] in TWO_CLS) else ref_result(c, r)   # 2H: a new pose, judged strictly (no reference leniency)
+            R0 = ref_result(c, r)
+            if c == 0 and w["cls"] in TWO_CLS:
+                # 2H: a new pose, judged strictly, except `seen` (blade snap at a fixed recording frame, e6fix swing0 frame
+                # ~272: the reference katana fails it too = a property of the recording, not of the 2H grip)
+                R0 = {k: v for k, v in R0.items() if k == 'seen'}
             for k, (ok, txt, bad) in J.items():
                 # reference-relative: a check the reference weapon (the one the recording was made with) also fails is a
                 # recording / pose problem, judged by the normal gate: the weapon fails it only when clearly worse
