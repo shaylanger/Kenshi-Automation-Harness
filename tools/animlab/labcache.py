@@ -18,7 +18,7 @@ Mode (env ANIMLAB_CACHE): 1 (default) use + fill; 0 off (always compute, store n
 compare with the stored entry (a mismatch is printed to stderr and appended to <dir>/verify-mismatch.log; the computed
 result is used), the proof that a key misses no input.
 Store: ANIMLAB_CACHE_DIR (default /root/animlab-cache), entries <dir>/e/<k[:2]>/<k>/; LRU: a hit touches the entry, a
-store prunes the oldest entries when the total passes ANIMLAB_CACHE_MAX_MB (default 6000). Writes are atomic (tmp dir +
+store prunes the oldest entries when the total passes ANIMLAB_CACHE_MAX_MB (default 40000). Writes are atomic (tmp dir +
 rename) and a per-key flock makes concurrent identical computations (parallel gates of base/all trees) wait for the first
 one instead of computing twice. Only clean results are stored (exit 0/1, no Python traceback, no signal).
 CLI (shell callers, e.g. regress.sh):
@@ -40,7 +40,7 @@ except ImportError:  # Windows Python (4080 rig shim): no flock; one analysis pe
             pass
 
 DIR = os.environ.get('ANIMLAB_CACHE_DIR', '/root/animlab-cache')
-MAX_MB = float(os.environ.get('ANIMLAB_CACHE_MAX_MB', '6000'))
+MAX_MB = float(os.environ.get('ANIMLAB_CACHE_MAX_MB', '40000'))   # was 6000: full + 60% of entries rewritten per hour (gpu-lab 2026-10-11); WSL disk 760 GB free
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERSION = 'labcache-1'   # bump to invalidate every entry (key format change)
 _fh = {}
