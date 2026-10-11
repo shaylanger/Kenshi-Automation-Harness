@@ -345,6 +345,8 @@ lower). Performers mime (no real sword), so treat as owner `inferred` until Shay
 | PR10 dual-wield alternation: next stroke may start during the other's recovery (overlap <= 0.2 s), interval 0.25-1.0 s | dualwield | boxing alternation 0.11-1.02 s (median 0.28), overlap 0-0.19 s | motions/dualwield-alternate.json 0.85 s, no overlap | `ref.alt` | PROPOSED for the dual-wield brief (proxy: boxing, no dual-sword data) |
 | PR11 crossbow aim: trigger wrist >= 0.35 arm from the eye; rear elbow 34-53 deg | crossbow | rifle aim: wrist-head 0.42-0.53 arm, rear elbow 34-53 | r_aim 0.25 arm, elbow 38 | - | INFO: a crossbow stock sits at the cheek, the rifle numbers are an upper bound |
 
+- 2026-10-11 (fp-design-research): FD1-FD9 proposed from shipped-game design numbers (Chivalry 2 timing table, HL2/HL1/Quake bob source, viewmodel FOVs, FP animation guides), each with source URL, threshold and the PR/Misses row it answers: `components/KenshiFP/animlab/reference/FP_DESIGN_RESEARCH.md` (KenshiFP repo) section 6; Shay questions Q1-Q6 in section 7. Notable: game 2H wind-up share is 0.32-0.41, so PR5's 0.40 mocap floor should be 0.30; our 1H strokes 0/1 have no wind-up (games 0.12-0.20 s).
+
 Taste-set notes (reference vs Shay's rules): R2 / U10 / R25 / U14 are SUPPORTED by human motion (PR2, PR7, PR6, PR9). R8's 30-deg
 hold limit is stricter than a human sword grip (mime wrist bend 36-65 at the start): it is Shay's look, not anatomy; keep it.
 The largest human-vs-ours gaps (elbow bent through the stroke, short arcs, no torso turn: human torso share 0.12-0.48, chest
