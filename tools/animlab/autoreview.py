@@ -66,6 +66,9 @@ IM_MIN = 8                    # second change for `intermediate`
 QUIET = 6                     # image-only: median changed cells on the quiet side of a judged cut
 EV_MIN = 12                   # changed cells for a view event in a quiet scene (image-only fragments)
 BAND_MAX = 1.5                # s
+PRE_DIL = 2                   # px (256x144): last pre-band objects grown by this before "new" is judged
+BAND_MIN = 0.25               # s: image-only band at least this long (fade band 0.4-0.9 s; a 4-frame viewmodel jitter, 2E66 27.87 s, is not one)
+LESS = 0.8                    # image-only band: central objects during <= LESS x min(before, after)
 OBJ_DL = 45
 FRAG_MIN = 40                 # new floating object px (256x144) for a fragment flag
 FG_T = 34                     # plate foreground: max abs RGB difference
@@ -386,7 +389,7 @@ def objects(f):
     return np.abs(L - bl) >= OBJ_DL
 
 
-def band_spans(t, cnt, views):
+def band_spans(t, cnt, views, objc=None):
     """(first, end) frame spans of the body-hidden band: from the view source, or image-only intermediate views."""
     n = len(t)
     spans = []
@@ -405,27 +408,48 @@ def band_spans(t, cnt, views):
             else:
                 i += 1
         return spans, 'view source'
-    ev = []
+    # image-only: a band view is an intermediate view that shows LESS than both views around it (the viewmodel went, the
+    # body is not there yet: 9C9ECB01 5.87-6.47 s central objects 426 -> 164..330 -> 655). Events = a frame change of
+    # >= EV_MIN cells after a quiet stretch; events <= 2 frames apart are one event (a fade over two frames). The view
+    # between two events may drift a little (slow ease-out tail: median <= QUIET, max <= 2 x EV_MIN changed cells).
+    # A plain FP <-> 3P cut followed by a swing or a walk is not a band: the view after the cut shows as much as before.
+    if objc is None:
+        return spans, 'image-only (no frames)'
+    cl = []                                   # runs of changing frames (gaps <= 2 frames merged)
     for i in range(1, n):
-        q = sorted(cnt[max(1, i - 3):i])
-        if cnt[i] >= EV_MIN and (not q or q[len(q) // 2] <= 4):
-            ev.append(i)
-    for a, b in zip(ev, ev[1:]):
-        if b - a >= 2 and t[b] - t[a] <= BAND_MAX and max(cnt[a + 1:b]) <= 6:   # a static intermediate view
+        if cnt[i] >= EV_MIN:
+            if cl and i - cl[-1][1] <= 2:
+                cl[-1] = (cl[-1][0], i)
+            else:
+                cl.append((i, i))
+    ev = []                                   # view events: short runs (<= 3 frames) after a quiet stretch; a swing or a
+    for a0, a1 in cl:                         # walk is a long run of changes, not a view switch (9C9ECB01 42.90 s)
+        q = sorted(cnt[max(1, a0 - 3):a0])
+        if a1 - a0 <= 2 and (not q or q[len(q) // 2] <= 4):
+            ev.append((a0, a1))
+    for (a0, a), (b, _) in zip(ev, ev[1:]):
+        mid = sorted(cnt[a + 1:b])
+        if b - a < 2 or t[b] - t[a] > BAND_MAX or mid[len(mid) // 2] > QUIET or mid[-1] > 2 * EV_MIN:
+            continue
+        before = objc[max(0, a0 - 1)]; after = objc[min(n - 1, b + 1)]
+        during = sorted(objc[a:b])[(b - a) // 2]
+        if os.environ.get("AR_DEBUG"): print("span", round(t[a], 2), round(t[b], 2), "cnt a,b", cnt[a0:a1 + 1] if False else cnt[a], cnt[b], "objc", before, during, after, file=sys.stderr)
+        if during <= LESS * min(before, after) and t[b] - t[a] >= BAND_MIN:   # shorter = oneview's single-frame glitches
             spans.append((a, b))
     return spans, 'image-only'
 
 
 def check_fragments(F, t, cnt, views):
     import numpy as np
-    spans, how = band_spans(t, cnt, views)
+    objc = [int(objects(f)[:, NC * CS // 4:3 * NC * CS // 4].sum()) for f in F] if not any(v is not None for v in views) else None
+    spans, how = band_spans(t, cnt, views, objc)
     hudpx = np.zeros((SR * CS, W), bool)
     x0, y0, x1, y1 = HUDBOX
     hudpx[int(y0 * H):int(y1 * H) + 1, int(x0 * W):int(x1 * W) + 1] = True
     hudpx[:int(0.05 * H)] = True
     flags = []
     for a, b in spans:
-        pre = dilate(objects(F[max(0, a - 1)]), 2)
+        pre = dilate(objects(F[max(0, a - 1)]), PRE_DIL)   # a viewmodel that shifts a few px is not new (2E66 27.87 s)
         for i in range(a, b):
             new = objects(F[i]) & ~pre & ~hudpx
             cm = new.reshape(SR, CS, NC, CS).sum((1, 3)) >= 6
@@ -485,6 +509,16 @@ def segments(F, maxshift=14, maxres=5.0, minlen=30):
         if i < n:
             a = i; ref = band_luma(F[i]); sh = [(0, 0)]
     return segs
+
+
+def still_plate(F, plate_path):
+    """a still (screenshot) has no camera segment: its plate is a screenshot of the same spot without the viewmodel
+    (e.g. XBMESH xbm-C-holstered.png), registered on the still by phase correlation on the sky/horizon band."""
+    import numpy as np
+    P = load(plate_path)[0][0].astype(np.int16)
+    win = np.outer(np.hanning(60), np.hanning(W)).astype(np.float32)
+    dy, dx = shift_of(band_luma(P), band_luma(F[0]), win)
+    return [(0, 1, 0, [(dy, dx)])], [P]
 
 
 def plate_of(F, seg, k=61):
@@ -595,7 +629,7 @@ def check_weapon(F, t, segs, plates, views, sts, weapon, refs):
     return flags, 'scored %d frames, states %s' % (n_scored, ','.join(sorted(lib)))
 
 
-def ref_add(video, weapon, refs, ev=None, offset=None, stamp=None, vmrec=None, states_keep=None, every=0.5):
+def ref_add(video, weapon, refs, ev=None, offset=None, stamp=None, vmrec=None, states_keep=None, every=0.5, plate=None):
     """store reference frames (foreground mask vs the take plate + colours) per state of an accepted take."""
     import numpy as np
     F, t = load(video)
@@ -606,10 +640,14 @@ def ref_add(video, weapon, refs, ev=None, offset=None, stamp=None, vmrec=None, s
     views, sts, _, src = frame_views(t, cnt, stamp, vmrec)
     es, _ = ev_states(t, ev, offset, video)
     sts = [es[i] or sts[i] for i in range(len(F))]
-    segs = segments(F)
+    if len(F) == 1:                       # a still: --plate (same spot, no viewmodel) + --states <its state>
+        if not (plate and states_keep):
+            print('ref add: a still needs --plate <image> and --states <state>'); return 0
+        sts = [states_keep[0]]; segs, plates = still_plate(F, plate)
+    else:
+        segs = segments(F); plates = [plate_of(F, s) for s in segs]
     n = 0; last = {}
-    for s in segs:
-        P = plate_of(F, s)
+    for s, P in zip(segs, plates):
         a, b, _, sh = s
         for i in range(a, b):
             st = sts[i]
@@ -712,7 +750,8 @@ def guess_weapon(video):
 ALL = ('oneview', 'fragments', 'occluder', 'weapon', 'overlay', 'cursor', 'openground')
 
 
-def run(video, out, ev=None, vmrec=None, stamp=None, offset=None, weapon=None, refs=REFS, name=None, checks=ALL, crops=True):
+def run(video, out, ev=None, vmrec=None, stamp=None, offset=None, weapon=None, refs=REFS, name=None, checks=ALL, crops=True,
+        plate=None, state=None):
     import numpy as np
     name = name or os.path.splitext(os.path.basename(video))[0]
     os.makedirs(out, exist_ok=True)
@@ -724,7 +763,7 @@ def run(video, out, ev=None, vmrec=None, stamp=None, offset=None, weapon=None, r
     cnt, steps = step_counts(F)
     views, sts, changes, vsrc = frame_views(t, cnt, stamp, vmrec)
     es, eoff = ev_states(t, ev, offset, video)
-    sts = [es[i] or sts[i] for i in range(len(F))]
+    sts = [es[i] or sts[i] or state for i in range(len(F))]
     lines = ['video %s frames=%d length=%.2f s view=%s states=%s weapon=%s' % (
         video, len(F), t[-1] if len(t) else 0, vsrc, ('ev offset %.2f' % eoff) if eoff is not None else 'rec' if any(sts) else 'none', weapon)]
     allf = []
@@ -743,6 +782,8 @@ def run(video, out, ev=None, vmrec=None, stamp=None, offset=None, weapon=None, r
         lines.append('fragments: band spans (%s) %s%s flags=%d' % (how, spans[:10], '...' if len(spans) > 10 else '', len(fl)))
     segs = segments(F) if len(F) > 1 and ('occluder' in checks or 'weapon' in checks) else []
     plates = [plate_of(F, s) for s in segs]
+    if len(F) == 1 and plate:
+        segs, plates = still_plate(F, plate)
     share = {}
     if 'occluder' in checks:
         fl, share = check_occluder(F, t, segs, plates, views, weapon)
@@ -830,10 +871,16 @@ def selftest(corpus, workers, refs):
         if len(p) >= 7 and p[2].startswith('autoreview:') and p[6] in ('ok', 'kept') and p[3] in ('FAIL', 'PASS'):
             rows.append(p)
     tmp = '/tmp/autoreview-selftest'
-    jobs = {}
+    jobs = {}; extra = {}
     for p in rows:
-        jobs.setdefault(os.path.join(corpus, p[0]), os.path.join(tmp, re.sub(r'\W+', '_', p[0])))
-    res = dict(pool_map([(v, o, dict(refs=refs, crops=False, checks=('oneview', 'fragments', 'occluder', 'weapon')))
+        v = os.path.join(corpus, p[0])
+        jobs.setdefault(v, os.path.join(tmp, re.sub(r'\W+', '_', p[0])))
+        notes = p[7] if len(p) > 7 else ''
+        for k in ('plate', 'state', 'weapon'):           # stills: plate=<corpus file> state=<state>; weapon=<class>
+            m = re.search(r"(?:^|\s)%s=(\S+)" % k, notes)
+            if m:
+                extra.setdefault(v, {})[k] = os.path.join(corpus, m.group(1)) if k == 'plate' else m.group(1)
+    res = dict(pool_map([(v, o, dict(refs=refs, crops=False, checks=('oneview', 'fragments', 'occluder', 'weapon'), **extra.get(v, {})))
                          for v, o in jobs.items()], workers))
     bad = 0
     for p in rows:
@@ -868,18 +915,20 @@ def main():
     for k in ('ev', 'vmrec', 'stamp', 'weapon', 'name', 'labels'):
         p.add_argument('--' + k)
     p.add_argument('--offset', type=float); p.add_argument('--refs', default=REFS); p.add_argument('--no-crops', action='store_true')
+    p.add_argument('--plate', help='still only: screenshot of the same spot without the viewmodel'); p.add_argument('--state', help='state of a still')
     p.add_argument('--checks', default=','.join(ALL))
     p = sp.add_parser('backfill'); p.add_argument('outroot'); p.add_argument('videos', nargs='+')
     p.add_argument('--workers', type=int, default=6); p.add_argument('--refs', default=REFS)
     p.add_argument('--checks', default='oneview,fragments,occluder,weapon'); p.add_argument('--no-crops', action='store_true')
     p = sp.add_parser('ref'); p.add_argument('action', choices=('add', 'list')); p.add_argument('video', nargs='?'); p.add_argument('weapon', nargs='?')
     p.add_argument('--ev'); p.add_argument('--stamp'); p.add_argument('--vmrec'); p.add_argument('--offset', type=float)
-    p.add_argument('--states'); p.add_argument('--refs', default=REFS)
+    p.add_argument('--states'); p.add_argument('--refs', default=REFS); p.add_argument('--plate')
     p = sp.add_parser('selftest'); p.add_argument('--corpus', default='/mnt/c/KenshiTestRuns/corpus')
     p.add_argument('--workers', type=int, default=6); p.add_argument('--refs', default=REFS)
     a = ap.parse_args()
     if a.cmd == 'run':
-        run(a.video, a.out, a.ev, a.vmrec, a.stamp, a.offset, a.weapon, a.refs, a.name, tuple(a.checks.split(',')), not a.no_crops)
+        run(a.video, a.out, a.ev, a.vmrec, a.stamp, a.offset, a.weapon, a.refs, a.name, tuple(a.checks.split(',')), not a.no_crops,
+            a.plate, a.state)
     elif a.cmd == 'backfill':
         jobs = [(v, os.path.join(a.outroot, re.sub(r'\W+', '_', os.path.splitext(v.replace('/mnt/c/', ''))[0])[-90:]),
                  dict(refs=a.refs, checks=tuple(a.checks.split(',')), crops=not a.no_crops)) for v in a.videos]
@@ -890,7 +939,7 @@ def main():
             for d in sorted(glob.glob(os.path.join(a.refs, '*', '*'))):
                 print('%s %d' % (os.path.relpath(d, a.refs), len(glob.glob(os.path.join(d, '*.npz')))))
         else:
-            sys.exit(0 if ref_add(a.video, a.weapon, a.refs, a.ev, a.offset, a.stamp, a.vmrec, a.states and a.states.split(',')) else 1)
+            sys.exit(0 if ref_add(a.video, a.weapon, a.refs, a.ev, a.offset, a.stamp, a.vmrec, a.states and a.states.split(','), plate=a.plate) else 1)
     elif a.cmd == 'selftest':
         sys.exit(0 if selftest(a.corpus, a.workers, a.refs) else 1)
     else:
