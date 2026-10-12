@@ -20,6 +20,11 @@ as the target margin is reached.
   bounds  [(lo, hi)] per coordinate (clipped); round_to: evaluations are memoised on x rounded to this (no re-evaluating
           a point the search already visited; the lab result cache labcache.py also skips identical replays)
   workers parallel f() calls when no batch function is given (default LABNICE_J or 4)
+  proc_batch(fn, workers, on_result)  batch function over a persistent fork process pool: use it when f is Python-heavy
+          (parsing/metrics under the GIL; a thread pool then runs ~1 core). fn(x) -> value or (value, extra); on_result(x,
+          value, extra) runs in the parent (BEST printing etc). Default workers LABNICE_J or 4; set the objective's own inner
+          pool to 1-2 (e.g. OBJ_J=1) so workers x inner <= the labnice budget. Measured 2026-10-11 (strokefix obj, 12-point
+          CMA generation, 10 replays each): ThreadPool(2) x OBJ_J=5 104.6 s, proc_batch(12) x OBJ_J=1 13.6 s (7.7x).
 
 CLI (any command that prints the objective): optim.py run --x0 0.1,0.2 --step 0.05,0.05 [--method cma] [--target T]
   [--maximize] [--maxevals N] [--bounds lo:hi,lo:hi] [--regex 'score=([-0-9.e]+)'] -- <command with {0} {1} ...>
@@ -27,6 +32,38 @@ CLI (any command that prints the objective): optim.py run --x0 0.1,0.2 --step 0.
 """
 import math, os, re, shlex, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
+
+
+_PB_FN = None
+
+
+def _pb_call(x):
+    return _PB_FN(x)
+
+
+def proc_batch(fn, workers=None, on_result=None):
+    """batch(xs) -> values over a persistent fork ProcessPoolExecutor (see header). fn may be any callable (closures ok:
+    the pool forks after fn is set, so nothing is pickled but x and the result)."""
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+    global _PB_FN
+    _PB_FN = fn
+    workers = workers or int(os.environ.get('LABNICE_J') or 4)
+    pool = [None]
+
+    def batch(xs):
+        if pool[0] is None:
+            pool[0] = ProcessPoolExecutor(workers, mp_context=mp.get_context('fork'))
+        outs = list(pool[0].map(_pb_call, [list(x) for x in xs]))
+        vals = []
+        for x, r in zip(xs, outs):
+            v, extra = (r[0], r[1]) if isinstance(r, tuple) else (r, None)
+            if on_result:
+                on_result(list(x), v, extra)
+            vals.append(v)
+        return vals
+    batch.shutdown = lambda: pool[0] and pool[0].shutdown()
+    return batch
 
 
 class Result:
