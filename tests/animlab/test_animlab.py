@@ -439,6 +439,19 @@ class T(unittest.TestCase):
         self.assertAlmostEqual(M.visible_travel([(-100, 450), (1700, 450)]), 1600 / math.hypot(1600, 900), 3)
         ok, gated, t = M.path_one(1, short); self.assertFalse(gated)   # backhand accepted: info (SR13)
 
+    def test_rec_edge_sr41(self):   # SR41 18:30: rising stroke return: edge away from the camera right after the cut
+        def run(zs):   # swing frames u .70.. .98 step .04 then 3 rest frames; cut (path) ends at u .76
+            us = [0.70 + 0.04 * k for k in range(8)]
+            F = [dict(swu=u) for u in us] + [dict() for _ in range(3)]
+            P = [dict(mu=(0.0, 0.0, z)) for z in zs]
+            S = [(u, i, (0, 0)) for i, u in enumerate(us) if u <= 0.761]
+            return M.rec_edge(F, P, list(range(8)), S)
+        du, z = run([-0.8, -0.8, -0.8, -0.1, 0.4, 0.5, 0.6, 0.7, 0.8, 0.8, 0.8])   # turns 2 frames after the cut
+        self.assertAlmostEqual(du, 0.08, 3); self.assertLessEqual(du, M.REC_DU)
+        du, z = run([-0.8, -0.8, -0.8, -0.8, -0.7, -0.5, -0.4, 0.0, 0.3, 0.5, 0.8])   # game pt17v2s3a: only at rest
+        self.assertGreater(du, M.REC_DU)
+        du, z = run([-0.8] * 11); self.assertIsNone(du)
+
     def test_swing_rules_sweep_wexit_rep(self):   # Shay 17:05 angular sweep + repeatable path, 17:25 wind-up exit continuity
         def cam(x, y, z=10.0):   # screen px -> camera numbers at depth z
             return ((x - 800) / 800.0 * M.TX * z, (450 - y) / 450.0 * M.TY * z, z)

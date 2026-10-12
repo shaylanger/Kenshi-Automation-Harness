@@ -1872,8 +1872,30 @@ def swing_rules(F, P, idx, stk, sweep_min=SWEEP_MIN):
     return ok and g, ('sweep=%s/%.0f%s,' % ('-' if sw is None else '%.0f' % sw, sweep_min, '' if g else ':BAD')) + t
 
 
+# SR41 (Shay 2026-10-11, PT17-v2 review): rising stroke return: as soon as the cut ends the blade turns its edge away
+# from the player during the return (old key-arc s3 did, z >= -0.36 throughout; screen-line s3 kept z -0.8 until rest).
+# Edge = rendered mu z in camera space (+ = away). Gate: z >= REC_Z within REC_DU swing u after the cut end (last path
+# frame); frames after the swing count as u 1 + 0.04/frame. Separates game rec pt17v2s3a (du .22) from fixed lab
+# replays (.13) and e6c5 (0). Gated for REC_GATE strokes, info for the others.
+REC_Z, REC_DU, REC_GATE = -0.3, 0.15, (3,)
+
+
+def rec_edge(F, P, idx, S, z=REC_Z):
+    """(du, z at that frame) first swing-u distance after the cut end where the edge is away (mu z >= z), du None = never."""
+    if not S:
+        return None, None
+    u0, last = S[-1][0], idx[-1]
+    for i in list(idx) + list(range(last + 1, min(len(F), last + 8))):
+        u = F[i].get('swu', 0.0) if i <= last else 1.0 + 0.04 * (i - last)
+        if u <= u0 or not P[i].get('mu'):
+            continue
+        if P[i]['mu'][2] >= z:
+            return u - u0, P[i]['mu'][2]
+    return None, None
+
+
 def path_swing(F, P, idx, stk, S, **kw):
-    """one swing: (ok, gated, text) = path_one (or thrust_one) + swing_rules."""
+    """one swing: (ok, gated, text) = path_one (or thrust_one) + swing_rules (+ SR41 return edge rec_edge)."""
     info = kw.get('info', PATH_INFO)
     if stk in PATH_THRUST:
         g, t = thrust_one(stk, S)
@@ -1882,6 +1904,11 @@ def path_swing(F, P, idx, stk, S, **kw):
     else:
         g, gated, t = path_one(stk, S, **kw)
     rg, rt = swing_rules(F, P, idx, stk)
+    if stk not in PATH_THRUST and S:
+        du, _ = rec_edge(F, P, idx, S)
+        rok = du is not None and du <= REC_DU
+        rt += ',rec=%s/%.2f%s%s' % ('-' if du is None else '%.2f' % du, REC_DU, '' if rok else ':BAD', '' if stk in REC_GATE else '(info)')
+        rg = rg and (rok or stk not in REC_GATE)
     return g and rg, gated, t + ',' + rt
 
 
