@@ -1363,6 +1363,11 @@ def _both(a, b):
 # carry the weapon read; a weapon framed so the hands leave the view reads as a floating blade / plank).
 FRAMED_MIN = {'ready': 0.80, 'block': 0.80, 'swing': 0.50}
 FRAMED_MARGIN = 0.02
+# SR41 (Shay 18:30, PT17-v2 accepted "looks amazing"): the straight screen-line strokes 0/3 carry the hand below the frame
+# mid-stroke by design (accepted game recs sjudge-pt17v2-a pt17v2s0 framed swing 0.19, s3a 0.31; same 1H stroke 0 on the
+# Buster rec 0.12); swing frames of these strokes are reported (framed_swing_line, info) and never gate (check vs rule:
+# Misses 2026-10-11 "framed swing vs SR41", weapon-classes). Other strokes keep the swing minimum.
+FRAMED_SWING_INFO = (0, 3)
 
 
 def framed_check(F, P, mins=None, margin=FRAMED_MARGIN):
@@ -1377,6 +1382,8 @@ def framed_check(F, P, mins=None, margin=FRAMED_MARGIN):
         st = p['state']
         if st not in mins:
             continue
+        if st == 'swing' and r.get('stroke') in FRAMED_SWING_INFO:
+            st = 'swing_line'
         e = S.setdefault(st, [0, 0])
         e[0] += 1
         e[1] += inside(_uproj(p['J'][2])) or inside(_uproj(p['J'][5]))
@@ -1387,6 +1394,9 @@ def framed_check(F, P, mins=None, margin=FRAMED_MARGIN):
         if st in S:
             n, k = S[st]; g = k >= mins[st] * n; ok = ok and g
             txt.append('framed_%s=%.2f/%.2f(%d/%d)%s' % (st, k / float(n), mins[st], k, n, '' if g else ':BAD'))
+    if 'swing_line' in S:
+        n, k = S['swing_line']
+        txt.append('framed_swing_line=%.2f(%d/%d,info)' % (k / float(n), k, n))
     return ok, txt
 
 
