@@ -212,6 +212,23 @@ swing (2E66 33.67 s; a stamp/vmrec view source covers it); occluder flags a full
   never paused; stale recording flags (marker or ffmpeg gdigrab older than 30 min) are ignored. `lab-recpause.sh
   --status|--which`, `labnice.sh --status`, selftest `tools/automation/labnice-selftest.sh` (private LAB_D).
 - weapon_matrix temp dirs (`/tmp/animlab-wm-replay*`) are removed at exit.
+- **One OpenBLAS thread per python** (gpu-lab 2026-10-11): `tools/automation/wsl-blas1.sh install|remove|status`
+  (KenshiModding repo, installed in WSL) makes every WSL python3 run numpy with `OPENBLAS_NUM_THREADS=1` (system
+  sitecustomize.py; `KAH_BLAS_THREADS=n|keep` overrides). Each numpy import used to start nproc (32) busy-spinning
+  threads, or LABNICE_J under labnice: `import numpy` 1.35 s CPU (unset) / 0.37 s (=6) vs 0.07 s; one pasweep.py variant
+  2.26 -> 0.94 s CPU, identical output. labnice.sh's OPENBLAS cap is overridden by it (OMP/MKL caps still apply).
+- **forkbatch** `components/KenshiFP/animlab/forkbatch.py <jobs> -j N` (KenshiModding repo): drop-in for
+  `xargs -P N -I{} -d '\n' bash -c '{}' < jobs` on variant sweeps whose lines are `python3 <script>.py args`
+  (polearm pasweep.py, any per-variant evaluator). One warm parent (numpy + recfmt/metrics/weapon_matrix imported) forks
+  a child per job (no interpreter start, no state leak, script read at run time); in the child recfmt.parse and
+  metrics.rendered are memoised (judge() + the caller recomputed both 2-3x per replay). Use it inside labnice:
+  `labnice.sh -s 6 python3 forkbatch.py jobs.txt -j 6 > out.txt 2>&1`. `--check K` = agreement selftest (K jobs forked vs
+  plain bash, byte compare). Measured 2026-10-11 (24 fresh Naginata 2-stroke variants, -j 6, shared load): xargs
+  (BLAS 6) 51 CPU-s -> forkbatch 33 CPU-s (-35%), 9.5 -> 7.2 s wall; cached-replay variants ~2x less CPU; checks
+  6/6 fresh + 12/12 cached identical. What stays: the adapter replay (~0.45 s CPU per replay, ~70% of a variant now;
+  75% of it the elbow search) is the KenshiFP C viewmodel, a branchy per-frame state machine over globals: it stays on
+  the CPU (a GPU port = a second copy of the game code; WSL CUDA is off-limits, /etc/kah-no-gpu). Next cut there:
+  fewer variants (optim.py CMA/early stop instead of random 1300-variant grids) and replay result reuse (labcache).
 
 ## Metrics (per state)
 
