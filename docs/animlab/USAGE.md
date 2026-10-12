@@ -27,6 +27,9 @@ hash offline; `tools/animlab/fptables.py make|show|check|expand` writes variant 
 ```
 # build the KenshiFP adapter against a read-only copy of the current source (+ the rec-native patch if not merged yet)
 bash components/KenshiFP/animlab/build.sh --sync [--patch pending-fixes/kfp-rec-native-meta.py] --out /root/animlab-build/kfpvm_cur
+# adapter of EXACTLY a game take's build (replaying a take with any other adapter mispredicts): prints the path, builds +
+# caches kfpvm_src-<sha8> from the pipeline source snapshot on first use, writes <adapter>.d/MATCHES
+bash components/KenshiFP/animlab/adapter-for.sh <take.vmrec.txt | sha8> [--drive]
 # metrics of one recording (game or replay)
 python3 tools/animlab/animlab.py metrics rec.txt
 # replay + compare with the game
