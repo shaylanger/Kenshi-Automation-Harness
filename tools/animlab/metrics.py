@@ -831,8 +831,10 @@ SEE_MID = (0.40, 0.58)   # mid-stroke crossing: blade must be seen here even whe
 
 
 def _tip_onscreen(p, L=SEE_L, zn=3.0):
+    # the real view (TX/TY, = path/vmcheck onscr): the .85/1.5 sample cull of blade_seen counted a tip up to 21% of the
+    # half-height below the bottom edge as on screen, so an SR38 off-screen end (E6 s2 overhead, tip y/z -.83) was judged
     c = add(p['mp'], mul(nz(p['mf']), L))
-    return c[2] >= zn and abs(c[1] / c[2]) <= .85 and abs(c[0] / c[2]) <= 1.5
+    return c[2] >= zn and abs(c[1] / c[2]) <= TY and abs(c[0] / c[2]) <= TX
 # seen counts an edge-on crossing between two frames as 0 (sampling-independent: a 30 fps video catches it at random)
 
 

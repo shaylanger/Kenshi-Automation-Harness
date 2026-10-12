@@ -439,6 +439,13 @@ class T(unittest.TestCase):
         self.assertAlmostEqual(M.visible_travel([(-100, 450), (1700, 450)]), 1600 / math.hypot(1600, 900), 3)
         ok, gated, t = M.path_one(1, short); self.assertFalse(gated)   # backhand accepted: info (SR13)
 
+    def test_tip_onscreen_real_view(self):   # SR38/17:10: a tip past the screen edge is off screen (not the .85 cull)
+        def p(ty, z=20.0):   # blade straight into the screen, tip at screen y/z = ty, depth z
+            return dict(mp=(0.0, ty * z, z - M.SEE_L), mf=(0.0, 0.0, 1.0))
+        self.assertFalse(M._tip_onscreen(p(-0.8)))   # past the bottom edge (TY .70), inside the old .85 cull
+        self.assertTrue(M._tip_onscreen(p(-0.6)))
+        self.assertFalse(M._tip_onscreen(dict(mp=(1.4 * 20, 0.0, 20 - M.SEE_L), mf=(0.0, 0.0, 1.0))))   # x past TX 1.245
+
     def test_rec_edge_sr41(self):   # SR41 18:30: rising stroke return: edge away from the camera right after the cut
         def run(zs):   # swing frames u .70.. .98 step .04 then 3 rest frames; cut (path) ends at u .76
             us = [0.70 + 0.04 * k for k in range(8)]
