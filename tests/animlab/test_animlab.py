@@ -183,8 +183,11 @@ class T(unittest.TestCase):
         good = dict(arc_ok=0.95, arc_p05=0.8, arc_n=80, wb_max=20.0)
         self.assertTrue(M.arc_gate({'swing': good}, {'swing': 0.85})[0])
         ok, txt = M.arc_gate({'swing': dict(good, arc_ok=0.5)}, {'swing': 0.85})
-        self.assertFalse(ok); self.assertTrue(txt[0].endswith(':BAD'))
+        self.assertFalse(ok); self.assertIn(':BAD', txt[0])
         self.assertFalse(M.arc_gate({'swing': dict(good, wb_max=107.0)}, {'swing': 0.85})[0])   # lead by wrist fold
+        # SR43: only wrist-on-screen frames judge wb (kfs0b: 82.7 all off screen, 30.5 on screen)
+        self.assertTrue(M.arc_gate({'swing': dict(good, wb_max=82.7, wb_vis_max=30.5, wb_vis_n=9, wb_n=57)}, {'swing': 0.85})[0])
+        self.assertFalse(M.arc_gate({'swing': dict(good, wb_max=82.7, wb_vis_max=60.0, wb_vis_n=9, wb_n=57)}, {'swing': 0.85})[0])
         self.assertEqual(M.arc_gate({}, {'swing': 0.85}), (False, ['swing:NO_FAST_FRAMES']))
 
     def test_bolt_check(self):   # C3: a bolt that moves on the weapon fails, a rigid one passes
@@ -399,7 +402,7 @@ class T(unittest.TestCase):
         self.assertLessEqual(m['edge'], M.PATH_EDGE)
         hook = [(200 + 60 * i, 800 - 60 * i) for i in range(9)] + [(680 + 30 * k, 320 + 40 * k) for k in range(1, 5)]
         ok, gated, t = M.path_one(3, [(0.3 + 0.03 * i, i, p) for i, p in enumerate(hook)])
-        self.assertFalse(ok, t); self.assertIn('late=', t); self.assertIn(':BAD', t.split('late=')[1].split(',')[0])
+        self.assertFalse(ok, t); self.assertIn('hook=', t); self.assertIn(':BAD', t.split('hook=')[1].split(',')[0])
         ok, gated, t = M.path_one(1, [(0.3 + 0.03 * i, i, p) for i, p in enumerate(hook)])
         self.assertFalse(gated)                                                        # stroke 1 = info (accepted look)
         ok, gated, t = M.path_one(0, [(0.3 + 0.03 * i, i, (200 + 30 * i, 700 - 30 * i)) for i in range(13)])

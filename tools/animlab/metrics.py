@@ -125,6 +125,8 @@ def rendered(F):
             tip = add(tip, mul(p['mu'], 0.84))
         p['tip'] = tip
         p['tpx'] = proj(tip)
+        q = proj(J[5])   # weapon-hand wrist on screen (arc wb judges only these frames, SHAY_RULES SR43)
+        p['wvis'] = q is not None and 0 <= q[0] <= W_PX and 0 <= q[1] <= H_PX
         out.append(p)
     return out
 
@@ -175,6 +177,7 @@ def state_table(P, skip=0):
     out = {}
     for s, ps in T.items():
         wb = [p['wb'] for p in ps if p['wb'] is not None]
+        wbv = [p['wb'] for p in ps if p['wb'] is not None and p.get('wvis', True)]
         ed = [p['edge'] for p in ps]
         ar = [p["arc"] for p in ps if p.get("arc") is not None]
         out[s] = dict(n=len(ps), wb_p95=pct(wb, .95), wb_max=max(wb) if wb else float('nan'),
@@ -186,7 +189,8 @@ def state_table(P, skip=0):
                       jit_p95=pct([p['jit'] for p in ps if p['jit'] is not None], .95),
                       step_p95=pct([p['step'] for p in ps if p['step'] is not None], .95),
                       arc_ok=sum(1 for x in ar if x >= 0.7) / len(ar) if ar else float("nan"), arc_p05=pct(ar, .05), arc_n=len(ar),
-                      move_dm=float('nan'), move_deg=float('nan'))
+                      move_dm=float('nan'), move_deg=float('nan'),
+                      wb_vis_max=max(wbv) if wbv else 0.0, wb_vis_n=len(wbv), wb_n=len(wb))
     # C1 (KenshiFP 2026-10-09: the crossbow aim stayed in the ready pose and passed): how far each state moves the weapon
     # from the median ready pose. Held states (aim, block) by their median pose, paths (swing, reload, ...) by their
     # largest frame. move_dm = grip displacement (dm), move_deg = blade/stock axis angle (deg). See moves_ok().
@@ -247,7 +251,9 @@ ARC_OK, ARC_SHARE, ARC_WB = 0.7, 0.85, 50.0   # E1 gate: per-frame edge_arc >= A
 def arc_gate(table, spec, wb_lim=ARC_WB):
     """E1 gate (sword edge leads the arc): spec = {state: share}. Each state must exist with fast frames, have
     arc_ok >= share and a sane wrist (wb_max <= wb_lim deg; a patch that turns the edge by folding the wrist fails).
-    Returns (ok, [text per state])."""
+    wb_max counts only frames with the weapon-hand wrist ON SCREEN (SR43, Shay 2026-10-11 on keyframe take kfs0b: "I can
+    not see the wrist at all so I can't even tell if it is moving weirdly"; 82.7 deg there was all off screen); the
+    all-frames value is reported as wb_all= (info). Returns (ok, [text per state])."""
     ok, txt = True, []
     for s, share in spec.items():
         m = table.get(s)
@@ -255,10 +261,12 @@ def arc_gate(table, spec, wb_lim=ARC_WB):
             ok = False
             txt.append(s + ':NO_FAST_FRAMES')
             continue
-        good = m['arc_ok'] >= share and m['wb_max'] <= wb_lim
+        wbv = m.get('wb_vis_max', m['wb_max'])
+        good = m['arc_ok'] >= share and wbv <= wb_lim
         ok = ok and good
-        txt.append('%s:arc_ok=%.2f/%.2f,arc_p05=%.2f,n=%d,wb_max=%.1f/%.0f%s' % (
-            s, m['arc_ok'], share, m['arc_p05'], m['arc_n'], m['wb_max'], wb_lim, '' if good else ':BAD'))
+        txt.append('%s:arc_ok=%.2f/%.2f,arc_p05=%.2f,n=%d,wb_max=%.1f/%.0f%s,wb_onscreen=%d/%d,wb_all=%.1f(info)' % (
+            s, m['arc_ok'], share, m['arc_p05'], m['arc_n'], wbv, wb_lim, '' if good else ':BAD',
+            m.get('wb_vis_n', m.get('n', 0)), m.get('wb_n', m.get('n', 0)), m['wb_max']))
     return ok, txt
 
 
@@ -927,7 +935,7 @@ def swings(F, P):
 def blade_check(F, P, snap_max=SNAP_MAX, see_min=SEE_MIN, win=SNAP_WIN, snap_u=SNAP_U, u0=SEE_U0, u1=SEE_U1):
     """E6 per swing: (1) snap = max sword rotation over one video frame (win s) in [top, top+snap_u], top = slowest
     window of the wind-up end (u ARC_U0-.1 .. ARC_U0+.12); (2) seen = per-frame min blade_seen over u [u0, u1]."""
-    txt, ok, ws, wv = [], True, None, None
+    txt, ok, ws, wv, fl = [], True, None, None, []
     for k, idx in enumerate(swings(F, P)):
         rate = []
         for n, i in enumerate(idx):
@@ -947,9 +955,23 @@ def blade_check(F, P, snap_max=SNAP_MAX, see_min=SEE_MIN, win=SNAP_WIN, snap_u=S
         # judged (an on-screen blade there is still judged, e.g. an end-on hairline). Off-screen STARTS: R32 wexit.
         g = [(blade_seen(P[i]), F[i]['swu'], i) for i in idx if u0 <= F[i]['swu'] <= u1
              and (SEE_MID[0] <= F[i]['swu'] <= SEE_MID[1] or _tip_onscreen(P[i]))]
-        seen = [(x[0][0], x[1], x[2]) for x in g]
         # between frames: a flat-facing sign change means the blade passed edge-on (seen 0) whatever frames were sampled
-        seen += [(0.0, g[n + 1][1], g[n + 1][2]) for n in range(len(g) - 1) if g[n][0][2] * g[n + 1][0][2] < 0]
+        sv = [0.0 if n and g[n - 1][0][2] * g[n][0][2] < 0 else g[n][0][0] for n in range(len(g))]
+        # SR44 (Shay 2026-10-11, keyframe take kfs0b frame 223 u .82: "the blade does not look edge on at the end (or maybe it
+        # just adjusts very quickly?) as the sword returns to the resting state it looks perfectly fine"): after the
+        # mid-stroke crossing (u > SEE_MID[1]) ONE isolated edge-on frame (both neighbours seen) is not judged; two or more
+        # in a row still fail, and the crossing itself stays strict.
+        # Only an EDGE-ON event is excused: a flat-facing sign change between two frames that are themselves seen (kfs0b
+        # frame 223: a one-frame roll of the flat, invisible on a two-sided blade), or a frame turned edge-on whose blade
+        # still has >= half the swing's median on-screen length; an END-ON frame (blade pointing into the screen, no
+        # length: mutation rec-endon-blade-frame) still fails.
+        lo = lambda n: 0 <= n < len(sv) and sv[n] < see_min
+        msl = sorted(x[0][1] for x in g)[len(g) // 2] if g else 0.0
+        flash = [n for n in range(len(sv)) if lo(n) and g[n][1] > SEE_MID[1] and not lo(n - 1) and not lo(n + 1)
+                 and (g[n][0][0] >= see_min or g[n][0][1] >= 0.5 * msl)]   # roll-through between two seen frames, or edge-on with length
+        if flash:
+            fl.append('swing%d(frame%d),u=%.2f' % (k, g[flash[0]][2], g[flash[0]][1]))
+        seen = [(sv[n], g[n][1], g[n][2]) for n in range(len(g)) if n not in flash]
         if seen:
             mn = min(seen)
             if wv is None or mn[0] < wv[1]:
@@ -962,6 +984,8 @@ def blade_check(F, P, snap_max=SNAP_MAX, see_min=SEE_MIN, win=SNAP_WIN, snap_u=S
     if wv:
         good = wv[1] >= see_min; ok = ok and good
         txt.append('seen=%.3f/%.2f%s@swing%d(frame%d),u=%.2f' % (wv[1], see_min, '' if good else ':BAD', wv[0], wv[3], wv[2]))
+    if fl:
+        txt.append('edge_flash=%d(info,1-frame late edge-on SR44):%s' % (len(fl), ';'.join(fl[:3])))
     return ok, txt
 
 
@@ -1293,7 +1317,7 @@ def swing_verdicts(F, P, overhead=(), inline=False):
                                                  '%.0f/step%.1f' % (max(r[0] for r in sr), max(r[1] for r in sr)) if sr else '-')
         Pm = [p if p['state'] != 'swing' or i in keep else dict(p, state='swing_x') for i, p in enumerate(P)]
         ar = [P[i]['arc'] for i in idx if P[i].get('arc') is not None]
-        wb = [P[i]['wb'] for i in idx if P[i]['wb'] is not None]
+        wb = [P[i]['wb'] for i in idx if P[i]['wb'] is not None and P[i].get('wvis', True)]   # SR43 wrist on screen
         bok, btxt = blade_check(F, Pm)
         sok, stxt = stroke_check(F, Pm, overhead)
         pok, ptxt = path_check(F, Pm)   # E6 screen path (Shay 2026-10-11 PT17); pool --checks ...,path (not in the gate pool: s0/s3 fail by design until refitted)
@@ -1625,7 +1649,7 @@ def arc_each(P, share=ARC_SHARE, wb_lim=ARC_WB, state='swing', min_n=OCC_MIN_ARC
         if len(ar) < min_n:
             continue
         n += 1
-        wb = max([P[i]['wb'] for i in r if P[i]['wb'] is not None] or [0.0])
+        wb = max([P[i]['wb'] for i in r if P[i]['wb'] is not None and P[i].get('wvis', True)] or [0.0])   # SR43
         a = sum(1 for x in ar if x >= ARC_OK) / float(len(ar))
         if a < share or wb > wb_lim:
             bad.append('%s@%d:arc_ok=%.2f,wb=%.0f' % (state, r[0], a, wb))
@@ -1664,7 +1688,8 @@ def inline_each(F, P, slack=INL_EACH_SLACK, **kw):
 # ~40-45 deg screen angle (PT17 s3 too steep) and the follow-through ends with the tip near a screen edge (PT17 s0 stopped
 # mid-screen). Per swing, tip = grip + BLADE along the blade, FP camera at zoom 0, 1600x900 (16:9), not clipped:
 #   dev   = max perpendicular distance of any path point from the total-least-squares line / path extent along that line
-#   late  = max perpendicular distance of the last PATH_LATE of the path (by arc length) from the line fitted to the first
+#   late  = (printed 'hook=': end-hook SHAPE, not timing vs the click; SR45 open: Shay has not ruled on it)
+#           max perpendicular distance of the last PATH_LATE of the path (by arc length) from the line fitted to the first
 #           1-PATH_LATE (the stroke's own direction; a late hook tilts an all-points fit and hides in it) / extent
 #   ang   = fitted line angle from the screen horizontal, 0-90 deg (gated for PATH_DIAG strokes)
 #   edge  = end tip distance to the nearest screen edge, min(x/W, 1-x/W, y/H, 1-y/H), 0 when off screen
@@ -1684,7 +1709,7 @@ PATH_ANG = (35.0, 50.0)                 # diagonal strokes: fitted line angle fr
 PATH_DIAG = (0, 3)                      # scripted stroke ids that are diagonals (angle gated); others: angle reported
 PATH_INFO = (1,)                        # SR13: stroke 1 (backhand, accepted) measured, non-blocking (info); stroke 2 (overhead) was info until Shay rejected it in E6 (SR39 18:10): gated
 PATH_MIN_N = 4
-PATH_BAND, PATH_CTR, PATH_FAST = 0.20, 0.12, (0.25, 0.75)
+PATH_BAND, PATH_CTR, PATH_FAST = 0.20, 0.16, (0.25, 0.75)   # ctr 0.12 -> 0.16: SR45 Shay accepted kfs0b 0.148/0.144 ("slightly off center is fine")
 PATH_END_BAND = 0.10                    # SR38 (Shay 18:15): the stroke ENDS with the tip in the outer 10% band opposite its start band (off screen counts); start band stays PATH_BAND (SR14)
 #   trav  = visible tip travel: length of the tip path clipped to the screen / screen diagonal (what Shay sees move).
 #           Gated only for the strokes in PATH_TRAV_MIN (SR39: Shay's E6 review asked ~double tip travel for E6 stroke 0
@@ -1803,7 +1828,7 @@ def path_one(stk, S, dev=PATH_DEV, late=PATH_LATE_MAX, edge=PATH_EDGE, angr=PATH
     tmin = PATH_TRAV_MIN.get(stk)
     g_trav = tmin is None or m['trav'] >= tmin
     ok = g_dev and g_late and g_edge and g_ang and g_span and g_ctr and g_fast and g_trav
-    txt = 'dev=%.3f/%.2f%s,late=%.3f/%.2f%s,ang=%.0f%s%s,edge=%.3f/%.2f%s,len=%.2f,u=%.2f-%.2f,end=%.0f,%.0f(frame%d),n=%d' % (
+    txt = 'dev=%.3f/%.2f%s,hook=%.3f/%.2f%s,ang=%.0f%s%s,edge=%.3f/%.2f%s,len=%.2f,u=%.2f-%.2f,end=%.0f,%.0f(frame%d),n=%d' % (
         m['dev'], dev, bad(g_dev), m['late'], late, bad(g_late), m['ang'],
         '/%.0f-%.0f' % angr if stk in diag else '(info)', bad(g_ang), m['edge'], edge, bad(g_edge), m['len'],
         S[0][0], S[-1][0], m['end'][0], m['end'][1], S[-1][1], m['n']) + ',span=%s%s,ctr=%.3f/%.2f%s,fast=%s/%.2f-%.2f%s' % (
