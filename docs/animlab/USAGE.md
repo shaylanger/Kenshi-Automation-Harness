@@ -232,6 +232,19 @@ swing (2E66 33.67 s; a stamp/vmrec view source covers it); occluder flags a full
   75% of it the elbow search) is the KenshiFP C viewmodel, a branchy per-frame state machine over globals: it stays on
   the CPU (a GPU port = a second copy of the game code; WSL CUDA is off-limits, /etc/kah-no-gpu). Next cut there:
   fewer variants (optim.py CMA/early stop instead of random 1300-variant grids) and replay result reuse (labcache).
+- **Optimizer populations in parallel + on the 4080** (load-balance 2026-10-11). `optim.proc_batch(fn, workers,
+  on_result, inner_env='OBJ_J')`: fork process pool for a Python-heavy objective (a thread pool ran ~1 core under the
+  GIL: 12-point CMA generation 104.6 s -> 13.6 s); `inner_env` gives a batch smaller than the pool the spare slots
+  (CMA x0 alone: OBJ_J=workers). `tools/animlab/lab_remote.py`: `Remote(module, func, adapter=, data=, env=, workers=)`
+  serves the objective on the 4080 (Windows Python at IDLE priority, so its Kenshi lanes keep the CPU; never the 4080's
+  WSL), mingw-builds `<adapter>.exe` from `<adapter>.d`, copies module/adapter/data dirs by content hash; `split_batch(
+  local_batch, rem, to_args, local_workers, on_result)` sends a share of every population there and adapts the share so
+  both sides finish together; any remote error -> those points run locally (nothing lost), `LAB_REMOTE=0` = local only,
+  `LAB_REMOTE_V=1` prints `k=<remote>/<n> local Xs remote Ys` per batch. Windows libm differs in the last digit (max
+  0.002 on a pose dump): use it for optimizers/sweeps, not for gate verdicts; re-check a final optimum locally.
+  Example: `/root/strokefix/opt-par.py` (remote on by default, OPT_REMOTE_J=6). Measured (sjl_v4 s2, 48 evals, 8 local
+  workers, 5090 lab budget shared, 4080 filming 2 lanes): 68 s local -> 60 s with the 4080; a 4080 replay is 0.86 s vs
+  0.47 s in 5090 WSL, so it pays most when the 5090's labnice slots are full. Selftest: `python3 lab_remote.py selftest`.
 
 ## Metrics (per state)
 

@@ -37,13 +37,18 @@ from concurrent.futures import ThreadPoolExecutor
 _PB_FN = None
 
 
-def _pb_call(x):
+def _pb_call(x, inner=None):
+    if inner:   # (env name, value): inner parallelism for this batch size (set in the worker, fork-safe)
+        os.environ[inner[0]] = inner[1]
     return _PB_FN(x)
 
 
-def proc_batch(fn, workers=None, on_result=None):
+def proc_batch(fn, workers=None, on_result=None, inner_env=None):
     """batch(xs) -> values over a persistent fork ProcessPoolExecutor (see header). fn may be any callable (closures ok:
-    the pool forks after fn is set, so nothing is pickled but x and the result)."""
+    the pool forks after fn is set, so nothing is pickled but x and the result). inner_env='OBJ_J': a batch smaller
+    than the pool sets that env var to workers // len(xs) in the workers (the objective's own inner pool), so a 1-point
+    batch (CMA x0, a short last generation, a remote split) still uses every slot (load-balance 2026-10-11: x0 alone
+    9 s at OBJ_J=1)."""
     import multiprocessing as mp
     from concurrent.futures import ProcessPoolExecutor
     global _PB_FN
@@ -54,7 +59,8 @@ def proc_batch(fn, workers=None, on_result=None):
     def batch(xs):
         if pool[0] is None:
             pool[0] = ProcessPoolExecutor(workers, mp_context=mp.get_context('fork'))
-        outs = list(pool[0].map(_pb_call, [list(x) for x in xs]))
+        inner = (inner_env, str(max(1, workers // max(1, len(xs))))) if inner_env else None
+        outs = list(pool[0].map(_pb_call, [list(x) for x in xs], [inner] * len(xs)))
         vals = []
         for x, r in zip(xs, outs):
             v, extra = (r[0], r[1]) if isinstance(r, tuple) else (r, None)
