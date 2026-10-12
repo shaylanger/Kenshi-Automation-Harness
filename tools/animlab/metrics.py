@@ -18,6 +18,7 @@ States: ready, swing, block, swing->block (a block entered straight from a swing
 draw / lower (blends), native (viewmodel faded out by zoom, zf < 0.99), off (no viewmodel). Hitch frames (dt > 0.07 s, or next to one) are left out of jit/step.
 """
 import math
+import os
 from recfmt import sub, add, mul, dot, ln, nz, ang, remap, cross
 
 W_PX, H_PX, TX, TY = 1600.0, 900.0, 1.245, 0.70   # Kenshi FP view: tan half-angles (vmcheck onscr)
@@ -31,6 +32,20 @@ NATIVE_ZF = 0.99   # zoom fade below this = the body plays the native animation 
 # Frames that play the NATIVE animation (no solver pose on screen): zoom-faded (`native`), viewmodel off (`off`) and the
 # draw/lower blends. Shay 2026-10-10: the wrist-bend limit applies to solver-posed frames only; native frames are exempt.
 NATIVE_STATES = ('native', 'off', 'draw', 'lower')
+# lab-vs-game AGREEMENT comparisons (replay gate frame errors, flat, posedump) skip zoomed-out frames: at camera distance
+# >= AGREE_ZOOM_SKIP (rec `zoom`, the zoomret-check 'zoomed out' bound) the game numbers are taken from the zoomed camera,
+# so every zoom-25 half showed as 60-140 deg 'disagreement' and hid a real one (cleaver-fix 139 ready roll, 2026-10-11).
+# The zoom-out look is judged by its own checks (zoomband, PT29, zoomret), not by agreement. Env ANIMLAB_AGREE_ZOOM=<z>
+# overrides (0 = compare every frame).
+AGREE_ZOOM_SKIP = float(os.environ.get('ANIMLAB_AGREE_ZOOM', '8'))
+
+
+def agree_zoom_skip(frames, i, lim=None):
+    """True when game rec frame i (or the frame before it: record n measures what frame n-1 rendered) is zoomed out."""
+    lim = AGREE_ZOOM_SKIP if lim is None else lim
+    if lim <= 0:
+        return False
+    return any((frames[k].get('zoom') or 0.0) >= lim for k in (i - 1, i) if 0 <= k < len(frames))
 
 
 def rec_setting(meta, key, default=None):

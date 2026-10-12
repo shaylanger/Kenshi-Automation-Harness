@@ -134,14 +134,20 @@ def cmd_metrics(a):
 
 
 NOCMP = ('off', 'draw', 'lower', 'native', 'settle')   # not compared: blends + native animation (no solver output on screen)
+LAST_ZSKIP = 0   # frames frame_errors() left out as zoomed out (M.agree_zoom_skip) on its last call
 
 
 def frame_errors(Pr, Ps, Fr, skip):
     """per-frame errors replay vs game on frames where both show the full viewmodel."""
     E = {}
+    global LAST_ZSKIP
+    LAST_ZSKIP = 0
     for i in range(skip, min(len(Pr), len(Ps))):
         r, s = Pr[i], Ps[i]
         if r['state'] in NOCMP or s['state'] in NOCMP or not r['wih']:
+            continue
+        if M.agree_zoom_skip(Fr, i):   # zoomed out (>= M.AGREE_ZOOM_SKIP): not an agreement frame
+            LAST_ZSKIP += 1
             continue
         e = E.setdefault(r['state'], dict(grip=[], elbow=[], wrist=[], blade=[], edge=[], wb=[], match=0, n=0))
         e['n'] += 1
@@ -164,6 +170,9 @@ def compare(real, sim, skip=0, tol=None, quiet=False):
         mark_settle(Pr, Ps, Rr.frames, tol['settle_s'])
     gated = tol.get('states') or M.STATE_ORDER
     E = frame_errors(Pr, Ps, Rr.frames, skip)
+    zskip = LAST_ZSKIP
+    if not quiet and zskip:
+        print('zoom_skipped=%d frames (zoom >= %g: zoomed out, not compared)' % (zskip, M.AGREE_ZOOM_SKIP))
     Tr, Ts = M.state_table(Pr, skip), M.state_table(Ps, skip)
     fails, rows = [], []
     for s in states_of(E):
@@ -356,7 +365,7 @@ def cmd_spike(a):
 
 def cmd_compare(a):
     fails, n = compare(a.real, a.sim, a.skip)
-    print('GATE %s frames=%d %s' % ('PASS' if not fails else 'FAIL', n, '; '.join(fails[:8])))
+    print('GATE %s frames=%d zoom_skipped=%d %s' % ('PASS' if not fails else 'FAIL', n, LAST_ZSKIP, '; '.join(fails[:8])))
     ok, txt = M.jitter_faithful(M.state_table(M.frame_metrics(recfmt.parse(a.real)), a.skip),
                                 M.state_table(M.frame_metrics(recfmt.parse(a.sim)), a.skip))
     print('jitter %s %s' % ('PASS' if ok else 'FAIL', ' '.join(txt) or 'no state above %.1f px' % M.JIT_MIN))
@@ -374,7 +383,7 @@ def cmd_replay(a):
     calib = run_adapter(a.adapter, a.rec, out, adapter_args(a) + shlex.split(a.args or ''))
     print('replay -> %s (calib %s)' % (out, calib))
     fails, n = compare(a.rec, out, a.skip)
-    print('GATE %s frames=%d %s' % ('PASS' if not fails else 'FAIL', n, '; '.join(fails[:8])))
+    print('GATE %s frames=%d zoom_skipped=%d %s' % ('PASS' if not fails else 'FAIL', n, LAST_ZSKIP, '; '.join(fails[:8])))
 
 
 def cmd_pool(a):
@@ -472,7 +481,7 @@ def cmd_agree(a):
         rec, out = ro
         fails, n = compare(rec, out, quiet=True)
         # gate = per-frame replay error; no viewmodel frames (zoomed out: native animation) = not comparable, no row
-        rows = [('gate', True, not fails, not fails, 'frames=%d %s' % (n, '; '.join(fails[:2])))] if n else []
+        rows = [('gate', True, not fails, not fails, 'frames=%d zoom_skipped=%d %s' % (n, LAST_ZSKIP, '; '.join(fails[:2])))] if n else []
         res[k] = (name, rows + M.agree_rows(recfmt.parse(rec), recfmt.parse(out)), info)
     tab, summ, dis = [], {}, []
     for name, rows, info in res:
@@ -557,7 +566,8 @@ def cmd_gate(a):
         run_adapter(a.adapter, rec, out, shlex.split(a.args or ''))
         print('== %s' % rec)
         fails, n = compare(rec, out, a.skip, tol, quiet=a.quiet)
-        print('GATE %s %s frames=%d %s' % ('PASS' if not fails else 'FAIL', os.path.basename(rec), n, '; '.join(fails[:8])))
+        print('GATE %s %s frames=%d zoom_skipped=%d %s' % ('PASS' if not fails else 'FAIL', os.path.basename(rec), n, LAST_ZSKIP,
+                                                         '; '.join(fails[:8])))
         allok = allok and not fails
     return 0 if allok else 1
 

@@ -8,6 +8,9 @@ vm_pd_write, compiled from the same client source) at the dumped records and thi
   posedump.py compare <game.pd> [--rec <rec>] [--lab-bin <kfpvm_replay with posedump>] [--lab <lab.pd>] [--tables <file>]
                       [--pos-tol 0.5] [--ang-tol 15] [--row POSEDUMP] [--out <dir>] [--skip N]
       --skip N = leave out the first N records (warm-up: solver state from before the recording settles).
+      --zoom-skip Z = leave out records whose game S line has zoom >= Z (default 8 = metrics.AGREE_ZOOM_SKIP, env
+      ANIMLAB_AGREE_ZOOM; 0 = keep all): zoomed-out records are measured from the zoomed camera, not agreement frames
+      (every zoom-25 half showed as 60-140 deg and hid the real 139 cleaver ready-roll gap). Counted as zoom_skipped=.
       --lab given = compare two existing dumps (no replay). Else replays --rec (default <game.pd>.rec).
   posedump.py fromrec <rec.txt> <out.pd> [--frames a,b,c-d] [--all]
       (default: only records where the viewmodel is fully up, on + w=1, this and the previous record; --all = every one)
@@ -122,14 +125,15 @@ def run_lab(rec, frames, tables, outpd):
 
 def cmd_compare(a):
     game = a[0]
-    o = dict(rec=game + '.rec', lab=None, tables=None, pos_tol=0.5, ang_tol=15.0, row='POSEDUMP', out=None, skip=0)
+    o = dict(rec=game + '.rec', lab=None, tables=None, pos_tol=0.5, ang_tol=15.0, row='POSEDUMP', out=None, skip=0,
+             zoom_skip=float(os.environ.get('ANIMLAB_AGREE_ZOOM', '8')))
     i = 1
     while i < len(a):
         k = a[i].lstrip('-').replace('-', '_')
         if k == 'lab_bin':
             os.environ['KFPVM_POSEDUMP'] = a[i + 1]
         elif k in o:
-            o[k] = a[i + 1] if k not in ('pos_tol', 'ang_tol', 'skip') else (int(a[i + 1]) if k == 'skip' else float(a[i + 1]))
+            o[k] = a[i + 1] if k not in ('pos_tol', 'ang_tol', 'skip', 'zoom_skip') else (int(a[i + 1]) if k == 'skip' else float(a[i + 1]))
         else:
             sys.exit('posedump.py: unknown arg %s' % a[i])
         i += 2
@@ -153,6 +157,7 @@ def cmd_compare(a):
         f0 = min(g['B'])
         for f in [f for f in g['B'] if f < f0 + o['skip']]:
             del g['B'][f]
+    zsk = zoom_skip(g, o['zoom_skip'])
     out = sys.stdout
     if o['out']:
         os.makedirs(o['out'], exist_ok=True)
@@ -164,8 +169,8 @@ def cmd_compare(a):
     # older recordings have no `# tables` header: hash unknown, not a mismatch
     hash_ok = not (known(g['tables']) and known(l['tables']) and g['tables'] != l['tables'] and not o['tables'])
     w = s['worst']
-    ev = 'frames=%d bad=%d worst_dp=%.3f(%s) worst_dang=%.1f(%s) tol=%.2fdm/%.0fdeg tables game=%s lab=%s lab_dump=%s' % (
-        s['frames'], s['nbad'], w['dp'][0], w['dp'][1], w['da'][0], w['da'][1], o['pos_tol'], o['ang_tol'],
+    ev = 'frames=%d zoom_skipped=%d bad=%d worst_dp=%.3f(%s) worst_dang=%.1f(%s) tol=%.2fdm/%.0fdeg tables game=%s lab=%s lab_dump=%s' % (
+        s['frames'], zsk, s['nbad'], w['dp'][0], w['dp'][1], w['da'][0], w['da'][1], o['pos_tol'], o['ang_tol'],
         g['tables'], l['tables'], labpd)
     if not s['frames']:
         print('RESULT %s FAIL no common frames %s' % (row, ev)); return 1
@@ -173,6 +178,26 @@ def cmd_compare(a):
         print('RESULT %s FAIL tables hash mismatch %s' % (row, ev)); return 1
     print('RESULT %s %s %s' % (row, 'PASS' if ok else 'FAIL', ev))
     return 0 if ok else 1
+
+
+S_ZOOM = 6   # index of zoom in an S line's fields (after `S <frame>`): st ti cls swing stroke prog zoom w phase
+
+
+def zoom_skip(g, lim):
+    """drop game records whose S line says zoom >= lim (or the S line of the record before: record n measures what
+    frame n-1 rendered); returns how many were dropped."""
+    if lim <= 0:
+        return 0
+    def z(f):
+        t = g['S'].get(f)
+        try:
+            return float(t[S_ZOOM]) if t and len(t) > S_ZOOM else 0.0
+        except ValueError:
+            return 0.0
+    drop = [f for f in g['B'] if z(f) >= lim or z(f - 1) >= lim]
+    for f in drop:
+        del g['B'][f]
+    return len(drop)
 
 
 def want(fl, i):
@@ -235,6 +260,12 @@ def cmd_selftest():
     assert not ok and s['worst']['dp'][1] == 'handR@5', s
     ok, s = compare(g, dict(tables='a', S={}, B={6: {}}), 0.5, 15, io.StringIO())
     assert not ok and s['frames'] == 0
+    # zoomed-out records leave the comparison (zoom >= 8 on the record or the one before), zoom 0 ones stay
+    z = dict(S={f: ['ready', '0', '0', '0', '-1', '0', zz, '1', '0'] for f, zz in ((1, '0'), (2, '25'), (3, '0'), (4, '7.9'))},
+             B={1: {}, 2: {}, 3: {}, 4: {}})
+    assert zoom_skip(z, 8) == 2 and sorted(z['B']) == [1, 4], z['B']
+    z['B'] = {1: {}, 2: {}, 3: {}}
+    assert zoom_skip(z, 0) == 0 and len(z['B']) == 3
     print('posedump selftest PASS')
     return 0
 
