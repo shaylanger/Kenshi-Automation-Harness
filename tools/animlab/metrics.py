@@ -1361,17 +1361,58 @@ def _both(a, b):
 # Reel 109: Buster ready 0.00 block 0.00 swing 0.47, Fragment Axe ready/block 0.00 swing 0.38, Naginata ready 0.04
 # block 0.00 swing 0.25; 1H sword / ab2h / E6 / f28 recs 0.95-1.00. CLASS: every melee weapon class at zoom 0 (the hands
 # carry the weapon read; a weapon framed so the hands leave the view reads as a floating blade / plank).
-FRAMED_MIN = {'ready': 0.80, 'block': 0.80, 'swing': 0.50}
+FRAMED_MIN = {'ready': 0.80, 'block': 0.80, 'swing': 0.80}
 FRAMED_MARGIN = 0.02
-# SR41 (Shay 18:30, PT17-v2 accepted "looks amazing"): the straight screen-line strokes 0/3 carry the hand below the frame
-# mid-stroke by design (accepted game recs sjudge-pt17v2-a pt17v2s0 framed swing 0.19, s3a 0.31; same 1H stroke 0 on the
-# Buster rec 0.12); swing frames of these strokes are reported (framed_swing_line, info) and never gate (check vs rule:
-# Misses 2026-10-11 "framed swing vs SR41", weapon-classes). Other strokes keep the swing minimum.
-FRAMED_SWING_INFO = (0, 3)
+# Swing frames (lab-rules 2026-10-11, SR17 "a blade may start or end off screen: normal, don't restrict it; only the
+# mid-stroke crossing must be visible"; SR18 off-screen start/end never a failure by itself; SR41 the accepted straight
+# strokes carry the hand below the frame mid-stroke): the old swing rule (a wrist in view on >= 50 % of ALL swing frames)
+# failed every heavy 2H / hacker / polearm take (146/147/148: 0.12-0.29) and Shay's accepted pt17v2 strokes. Now only the
+# MID-STROKE CROSSING of each swing is judged, and there the WEAPON must be seen (a wrist in view OR the grip..tip line
+# >= FRAMED_SEG_PX on screen); wind-up, follow-through and recovery are never judged here (wexit/R32 owns pop-in).
+# Crossing window, defined from the stroke path: the zoom-0 frames of the stroke proper (swing u ARC_U0..ARC_U1, key 1..4)
+# in order; s = cumulative screen path length (unclipped _uproj) of the weapon mid point (grip..tip midpoint, the point that
+# carries the stroke's screen line for every class); the crossing = frames with s/S_total in FRAMED_CROSS (middle half of
+# the stroke's own screen path, so a slow wind-out or a fast whip shift the window with the motion, not with u). A swing
+# whose stroke path has < 2 frames at zoom 0 is not judged. Gate: pooled share >= FRAMED_MIN['swing'] AND every judged
+# swing has >= 1 weapon-seen crossing frame (one stroke that never crosses the view = the Naginata "shaft flashes" class).
+FRAMED_CROSS = (0.25, 0.75)
+FRAMED_SEG_PX = 80.0   # px of 1600 wide: grip..tip on-screen length that counts as "weapon seen"
+
+
+def _seg_onscreen_px(a, b, n=24):
+    """on-screen length (px, 1600x900) of the 3D segment a..b (points behind the eye / outside the view dropped)."""
+    q = []
+    for k in range(n + 1):
+        c = add(a, mul(sub(b, a), k / float(n)))
+        u = _uproj(c) if c[2] >= 0.3 else None
+        q.append(u if u is not None and 0 <= u[0] <= W_PX and 0 <= u[1] <= H_PX else None)
+    return sum(math.hypot(q[k][0] - q[k - 1][0], q[k][1] - q[k - 1][1]) for k in range(1, len(q)) if q[k] and q[k - 1])
+
+
+def framed_cross(F, P, cross=FRAMED_CROSS, seg_px=FRAMED_SEG_PX, margin=FRAMED_MARGIN):
+    """per swing at zoom 0: (swing no, stroke, [(frame, seen)]) for the mid-stroke crossing frames (see FRAMED_CROSS)."""
+    inside = lambda q: q is not None and margin * W_PX <= q[0] <= (1 - margin) * W_PX and margin * H_PX <= q[1] <= (1 - margin) * H_PX
+    out = []
+    for k, idx in enumerate(swings(F, P)):
+        idx = [i for i in idx if F[i].get('cls', 0) == 0 and F[i].get('zoom', 0.0) < 0.5 and not F[i].get('band_hidden')
+               and ARC_U0 <= F[i].get('swu', 0.0) <= ARC_U1]
+        if len(idx) < 2:
+            continue
+        mid = [_uproj(mul(add(P[i]['mp'], P[i]['tip']), 0.5)) for i in idx]
+        cum = [0.0]
+        for j in range(1, len(idx)):
+            a, b = mid[j - 1], mid[j]
+            cum.append(cum[-1] + (math.hypot(a[0] - b[0], a[1] - b[1]) if a and b else 0.0))
+        tot = cum[-1]
+        win = [idx[j] for j in range(len(idx)) if tot > 0 and cross[0] <= cum[j] / tot <= cross[1]] or [idx[len(idx) // 2]]
+        out.append((k, F[idx[0]].get('stroke'), [(i, inside(_uproj(P[i]['J'][2])) or inside(_uproj(P[i]['J'][5]))
+                                                  or _seg_onscreen_px(P[i]['mp'], P[i]['tip']) >= seg_px) for i in win]))
+    return out
 
 
 def framed_check(F, P, mins=None, margin=FRAMED_MARGIN):
-    """(ok, [text]) melee only (cls 0); n/a (ok, ['framed=n/a']) when no zoom-0 melee frames."""
+    """(ok, [text]) melee only (cls 0); n/a (ok, ['framed=n/a']) when no zoom-0 melee frames. ready/block: a wrist in view
+    on >= mins share of the zoom-0 frames; swing: the weapon seen in the mid-stroke crossing (framed_cross, SR17)."""
     mins = mins or FRAMED_MIN
     inside = lambda q: q is not None and margin * W_PX <= q[0] <= (1 - margin) * W_PX and margin * H_PX <= q[1] <= (1 - margin) * H_PX
     S = {}
@@ -1380,23 +1421,26 @@ def framed_check(F, P, mins=None, margin=FRAMED_MARGIN):
         if r.get('cls', 0) != 0 or not p.get('wih') or r.get('zoom', 0.0) >= 0.5 or r.get('band_hidden'):
             continue
         st = p['state']
-        if st not in mins:
+        if st not in ('ready', 'block'):
             continue
-        if st == 'swing' and r.get('stroke') in FRAMED_SWING_INFO:
-            st = 'swing_line'
         e = S.setdefault(st, [0, 0])
         e[0] += 1
         e[1] += inside(_uproj(p['J'][2])) or inside(_uproj(p['J'][5]))
-    if not S:
+    X = framed_cross(F, P, margin=margin)
+    if not S and not X:
         return True, ['framed=n/a']
     ok, txt = True, []
-    for st in ('ready', 'block', 'swing'):
+    for st in ('ready', 'block'):
         if st in S:
             n, k = S[st]; g = k >= mins[st] * n; ok = ok and g
             txt.append('framed_%s=%.2f/%.2f(%d/%d)%s' % (st, k / float(n), mins[st], k, n, '' if g else ':BAD'))
-    if 'swing_line' in S:
-        n, k = S['swing_line']
-        txt.append('framed_swing_line=%.2f(%d/%d,info)' % (k / float(n), k, n))
+    if X:
+        n = sum(len(w) for _, _, w in X); k = sum(s for _, _, w in X for _, s in w)
+        dark = ['s%d(stroke%s,f%d)' % (sw, stk, w[0][0]) for sw, stk, w in X if not any(s for _, s in w)]
+        g = k >= mins['swing'] * n and not dark; ok = ok and g
+        txt.append('framed_swing_cross=%.2f/%.2f(%d/%d,%d swings)%s' % (k / float(n), mins['swing'], k, n, len(X), '' if g else ':BAD'))
+        if dark:
+            txt.append('cross_unseen=' + ','.join(dark[:6]))
     return ok, txt
 
 

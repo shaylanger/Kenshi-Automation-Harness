@@ -23,7 +23,7 @@ recorded prop pose (mp, mf, mu):
                  hand is on the shaft.
   With --adapter, a 2H weapon's recordings are replayed with `--set wcat=<skill category>` (what the game reads per
   weapon, kfp-two-hand), so the matrix judges the source's two-hand path; one-handed weapons use the plain replay.
-  framed (melee)  zoom-0 framing (metrics.framed_check): a wrist on screen on >= 80 % of ready/block and 50 % of swing
+  framed (melee)  zoom-0 framing (metrics.framed_check): a wrist on screen on >= 80 % of ready/block; swing: weapon seen in the mid-stroke crossing (SR17, metrics.framed_cross)
                  frames (heavy 2H / polearm reel takes showed only the blade, hands never in view).
   arc    (flat edged weapons)  E1 edge-leads-the-arc gate (metrics.arc_gate) with the mid-blade point at 0.5 x tip.
   seen   (flat edged weapons)  E6 blade visibility (metrics.blade_check) with the seen length scaled to the blade

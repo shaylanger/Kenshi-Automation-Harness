@@ -5,7 +5,7 @@
   spec.py run     <rules.tsv> --checks <checks.json> --class C <rec>... [--set k=v]   every rule of class C on recordings
   spec.py unarmed <cand>... [--rules rules.tsv]              unarmed (fists) spec on metricslab/native.py fist candidates (the
                                                              technique name = the candidate dir; shotei/palm names get U17)
-  spec.py framed <rec>                                       zoom-0 framing: a wrist in view at ready/block/swing
+  spec.py framed <rec>                                       zoom-0 framing: a wrist in view at ready/block, weapon seen in each swing's mid-stroke crossing (SR17)
   spec.py restedge <rec>                                     sword edge never toward the camera in the rest states
   spec.py stilljit <rec> [--states aim --max 1.5]            still-state weapon jitter (px at 1600x900)
   spec.py wrist    <rec> [--hold 30 --swing 50]              wrist bend limit per state (holds vs swings)
