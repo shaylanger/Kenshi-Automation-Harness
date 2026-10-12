@@ -420,6 +420,25 @@ class T(unittest.TestCase):
         ok, gated, t = M.path_one(3, off)
         self.assertFalse(ok, t); self.assertIn(':BAD', t.split('ctr=')[1].split(',')[0])
 
+    def test_path_end_band_travel_sr38_sr39(self):   # SR38 18:15 tip ends in the last 10 %; SR39 E6 s0/s2 ~2x tip travel only
+        def line(x0, y0, x1, y1, n=17):
+            S = []
+            for i in range(n):
+                s = i / float(n - 1); w = 0.5 - 0.5 * math.cos(math.pi * s)
+                S.append((0.30 + 0.03 * i, i, (x0 + (x1 - x0) * w, y0 + (y1 - y0) * w)))
+            return S
+        full = line(1350, 60, 250, 860)            # TR -> BL through the centre, ends 0.04 from the bottom
+        ok, gated, t = M.path_one(0, full); self.assertTrue(ok, t); self.assertTrue(gated); self.assertIn('trav=', t)
+        short = line(1350, 60, 340, 790)           # ends 0.12-0.21 from the edges: inside the old 20 % band, outside 10 %
+        ok, gated, t = M.path_one(3, short); self.assertFalse(ok, t)
+        self.assertIn(':BAD', t.split('span=')[1].split(',')[0])
+        ok, gated, t = M.path_one(2, line(800, -300, 800, 380))   # E6-like overhead: ends mid-screen, little visible travel
+        self.assertTrue(gated); self.assertFalse(ok, t); self.assertIn(':BAD', t.split('trav=')[1])
+        ok, gated, t = M.path_one(3, line(-200, 860, 1500, -100))  # stroke 3: travel reported, never gated (SR39 is s0/s2 only)
+        self.assertNotIn('/', t.split('trav=')[1].split(',')[0])
+        self.assertAlmostEqual(M.visible_travel([(-100, 450), (1700, 450)]), 1600 / math.hypot(1600, 900), 3)
+        ok, gated, t = M.path_one(1, short); self.assertFalse(gated)   # backhand accepted: info (SR13)
+
     def test_swing_rules_sweep_wexit_rep(self):   # Shay 17:05 angular sweep + repeatable path, 17:25 wind-up exit continuity
         def cam(x, y, z=10.0):   # screen px -> camera numbers at depth z
             return ((x - 800) / 800.0 * M.TX * z, (450 - y) / 450.0 * M.TY * z, z)

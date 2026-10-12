@@ -1608,12 +1608,43 @@ def inline_each(F, P, slack=INL_EACH_SLACK, **kw):
 # CLASS: any stroke's screen path (scripted 1H/2H strokes, new families): a check per swing, never a pooled value.
 PATH_U1 = 0.78                          # follow-through end (SWING_PHASES 'follow')
 PATH_LATE = 0.35                        # late share of the path (by arc length) judged for drift
-PATH_DEV, PATH_LATE_MAX, PATH_EDGE = 0.08, 0.05, 0.12
+PATH_DEV, PATH_LATE_MAX, PATH_EDGE = 0.08, 0.05, 0.10   # edge 0.12 -> 0.10: Shay SR38 18:15 (tip ends in the last 10%)
 PATH_ANG = (35.0, 50.0)                 # diagonal strokes: fitted line angle from horizontal
 PATH_DIAG = (0, 3)                      # scripted stroke ids that are diagonals (angle gated); others: angle reported
-PATH_INFO = (1, 2)                      # Shay 16:27: change only strokes 0 + 3 (and new strokes); stroke 1 (backhand, accepted) and stroke 2 (overhead, not under review) measured, non-blocking (info)
+PATH_INFO = (1,)                        # SR13: stroke 1 (backhand, accepted) measured, non-blocking (info); stroke 2 (overhead) was info until Shay rejected it in E6 (SR39 18:10): gated
 PATH_MIN_N = 4
 PATH_BAND, PATH_CTR, PATH_FAST = 0.20, 0.12, (0.25, 0.75)
+PATH_END_BAND = 0.10                    # SR38 (Shay 18:15): the stroke ENDS with the tip in the outer 10% band opposite its start band (off screen counts); start band stays PATH_BAND (SR14)
+#   trav  = visible tip travel: length of the tip path clipped to the screen / screen diagonal (what Shay sees move).
+#           Gated only for the strokes in PATH_TRAV_MIN (SR39: Shay's E6 review asked ~double tip travel for E6 stroke 0
+#           diagonal + stroke 2 overhead ONLY; measured on the E6 take Shay reviewed, corpus e6c5-bbf5-5090: s0 0.25-0.26, s2 0.18-0.19 -> x2).
+#           Every other stroke: reported, never gated (not a general threshold).
+PATH_TRAV_MIN = {0: 0.52, 2: 0.38}
+_DIAG_PX = math.hypot(W_PX, H_PX)
+
+
+def _clip_seg(a, b):
+    """Liang-Barsky: length of segment a-b inside the screen rectangle."""
+    t0, t1 = 0.0, 1.0
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    for p, q in ((-dx, a[0]), (dx, W_PX - a[0]), (-dy, a[1]), (dy, H_PX - a[1])):
+        if p == 0:
+            if q < 0:
+                return 0.0
+            continue
+        r = q / p
+        if p < 0:
+            t0 = max(t0, r)
+        else:
+            t1 = min(t1, r)
+        if t0 > t1:
+            return 0.0
+    return (t1 - t0) * math.hypot(dx, dy)
+
+
+def visible_travel(pts):
+    """on-screen tip path length / screen diagonal."""
+    return sum(_clip_seg(pts[i - 1], pts[i]) for i in range(1, len(pts))) / _DIAG_PX
 
 
 def _tls(pts):
@@ -1647,15 +1678,15 @@ def path_metrics(pts, late=PATH_LATE, us=None):
     edge = max(0.0, min(x / W_PX, 1 - x / W_PX, y / H_PX, 1 - y / H_PX))
     ang = abs(math.degrees(math.atan2(d[1], d[0])))
     ang = 180 - ang if ang > 90 else ang
-    def bands(q):
+    def bands(q, bw):
         b = set()
-        if q[0] <= PATH_BAND * W_PX: b.add('L')
-        if q[0] >= (1 - PATH_BAND) * W_PX: b.add('R')
-        if q[1] <= PATH_BAND * H_PX: b.add('T')
-        if q[1] >= (1 - PATH_BAND) * H_PX: b.add('B')
+        if q[0] <= bw * W_PX: b.add('L')
+        if q[0] >= (1 - bw) * W_PX: b.add('R')
+        if q[1] <= bw * H_PX: b.add('T')
+        if q[1] >= (1 - bw) * H_PX: b.add('B')
         return b
     opp = {'L': 'R', 'R': 'L', 'T': 'B', 'B': 'T'}
-    sb, eb = bands(pts[0]), bands(pts[-1])
+    sb, eb = bands(pts[0], PATH_BAND), bands(pts[-1], PATH_END_BAND)
     span = sorted('%s>%s' % (a, opp[a]) for a in sb if opp[a] in eb)
     ctr = _perp((W_PX / 2.0, H_PX / 2.0), c, d) / H_PX
     fast = None
@@ -1670,7 +1701,7 @@ def path_metrics(pts, late=PATH_LATE, us=None):
         mid = 0.5 * (along[k] + along[k + 1])
         fast = (mid - a0) / (a1 - a0) if abs(a1 - a0) > 1e-6 else 0.0
     return dict(dev=max(_perp(p, c, d) for p in pts) / ext, late=lt, ang=ang, edge=edge, len=ext / W_PX, n=len(pts),
-                end=(x, y), start=pts[0], span=span, ctr=ctr, fast=fast)
+                end=(x, y), start=pts[0], span=span, ctr=ctr, fast=fast, trav=visible_travel(pts))
 
 
 def path_series(F, P, u0=ARC_U0, u1=PATH_U1):
@@ -1698,13 +1729,16 @@ def path_one(stk, S, dev=PATH_DEV, late=PATH_LATE_MAX, edge=PATH_EDGE, angr=PATH
     g_ang = (angr[0] <= m['ang'] <= angr[1]) if stk in diag else True
     g_span, g_ctr = bool(m['span']), m['ctr'] <= PATH_CTR
     g_fast = m['fast'] is not None and PATH_FAST[0] <= m['fast'] <= PATH_FAST[1]
-    ok = g_dev and g_late and g_edge and g_ang and g_span and g_ctr and g_fast
+    tmin = PATH_TRAV_MIN.get(stk)
+    g_trav = tmin is None or m['trav'] >= tmin
+    ok = g_dev and g_late and g_edge and g_ang and g_span and g_ctr and g_fast and g_trav
     txt = 'dev=%.3f/%.2f%s,late=%.3f/%.2f%s,ang=%.0f%s%s,edge=%.3f/%.2f%s,len=%.2f,u=%.2f-%.2f,end=%.0f,%.0f(frame%d),n=%d' % (
         m['dev'], dev, bad(g_dev), m['late'], late, bad(g_late), m['ang'],
         '/%.0f-%.0f' % angr if stk in diag else '(info)', bad(g_ang), m['edge'], edge, bad(g_edge), m['len'],
         S[0][0], S[-1][0], m['end'][0], m['end'][1], S[-1][1], m['n']) + ',span=%s%s,ctr=%.3f/%.2f%s,fast=%s/%.2f-%.2f%s' % (
         '+'.join(m['span']) or '-', bad(g_span), m['ctr'], PATH_CTR, bad(g_ctr),
-        '-' if m['fast'] is None else '%.2f' % m['fast'], PATH_FAST[0], PATH_FAST[1], bad(g_fast))
+        '-' if m['fast'] is None else '%.2f' % m['fast'], PATH_FAST[0], PATH_FAST[1], bad(g_fast)) + (
+        ',trav=%.2f' % m['trav'] + ('/%.2f%s' % (tmin, bad(g_trav)) if tmin is not None else ''))
     return ok, stk not in info, txt + ('(info)' if stk in info else '')
 
 
