@@ -42,10 +42,23 @@ param(
   #                     takes key_inject/mouse_inject input and keeps running unfocused
   [string]$Monitor = '',
   [switch]$Background,
-  [switch]$Isolate
+  [switch]$Isolate,
+  # Opt-in used only by the workspace test wrapper; normal Play launches omit it.
+  [switch]$AutoAcceptModOrderWarning
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -Path (Join-Path $PSScriptRoot 'Win32Ui.cs')
+if ($AutoAcceptModOrderWarning) { . (Join-Path $PSScriptRoot '..\..\tools\automation\mod-order-warning-guard.ps1') }
+if (-not ('KenshiWarningControl' -as [type])) {
+  Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class KenshiWarningControl {
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+}
+'@
+}
 
 $HarnessDir = "$Kenshi\mods\AutomationHarness"
 $HarnessLog = "$HarnessDir\harness.log"
@@ -65,11 +78,100 @@ function Get-KenshiProcs {
 }
 function Get-KenshiPids { , [uint32[]]@((Get-KenshiProcs) | ForEach-Object { [uint32]$_.ProcessId }) }
 
+function Log-TestDialog([string]$Message) {
+  $line = '{0} {1}' -f (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss.fffK'), $Message
+  if ($script:LaunchDialogLog) { Add-Content -LiteralPath $script:LaunchDialogLog -Value $line -Encoding UTF8 }
+  Write-Host $line
+}
+
 function Get-Launcher {
   $procs = Get-KenshiProcs
   if ($procs.Count -eq 0) { return $null }
   $pids = [uint32[]]@($procs | ForEach-Object { [uint32]$_.ProcessId })
-  [KenshiWin32]::TopWindows($pids) | Where-Object { $_.Cls -eq '#32770' -and $_.Title -like 'Kenshi*' } | Select-Object -First 1
+  if (-not $AutoAcceptModOrderWarning) {
+    return [KenshiWin32]::TopWindows($pids) | Where-Object { $_.Cls -eq '#32770' -and $_.Title -like 'Kenshi*' } | Select-Object -First 1
+  }
+  # Only the exact installation path is eligible for the optional startup-warning action.
+  $scoped = @($procs | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($KenshiRoot, [StringComparison]::OrdinalIgnoreCase) })
+  $scopedPids = [uint32[]]@($scoped | ForEach-Object { [uint32]$_.ProcessId })
+  if ($scopedPids.Count -eq 0) { throw 'test launch warning guard refused: no exact-path Kenshi process' }
+  $scopedProcessPaths = @{}
+  foreach ($process in $scoped) {
+    $scopedProcessPaths[[string][uint32]$process.ProcessId] = [IO.Path]::GetFullPath([string]$process.ExecutablePath)
+  }
+  # The known modal's real title is “Mods warning”; collect every modal owned
+  # by this exact install so the separate crash-handler prompt can be refused.
+  $candidates = @([KenshiWin32]::TopWindows($scopedPids) | Where-Object { $_.Cls -eq '#32770' })
+  $entries = @()
+  foreach ($candidate in $candidates) {
+    $controls = @([KenshiWin32]::Children($candidate.Handle) | ForEach-Object {
+      [pscustomobject]@{ Handle=$_.Handle; Id=$_.Id; Cls=$_.Cls; Title=$_.Title; Enabled=[KenshiWarningControl]::IsWindowEnabled($_.Handle) }
+    })
+    $entries += [pscustomobject]@{ Dialog=$candidate; Controls=$controls }
+  }
+  $batch = Get-TestDialogBatch $entries $scopedPids
+
+  # Clear only exact known mod warnings before reporting any other modal. This
+  # permits two queued warnings to be handled in order while a crash prompt is
+  # left untouched and then refuses the launch.
+  foreach ($entry in $batch.Warnings) {
+    $candidate = $entry.Dialog
+    $decision = $entry.Decision
+    $processKey = [string][uint32]$candidate.Pid
+    if (-not $scopedProcessPaths.ContainsKey($processKey)) { throw 'test launch warning process was not in the exact-path snapshot; no click sent' }
+    $expectedExecutablePath = [string]$scopedProcessPaths[$processKey]
+    # Freshly match the same dialog and exact same affirmative HWND before clicking.
+    $fresh = @([KenshiWin32]::TopWindows($scopedPids) | Where-Object {
+      $_.Cls -eq '#32770' -and $_.Handle -eq $candidate.Handle -and $_.Pid -eq $candidate.Pid
+    })
+    if ($fresh.Count -eq 0 -and -not [KenshiWarningControl]::IsWindow($candidate.Handle)) {
+      Log-TestDialog ("DIALOG GUARD WARNING already closed before acknowledgement pid={0} hwnd={1}; no click sent" -f $candidate.Pid, $candidate.Handle)
+      continue
+    }
+    if ($fresh.Count -ne 1) { throw 'test launch warning changed before acknowledgement; no click sent' }
+    $freshControls = @([KenshiWin32]::Children($candidate.Handle) | ForEach-Object {
+      [pscustomobject]@{ Handle=$_.Handle; Id=$_.Id; Cls=$_.Cls; Title=$_.Title; Enabled=[KenshiWarningControl]::IsWindowEnabled($_.Handle) }
+    })
+    $freshDecision = Get-TestDialogDecision $fresh[0] $freshControls $scopedPids
+    if ($freshDecision.Kind -ne 'Warning' -or $freshDecision.Button.Handle -ne $decision.Button.Handle) {
+      throw 'test launch warning/button changed before acknowledgement; no click sent'
+    }
+    # Re-read the process table after all HWND/button validation, immediately
+    # before posting, so a recycled PID cannot inherit this warning decision.
+    $freshProcess = @(Get-KenshiProcs | Where-Object {
+      $_.ExecutablePath -and [uint32]$_.ProcessId -eq [uint32]$candidate.Pid
+    })
+    if ($freshProcess.Count -ne 1) { throw 'test launch warning process identity changed before acknowledgement; no click sent' }
+    $freshExecutablePath = [IO.Path]::GetFullPath([string]$freshProcess[0].ExecutablePath)
+    if ($freshExecutablePath -ine $expectedExecutablePath) { throw 'test launch warning process path changed before acknowledgement; no click sent' }
+    # BM_CLICK can fail on an inactive dialog; activating it would steal focus.
+    # Send the exact button notification to the validated parent dialog instead.
+    if (-not [KenshiWin32]::PostMessage($fresh[0].Handle, [KenshiWin32]::WM_COMMAND,
+        [IntPtr]([uint32]$freshDecision.Button.Id), $freshDecision.Button.Handle)) {
+      throw 'test launch warning affirmative click could not be queued'
+    }
+    $dismissed = $false
+    for ($n = 0; $n -lt 40; $n++) {
+      if (-not [KenshiWarningControl]::IsWindow($candidate.Handle)) { $dismissed = $true; break }
+      Start-Sleep -Milliseconds 50
+    }
+    if (-not $dismissed) { throw 'test launch warning remained after affirmative click' }
+    Log-TestDialog ("DIALOG GUARD ACCEPTED mod-order-warning pid={0} hwnd={1} buttonId={2} caption=[{3}]" -f $candidate.Pid, $candidate.Handle, $freshDecision.Button.Id, $freshDecision.Button.Title)
+  }
+
+  $normalLauncher = $null
+  foreach ($entry in $batch.Remaining) {
+    $candidate = $entry.Dialog
+    $decision = $entry.Decision
+    if ($decision.Kind -ne 'Launcher') {
+      $safeTitle = ([string]$candidate.Title -replace '[\r\n\x00-\x1F]','?')
+      Log-TestDialog ("DIALOG GUARD REFUSED title=[{0}] reason={1}; no click sent" -f $safeTitle, $decision.Diagnostic)
+      throw ("test launch refused unrecognized Kenshi dialog: title=[{0}] reason={1}" -f $safeTitle, $decision.Diagnostic)
+    }
+    if ($normalLauncher) { Log-TestDialog 'DIALOG GUARD REFUSED multiple normal launcher dialogs; no click sent'; throw 'test launch refused multiple normal launcher dialogs' }
+    $normalLauncher = $candidate
+  }
+  $normalLauncher
 }
 
 function Get-GameWindow {
@@ -126,6 +228,7 @@ function Start-Kenshi {
   if (-not (Get-Process steam -ErrorAction SilentlyContinue)) { throw 'Steam is not running' }
   if (-not (Test-Path "$HarnessDir\AutomationHarness.dll")) { throw "harness not installed in $HarnessDir" }
   $archived = Save-Logs 'before-launch'
+  if ($AutoAcceptModOrderWarning) { $script:LaunchDialogLog = Join-Path $archived 'startup-dialogs.txt' }
   "logs archived to $archived"
   # The harness recreates harness.log on start; removing it keeps the waits
   # below from matching lines of the previous session.
@@ -138,7 +241,7 @@ function Start-Kenshi {
   $flag = "$HarnessDir\input_isolation.flag"
   if ($Isolate) { Set-Content -Path $flag -Value 'kenshi-ctl launch -Isolate' -Encoding Ascii }
   else { Remove-Item $flag -ErrorAction SilentlyContinue }
-  $script:PrevForeground = [KenshiPlace]::Foreground()
+  $script:PrevForeground = [KenshiPlace]::CaptureForeground()
   $script:KeeperNotes = @{}
   $script:FocusReturns = 0
   if ($Monitor -or $Background) { $script:LaunchKeeper = { Keep-Background } }
@@ -161,7 +264,17 @@ function Start-Kenshi {
   $launcher = Wait-Until { Get-Launcher } 120 'the launcher dialog'
   # Let the dialog finish initialising (mod list) before pressing OK.
   Start-Sleep -Seconds 2
-  [KenshiWin32]::PressDialogButton($launcher.Handle, $LauncherOkId)
+  if ($AutoAcceptModOrderWarning) {
+    $current = Get-Launcher
+    if (-not $current -or $current.Handle -ne $launcher.Handle) { throw 'test launcher changed before acknowledgement; no click sent' }
+    $buttons = @([KenshiWin32]::Children($current.Handle) | Where-Object {
+      $_.Id -eq $LauncherOkId -and $_.Cls -ceq 'Button' -and (Normalize-WarningText $_.Title) -eq 'ok' -and [KenshiWarningControl]::IsWindowEnabled($_.Handle)
+    })
+    if ($buttons.Count -ne 1) { throw 'test launcher OK button missing or ambiguous; no click sent' }
+    if (-not [KenshiWin32]::PostMessage($buttons[0].Handle, [KenshiWin32]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero)) { throw 'test launcher OK click could not be queued' }
+  } else {
+    [KenshiWin32]::PressDialogButton($launcher.Handle, $LauncherOkId)
+  }
   "launcher OK pressed after $([int]((Get-Date) - $t0).TotalSeconds) s"
   Wait-Until { -not (Get-Launcher) -and (Get-GameWindow) } 60 'the game window' | Out-Null
   Wait-Until { Read-HarnessLogMatch 'KAH: frame listener running' } $TimeoutSec 'the harness frame listener' | Out-Null
@@ -202,10 +315,16 @@ function Keep-Background {
       $script:KeeperNotes["$($w.Handle)"] = if ($err) { "$($w.Cls): not placed: $err" } else { "$($w.Cls) on $where" }
     }
   }
-  if ($Background -and [KenshiPlace]::ForegroundOf($pids) -ne [IntPtr]::Zero) {
-    if ([KenshiPlace]::GiveBack($script:PrevForeground)) { $script:FocusReturns++ }
+  $gameForeground = [KenshiPlace]::ForegroundOf($pids)
+  if ($Background -and $gameForeground -eq [IntPtr]::Zero) {
+    # The user may have switched apps since launch; remember that current
+    # choice so a later game activation cannot send focus to an old window.
+    $currentForeground = [KenshiPlace]::CaptureForeground()
+    if ($currentForeground) { $script:PrevForeground = $currentForeground }
+  } elseif ($Background -and $gameForeground -ne [IntPtr]::Zero) {
+    if ([KenshiPlace]::GiveBack($script:PrevForeground, $gameForeground, $pids)) { $script:FocusReturns++ }
     # nothing to give it back to (launched from a background shell, user idle): drop it instead
-    elseif ([KenshiPlace]::Demote([KenshiPlace]::ForegroundOf($pids))) { $script:FocusReturns++; $script:KeeperNotes['demote'] = 'game had the foreground with no window to hand it to: minimized/restored to drop it' }
+    elseif ([KenshiPlace]::Demote($gameForeground)) { $script:FocusReturns++; $script:KeeperNotes['demote'] = 'game had the foreground with no safe window to hand it to: minimized/restored to drop it' }
   }
 }
 

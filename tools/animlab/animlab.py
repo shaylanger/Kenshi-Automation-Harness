@@ -572,6 +572,81 @@ def cmd_gate(a):
     return 0 if allok else 1
 
 
+FLAT_PARTS = ('grip', 'Lsh', 'Lel', 'Lwr', 'Rsh', 'Rel', 'Rwr', 'tip', 'blade', 'edge')
+FLAT_TIP_DM = 8.0   # weapon point used for the tip delta: grip + 8 dm along the measured weapon forward (sword ~ blade middle-tip)
+
+
+def flat_rows(game, sim, skip=0):
+    """per (state, stroke) group: {part: [abs deltas]} game vs lab on every frame where both show the viewmodel.
+    Position parts in dm (camera numbers), blade/edge in deg."""
+    Rr, Rs = recfmt.parse(game), recfmt.parse(sim)
+    Pr, Ps = M.frame_metrics(Rr), M.frame_metrics(Rs)
+    G = {}
+    for i in range(skip, min(len(Pr), len(Ps))):
+        r, s, f = Pr[i], Ps[i], Rr.frames[i]
+        if r['state'] in NOCMP or s['state'] in NOCMP or not r['wih'] or M.agree_zoom_skip(Rr.frames, i):
+            continue
+        st = f.get('stroke')
+        key = (r['state'], st if (st is not None and st >= 0 and r['state'].startswith('swing')) else None)
+        e = G.setdefault(key, dict((k, []) for k in FLAT_PARTS))
+        e['grip'].append(ln(sub(r['mp'], s['mp'])))
+        for j, nm in enumerate(recfmt.JOINTS):
+            e[nm].append(ln(sub(r['J'][j], s['J'][j])))
+        tr = tuple(r['mp'][k] + FLAT_TIP_DM * r['mf'][k] for k in range(3))
+        ts = tuple(s['mp'][k] + FLAT_TIP_DM * s['mf'][k] for k in range(3))
+        e['tip'].append(ln(sub(tr, ts)))
+        e['blade'].append(ang(r['mf'], s['mf']))
+        e['edge'].append(ang(r['mu'], s['mu']))
+    return G
+
+
+def cmd_flat(a):
+    """flat comparison: game pose dump (fp_vm rec dump) vs the lab's replay of the same recording/tables, per state and
+    scripted stroke (max + p95 of every joint/weapon delta), plus every lab check (metrics.check_suite) run on the GAME
+    numbers and on the lab numbers. One `RESULT flat <name> PASS|FAIL ...` line at the end."""
+    name = os.path.splitext(os.path.basename(a.rec))[0]
+    out = a.o or os.path.join(tmpdir('animlab-flat-'), 'replay.txt')
+    args = shlex.split(a.args or '')
+    if a.tables:
+        args += ['--tables', a.tables]
+    run_adapter(a.adapter, a.rec, out, args)
+    G = flat_rows(a.rec, out, a.skip)
+    rows, worst_pos, worst_ang, n = [], 0.0, 0.0, 0
+    for (st, sk) in sorted(G, key=lambda k: (M.STATE_ORDER.index(k[0]) if k[0] in M.STATE_ORDER else 99, k[0], -1 if k[1] is None else k[1])):
+        e = G[(st, sk)]
+        nn = len(e['grip'])
+        n += nn
+        row = [st + ('' if sk is None else '[s%d]' % sk), nn]
+        for k in FLAT_PARTS:
+            mx = max(e[k]) if e[k] else float('nan')
+            row.append('%s/%s' % (M.fmt(M.pct(e[k], .95)), M.fmt(mx)))
+            if nn >= 3 and mx == mx:
+                if k in ('blade', 'edge'):
+                    worst_ang = max(worst_ang, mx)
+                else:
+                    worst_pos = max(worst_pos, mx)
+        rows.append(row)
+    print_table(rows, ('state[stroke]', 'n') + tuple(k + ' p95/max' for k in FLAT_PARTS),
+                'game - lab per frame (positions dm, blade/edge deg), p95/max:')
+    gc = M.check_suite(recfmt.parse(a.rec))
+    lc = dict((c, ok) for c, ok, _ in M.check_suite(recfmt.parse(out)))
+    crow, gfail, dis = [], [], []
+    for c, ok, txt in gc:
+        lok = lc.get(c)
+        crow.append([c, 'n/a' if ok is None else 'PASS' if ok else 'FAIL', 'n/a' if lok is None else 'PASS' if lok else 'FAIL', txt[:100]])
+        if ok is False:
+            gfail.append(c)
+        if ok is not None and lok is not None and ok != lok:
+            dis.append(c)
+    print_table(crow, ('check', 'game', 'lab', 'game values'), 'lab checks on the GAME numbers (and on the lab replay):')
+    tol_ok = worst_pos <= a.pos_tol and worst_ang <= a.ang_tol
+    ok = n > 0 and not gfail and tol_ok
+    print('RESULT flat %s %s frames=%d groups=%d maxpos=%.2fdm maxang=%.1fdeg (tol %.2f/%.1f) game_checks_fail=%s lab_disagree=%s replay=%s'
+          % (name, 'PASS' if ok else 'FAIL', n, len(G), worst_pos, worst_ang, a.pos_tol, a.ang_tol,
+             ','.join(gfail) or 'none', ','.join(dis) or 'none', out))
+    return 0 if ok else 1
+
+
 def cmd_weapons(a):
     import weapons
     return weapons.cmd(a)
@@ -650,6 +725,12 @@ def main():
     p = sp.add_parser('agree'); p.add_argument('manifest', help='lines `<game rec> <adapter of its build> [adapter args]`')
     p.add_argument('--status', help='STATUS.md to write the summary into'); p.add_argument('--keep'); p.add_argument('-j', type=int, default=int(os.environ.get('LABNICE_J') or min(16, os.cpu_count() or 4)))
     ap.add_argument('--only-stroke', dest='only_stroke', type=int, help='E6: judge only swings of this scripted stroke (others -> swing_x)')
+    p = sp.add_parser('flat', help='game pose dump vs lab replay per state/stroke + lab checks on the game numbers')
+    p.add_argument('rec', help='game recording (fp_vm rec dump)'); p.add_argument('--adapter', required=True)
+    p.add_argument('--args', help='extra adapter args (quoted)'); p.add_argument('--tables', help='fp_tables file for the lab (adapter --tables)')
+    p.add_argument('--skip', type=int, default=0); p.add_argument('-o', help='keep the replay here')
+    p.add_argument('--pos-tol', type=float, default=1.0, help='max allowed game-lab position delta (dm), any joint/grip/tip')
+    p.add_argument('--ang-tol', type=float, default=10.0, help='max allowed game-lab blade/edge angle delta (deg)')
     p = sp.add_parser('weapons', help='weapon catalogue (base + mods) / per-weapon check matrix (weapons.py)')
     p.add_argument('--config', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'components', 'KenshiFP', 'animlab', 'native.json'))
     p.add_argument('--catalog', action='store_true'); p.add_argument('--run', action='store_true')
@@ -665,7 +746,7 @@ def main():
     if not a.cmd:
         ap.print_help(); return 2
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))   # SIGTERM -> SystemExit: atexit removes the temp dirs
-    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'reload': cmd_reload, 'spike': cmd_spike, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'path': cmd_path, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool, 'agree': cmd_agree, 'weapons': cmd_weapons}[a.cmd](a) or 0
+    return {'blade': cmd_blade, 'bolt': cmd_bolt, 'branch': cmd_branch, 'churn': cmd_churn, 'hinge': cmd_hinge, 'inline': cmd_inline, 'stock': cmd_stock, 'reload': cmd_reload, 'spike': cmd_spike, 'zoomband': cmd_zoomband, 'guard': cmd_guard, 'stroke': cmd_stroke, 'path': cmd_path, 'metrics': cmd_metrics, 'compare': cmd_compare, 'replay': cmd_replay, 'sweep': cmd_sweep, 'gate': cmd_gate, 'pool': cmd_pool, 'agree': cmd_agree, 'flat': cmd_flat, 'weapons': cmd_weapons}[a.cmd](a) or 0
 
 
 if __name__ == '__main__':

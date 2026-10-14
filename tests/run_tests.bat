@@ -74,6 +74,11 @@ cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests
 if errorlevel 1 (type "%ROOT%obj\tests\build_hold_speed.log" & echo TEST BUILD FAILED & exit /b 1)
 "%ROOT%obj\tests\hold_speed_test.exe"
 if errorlevel 1 exit /b 1
+cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\newgame_editor_state_test.exe" ^
+  "%ROOT%tests\newgame_editor_state_test.cpp" > "%ROOT%obj\tests\build_newgame_editor_state.log" 2>&1
+if errorlevel 1 (type "%ROOT%obj\tests\build_newgame_editor_state.log" & echo TEST BUILD FAILED & exit /b 1)
+"%ROOT%obj\tests\newgame_editor_state_test.exe"
+if errorlevel 1 exit /b 1
 cl /nologo /EHa /MD /W3 /I"%ROOT%src" /Fo"%ROOT%obj\tests\\" /Fe"%ROOT%obj\tests\chatter_test.exe" ^
   "%ROOT%tests\chatter_test.cpp" > "%ROOT%obj\tests\build_chatter.log" 2>&1
 if errorlevel 1 (type "%ROOT%obj\tests\build_chatter.log" & echo TEST BUILD FAILED & exit /b 1)

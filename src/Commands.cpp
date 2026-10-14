@@ -21,6 +21,7 @@
 #include "HoldSpeed.h"
 #include "Chatter.h"
 #include "FrameStamp.h"
+#include "NewGameEditorState.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -761,8 +762,10 @@ bool g_newGamePending = false; // a harness newgame not yet in the world
 bool g_newGameAuto = false;    // confirm the character editor ourselves
 int g_chargenStep = 0;         // 0 wait, 1 CONFIRM clicked, 2 box accepted
 int g_chargenTries = 0;
+const int kNewGameConfirmTries = 60;
 DWORD g_chargenAt = 0;         // first seen / last step
 DWORD g_newGameLastReport = 0;
+NewGameEditorState g_newGameEditorState;
 
 bool CharEditorOpen(GameWorld *world) {
   bool open = false;
@@ -777,6 +780,21 @@ bool CharEditorOpen(GameWorld *world) {
   } catch (...) {
   }
   return open;
+}
+
+bool CharEditorPlayerFlagOpen(GameWorld *world) {
+  try {
+    return Valid(world) && Valid(world->player) && world->player->characterEditorMode;
+  } catch (...) {
+    return false;
+  }
+}
+
+bool NewGameEditorOpen(GameWorld *world) {
+  const bool guiProbe = !g_newGameEditorState.observedOpen && CharEditorOpen(world);
+  const bool playerFlag = (g_newGameEditorState.observedOpen || guiProbe) && CharEditorPlayerFlagOpen(world);
+  const bool closureWatchArmed = !g_newGameAuto || g_chargenStep > 0 || g_chargenTries > kNewGameConfirmTries;
+  return g_newGameEditorState.IsOpen(g_newGamePending, closureWatchArmed, playerFlag, guiProbe, GetTickCount());
 }
 
 std::string CurrentSave() {
@@ -1029,7 +1047,7 @@ void WatchNewGame() {
     return;
   GameWorld *world = ou;
   const DWORD now = GetTickCount();
-  bool open = CharEditorOpen(world);
+  bool open = NewGameEditorOpen(world);
   if (now - g_newGameLastReport >= 10000) {
     g_newGameLastReport = now;
     int signal = -1;
@@ -1053,10 +1071,17 @@ void WatchNewGame() {
       g_chargenStep = 0;
       g_chargenAt = 0;
     }
+    if (g_newGameEditorState.observedOpen) {
+      g_newGamePending = false;
+      g_newGameEditorState.Reset();
+      Log("KAH: newgame in the world");
+      return;
+    }
     // In the world with the editor gone: the new game is running.
     if (Phase(world) == "world") {
       Log("KAH: newgame in the world");
       g_newGamePending = false;
+      g_newGameEditorState.Reset();
     }
     return;
   }
@@ -1070,7 +1095,7 @@ void WatchNewGame() {
   // PG 132/133/240 (pg-58): the editor reported open 2 s before its widgets existed; 3 tries 2 s apart
   // all missed ConfirmButton, which was there (and worked with `click`) a few seconds later. Keep trying
   // every 2 s for 2 minutes, logging the visible buttons now and then
-  const int kConfirmTries = 60;
+  const int kConfirmTries = kNewGameConfirmTries;
   if (g_chargenStep == 0 && now - g_chargenAt >= 2000) { // let the editor finish building
     if (g_chargenTries >= kConfirmTries) {
       if (g_chargenTries == kConfirmTries) {
@@ -1152,8 +1177,10 @@ void WatchLoads() {
         g_freshNewGame = false;
       if (signal == SaveManager::NEWGAME || signal == SaveManager::IMPORTGAME)
         Log(std::string("KAH: game signalled ") + (signal == SaveManager::NEWGAME ? "new game" : "import"));
-      if (signal == SaveManager::LOADGAME || signal == SaveManager::IMPORTGAME)
+      if (signal == SaveManager::LOADGAME || signal == SaveManager::IMPORTGAME) {
         g_newGamePending = false; // a load replaces the new game
+        g_newGameEditorState.Reset();
+      }
     }
     g_lastSignal = signal;
   } catch (...) {
@@ -1320,7 +1347,7 @@ bool LoadPending() {
 std::string Phase(GameWorld *world) {
   if (!Valid(world))
     return "starting";
-  if (g_newGamePending && CharEditorOpen(world))
+  if (g_newGamePending && NewGameEditorOpen(world))
     return "chargen";
   bool loading = false;
   try {
@@ -1874,6 +1901,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
     sm->load(f[2]);
     g_freshNewGame = false;
     g_newGamePending = false;
+    g_newGameEditorState.Reset();
     g_loadedSave = f[2];
     g_loadPending = true;
     g_loadSawEmpty = false;
@@ -1915,6 +1943,7 @@ std::string RunCommand(GameWorld *world, const std::vector<std::string> &f, bool
              "); try again in a few seconds";
     g_newGamePending = true;
     g_newGameAuto = !edit;
+    g_newGameEditorState.Reset();
     g_chargenStep = 0;
     g_chargenTries = 0;
     g_chargenAt = 0;

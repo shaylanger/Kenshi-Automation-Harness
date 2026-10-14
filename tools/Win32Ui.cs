@@ -89,6 +89,13 @@ public static class KenshiWin32 {
 // Background launches: put the game's windows on a chosen monitor without
 // activating them, and hand the focus back if the game took it.
 public static class KenshiPlace {
+  public sealed class WindowToken {
+    public IntPtr Handle;
+    public uint ProcessId;
+    public uint ThreadId;
+    public string ClassName;
+    public string Title;
+  }
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
   [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
   public struct MONITORINFOEX {
@@ -201,19 +208,55 @@ public static class KenshiPlace {
     return fg != IntPtr.Zero && IsOwnedBy(fg, pids) ? fg : IntPtr.Zero;
   }
 
-  // Gives the foreground back to prev (the user's window before the launch)
-  // while the game holds it: attach to the game's input thread, which may
-  // hand the foreground on. Never activates the game.
-  public static bool GiveBack(IntPtr prev) {
-    if (prev == IntPtr.Zero || !IsWindow(prev)) return false;
+  // Captures enough identity to reject a closed/recycled foreground HWND.
+  public static WindowToken CaptureForeground() {
+    IntPtr hwnd = GetForegroundWindow();
+    if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) return null;
+    uint pid; uint thread = GetWindowThreadProcessId(hwnd, out pid);
+    var cls = new StringBuilder(256); var title = new StringBuilder(512);
+    KenshiWin32.GetClassName(hwnd, cls, cls.Capacity);
+    KenshiWin32.GetWindowText(hwnd, title, title.Capacity);
+    return new WindowToken { Handle=hwnd, ProcessId=pid, ThreadId=thread, ClassName=cls.ToString(), Title=title.ToString() };
+  }
+
+  static bool SameWindow(WindowToken token) {
+    if (token == null || token.Handle == IntPtr.Zero || !IsWindow(token.Handle)) return false;
+    uint pid; uint thread = GetWindowThreadProcessId(token.Handle, out pid);
+    if (pid != token.ProcessId || thread != token.ThreadId) return false;
+    var cls = new StringBuilder(256); var title = new StringBuilder(512);
+    KenshiWin32.GetClassName(token.Handle, cls, cls.Capacity);
+    KenshiWin32.GetWindowText(token.Handle, title, title.Capacity);
+    return string.Equals(cls.ToString(), token.ClassName, StringComparison.Ordinal) &&
+      string.Equals(title.ToString(), token.Title, StringComparison.Ordinal);
+  }
+
+  // Kept pure so offline checks can exercise every fail-safe branch without
+  // reading or changing the desktop focus or cursor.
+  public static bool CanGiveBack(bool previousIdentityMatches, bool foregroundStillGame, bool destinationIsGame) {
+    return previousIdentityMatches && foregroundStillGame && !destinationIsGame;
+  }
+
+  // Gives focus back only while the same game HWND still owns the foreground
+  // and the captured destination is still the same non-game window.
+  public static bool GiveBack(WindowToken prev, IntPtr observedGame, uint[] gamePids) {
+    if (prev == null || observedGame == IntPtr.Zero) return false;
+    bool destinationIsGame = prev.Handle == observedGame || Array.IndexOf(gamePids, prev.ProcessId) >= 0;
+    bool previousIdentityMatches = !destinationIsGame && SameWindow(prev);
     IntPtr fg = GetForegroundWindow();
-    if (fg == prev) return true;
+    bool foregroundStillGame = fg == observedGame && IsOwnedBy(fg, gamePids);
+    if (!CanGiveBack(previousIdentityMatches, foregroundStillGame, destinationIsGame)) return false;
     uint pid;
     uint fgThread = GetWindowThreadProcessId(fg, out pid), me = GetCurrentThreadId();
     bool attached = fgThread != 0 && AttachThreadInput(me, fgThread, true);
-    SetForegroundWindow(prev);
+    // Recheck immediately before the only activation call: user focus may
+    // have changed since the keeper observed Kenshi in the foreground.
+    if (!CanGiveBack(SameWindow(prev), GetForegroundWindow() == observedGame, destinationIsGame)) {
+      if (attached) AttachThreadInput(me, fgThread, false);
+      return false;
+    }
+    SetForegroundWindow(prev.Handle);
     if (attached) AttachThreadInput(me, fgThread, false);
-    return GetForegroundWindow() == prev;
+    return GetForegroundWindow() == prev.Handle;
   }
 
   public static IntPtr Foreground() { return GetForegroundWindow(); }
