@@ -100,6 +100,7 @@ Everything else needs a loaded game.
 | `fight <a> <b>` | make two characters of different factions fight (their factions go to -100, both get an attack order) |
 | `job <npc> <building> [task <name>] [radius <m>]` | add a permanent job at the nearest matching building within `radius` of the npc (default 300, max 5000) (default task: the building's own job, e.g. OPERATE_MACHINERY) |
 | `jobs <npc>` / `clearjobs <npc>` | list / remove permanent jobs |
+| `contract-bodyguard <npc> [<hirer>] [hours <n>] [own] [replace] [package <name\|sid>]` | give the npc's squad a native hired-Bodyguard contract the way the hire dialogue does (`Blackboard::setContractJob` with the AI package collection "Bodyguard" (`5090-gamedata.base`, signal func SIG_BODYGUARD) and `<hirer>` (default `@player`) as giver): `Blackboard::hasContractJob()` becomes true, so Stobe's `squad.contract.present` (`NativeAiAwareness`, `stobe_bodyguard_probe`) reports it. Without `hours` the game's own default length; `hours <n>` (or a bare number) uses `_setContractJob`. A player-squad member needs `own` (separated into an own squad first, new handle; the contract never goes on the player's own squad blackboard); an existing contract needs `replace`. `contract-bodyguard <npc> status` (`has_contract`, `hours_left`) / `contract-bodyguard <npc> end` (`endContractJob`). Not yet run in game (built 2026-10-15): the first use must check `status` and the Stobe native probe |
 
 ### Buildings and time
 

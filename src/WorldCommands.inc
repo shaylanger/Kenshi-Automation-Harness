@@ -2284,6 +2284,116 @@ bool RunCharacterCommand(GameWorld *world, const std::vector<std::string> &f, Ch
     out = c->getName() + " jobs cleared";
     return true;
   }
+  if (cmd == "contract-bodyguard") { // contract-bodyguard <npc> [<hirer>] [hours <n>] [own] [replace] [package <p>] | end | status
+    // A native hired-bodyguard contract on the npc's squad Blackboard, made the way the hire dialogue makes it
+    // (Blackboard::setContractJob with the "Bodyguard" AI package collection and the hirer as giver), so
+    // Blackboard::hasContractJob() and stobe_state squad.contract.present report it (imm26 row 18-a).
+    const ContractArgs args = ParseContractArgs(f);
+    if (!args.error.empty()) {
+      out = args.error + " (usage: contract-bodyguard <npc> [<hirer>] [hours <n>] [own] [replace] [package <name|sid>] | end | status)";
+      return true;
+    }
+    Blackboard *board = nullptr;
+    ActivePlatoon *active = nullptr;
+    try {
+      active = c->getPlatoon();
+      board = Valid(active) && Valid(active->me) ? active->me->getBlackboard() : nullptr;
+    } catch (...) {
+      board = nullptr;
+    }
+    if (!board) {
+      out = c->getName() + " has no squad blackboard";
+      return true;
+    }
+    const bool had = board->hasContractJob();
+    if (args.mode == "status") {
+      out = c->getName() + " has_contract=" + (had ? "1" : "0");
+      if (had) {
+        TimeOfDay expiry = board->getContractExpiryTime();
+        if (!expiry.isUnset())
+          out += " hours_left=" + Num(expiry.getTotalHours() - world->getTimeStamp_inGameHours().getTotalHours());
+        out += " package=" + board->getCurrentAIPackageName();
+      }
+      ok = true;
+      return true;
+    }
+    if (args.mode == "end") {
+      if (had)
+        board->endContractJob();
+      ok = !board->hasContractJob();
+      Log("KAH: contract-bodyguard end " + c->getName() + " had=" + (had ? "1" : "0") + " now=" + (board->hasContractJob() ? "1" : "0"));
+      out = c->getName() + " contract ended had=" + (had ? "1" : "0") + " has_contract=" + (board->hasContractJob() ? "1" : "0");
+      return true;
+    }
+    Character *hirer = FindCharacter(world, args.hirer);
+    if (!hirer) {
+      out = NotFound(args.hirer);
+      return true;
+    }
+    if (hirer == c) {
+      out = "the hirer must be a different character";
+      return true;
+    }
+    if (c->isDead() || c->isUnconcious()) {
+      out = c->getName() + " is dead or unconscious";
+      return true;
+    }
+    if (had && !args.replace) {
+      out = c->getName() + " already has a contract (add 'replace' to end it first)";
+      return true;
+    }
+    // The contract belongs to the squad: never put it on the player's own squad Blackboard (that would hit every
+    // member). 'own' first moves the npc into an own squad, as the `faction` command does (new handle afterwards).
+    if (Valid(active) && active->isPlayer) {
+      if (!args.own) {
+        out = c->getName() + " is in the player's squad: add 'own' to separate " + c->getName() + " into an own squad first";
+        return true;
+      }
+      Platoon *own = c->separateIntoMyOwnSquad(true);
+      if (!Valid(own)) {
+        out = "could not separate " + c->getName() + " into an own squad";
+        return true;
+      }
+      active = c->getPlatoon();
+      board = Valid(active) && Valid(active->me) ? active->me->getBlackboard() : nullptr;
+      if (!board || (Valid(active) && active->isPlayer)) {
+        out = "separating " + c->getName() + " did not give an own squad blackboard";
+        return true;
+      }
+    }
+    std::string findError;
+    GameData *package = FindData(world, AI_PACKAGE, args.package, findError);
+    if (!package && args.package == "Bodyguard")
+      package = FindData(world, AI_PACKAGE, "5090-gamedata.base", findError);
+    if (!package) {
+      out = "no AI package: " + findError;
+      return true;
+    }
+    if (board->hasContractJob())
+      board->endContractJob();
+    const hand giver = hirer->getHandle();
+    try {
+      if (args.hours > 0)
+        board->_setContractJob(package, args.hours, giver);
+      else
+        board->setContractJob(package, giver);
+    } catch (...) {
+      out = "setContractJob threw";
+      return true;
+    }
+    ok = board->hasContractJob();
+    std::string hoursLeft;
+    if (ok) {
+      TimeOfDay expiry = board->getContractExpiryTime();
+      if (!expiry.isUnset())
+        hoursLeft = Num(expiry.getTotalHours() - world->getTimeStamp_inGameHours().getTotalHours());
+    }
+    Log("KAH: contract-bodyguard " + c->getName() + " hirer=" + hirer->getName() + " package=" + package->name +
+        " hours=" + Int(args.hours) + " has_contract=" + (ok ? "1" : "0") + " hours_left=" + hoursLeft);
+    out = c->getName() + " has_contract=" + (ok ? "1" : "0") + " package=" + package->name + " (" + package->stringID + ") hirer=" +
+          hirer->getName() + (hoursLeft.empty() ? "" : " hours_left=" + hoursLeft) + " now " + Describe(c, nullptr);
+    return true;
+  }
   if (cmd == "setname") { // setname <npc> <new name>
     if (f.size() < 4 || f[3].empty()) {
       out = "usage: setname <npc> <new name>";

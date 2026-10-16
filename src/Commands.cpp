@@ -22,6 +22,7 @@
 #include "Chatter.h"
 #include "FrameStamp.h"
 #include "NewGameEditorState.h"
+#include "ContractArgs.h"
 
 #include <kenshi/AI/AITaskSystem.h>
 #include <kenshi/Character.h>
@@ -69,6 +70,7 @@
 #include <kenshi/CameraClass.h> // acceltime follow, camfollow
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/RaceData.h>
+#include "BlackboardContract.h" // contract-bodyguard (Blackboard method-only view)
 #include <kenshi/NavMesh.h> // walktime: is the target on the navmesh
 #include <kenshi/SaveManager.h>
 #include <kenshi/gui/LoadSaveWindow.h> // ImportGameMenu (import ... menu)
@@ -822,7 +824,7 @@ const char *const kBuiltins[] = {
     "benches", "craft", "research", "blueprint",
     "tasks", "ui", "click", "messages", "screenshot", "time", "building", "production",
     "buildings", "power", "fill", "order", "fight", "job", "jobs", "clearjobs", "setname",
-    "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
+    "contract-bodyguard", "faction", "sleep", "wake", "damage", "shackle", "unshackle", "cage", "uncage", "shopstock",
     "trade", "eat", "blood", "build", "unbuild", "fps", "produced", "protect", "drop", "pickup", "unload", "reload", "runspeed", "walktime", "sever", "hit", "newgame", "import", "stealth", "crime",
     "chance", "detect", "detecttime", "senses", "face", "pin", "healtime", "water", "findwater", "swimtime", "acceltime", "camfollow", "construct", "construction", "farm", "towns", "turret", "rangedtest", "rangedinfo", "combatmode", "steady", "dialog", "input_isolation", "key_inject", "mouse_inject", "chatter", "sync_flash", "stamp", "sampler"};
 
@@ -839,6 +841,7 @@ const char *const kHelp =
     "give <npc> <item> [n] | relation <npc> <-100..100> | "
     "order <npc> <task> [target <npc>] [building <name>] [keep] | tasks [filter] | fight <a> <b> | "
     "job <npc> <building> [task <name>] [radius <m>] | jobs|clearjobs <npc> | setname <npc> <name> | "
+    "contract-bodyguard <npc> [<hirer>] [hours <n>] [own] [replace] [package <name|sid>] | contract-bodyguard <npc> end|status | "
     "faction <npc> <faction> | sleep <npc> [bed <name>] | wake <npc> | "
     "damage <npc> <part> <cut> [blunt] [pierce] | blood <npc> <value|pct%> | protect [<npc> on|off] | shackle <npc> [owner <npc>] | unshackle <npc> | "
     "cage|uncage <npc> [cage] | shopstock <trader> [radius <m>] | trade <buyer> <trader> <item> [radius <m>] | "
