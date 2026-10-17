@@ -94,7 +94,10 @@ function Get-Launcher {
   # Only the exact installation path is eligible for the optional startup-warning action.
   $scoped = @($procs | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($KenshiRoot, [StringComparison]::OrdinalIgnoreCase) })
   $scopedPids = [uint32[]]@($scoped | ForEach-Object { [uint32]$_.ProcessId })
-  if ($scopedPids.Count -eq 0) { throw 'test launch warning guard refused: no exact-path Kenshi process' }
+  # Get-KenshiProcs also returns a process whose path cannot be read yet (a just-started or restarting kenshi_x64.exe).
+  # None of those is eligible for the warning action, and none is clicked, so this is 'not there yet' (Wait-Until polls
+  # again), not an error. Throwing here aborted a lane launch whenever the new process had no ExecutablePath for a moment.
+  if ($scopedPids.Count -eq 0) { return $null }
   $scopedProcessPaths = @{}
   foreach ($process in $scoped) {
     $scopedProcessPaths[[string][uint32]$process.ProcessId] = [IO.Path]::GetFullPath([string]$process.ExecutablePath)
